@@ -16,3 +16,12 @@ The codename `shadowfax project` has the following goals:
 - Write the implementation in a memory-safe language (e.g., Rust).
 
 Additionally, the repository will serve as a reference point for the current state of compatible hardware and software technologies in the RISC-V confidential computing ecosystem.
+
+**List of Tasks**
+
+Possible task outline (we will be using git tasks in the future)
+
+- Identify responsabilities of `shadowfax` with regards to `openSBI` (It will likely be a rust extension to openSBI)
+- Identify what a TSM-Driver is exactly responsible for (I suggest using CoVE specification and ARM TF-A and Intel TDX module as references)
+- Define a project structure (Do we need to have OpenSBI as a submodule? Do we need external lib? etc...)
+- List compatible Supervisor Domains / Hyperivsors (Linux Kernel Version that implements COVH, Salus, SeL4 (when we get there))
