@@ -4,7 +4,7 @@ main: baremetal.ld main.o
 	$(LD) $(LDFLAGS) -o $@ -T $^
 
 main.o: main.s
-	$(CC) $(CFLAGS) -march=rv64gh -o $@ $<
+	$(CC) $(CFLAGS) -c -march=rv64gh -o $@ $<
 
 run: main
 	echo "Press (ctrl + a) and then x to quit"

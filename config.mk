@@ -2,5 +2,5 @@
 CC = riscv64-linux-musl-gcc
 LD = riscv64-linux-musl-ld
 
-CFLAGS = -c -Wall -Wextra -Werror
+CFLAGS = -Wall -Wextra -Werror
 LDFLAGS = 
