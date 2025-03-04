@@ -30,7 +30,7 @@ void main() {
   message[9] = '\0';
 
   uart_puts("shadowfax says: ");
-  uart_puts(message); // Write the string to the UART
-  uart_puts("\n"); // Write the string to the UART
+  uart_puts(message);
+  uart_puts("\n");
   while (1); 
 }
