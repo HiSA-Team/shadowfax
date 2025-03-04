@@ -1,6 +1,11 @@
 # TODO: maybe use pkgconfig to find the correct path
-CC = riscv64-linux-musl-gcc
-LD = riscv64-linux-musl-ld
+PREFIX = riscv64-linux-musl
 
-CFLAGS = -Wall -Wextra -Werror
+CC = $(PREFIX)-gcc
+LD = $(PREFIX)-ld
+AS = $(PREFIX)-as
+
+ARCH = rv64gh
+
+CFLAGS = -Wall -Wextra
 LDFLAGS = 
