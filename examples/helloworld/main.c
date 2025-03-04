@@ -1,15 +1,36 @@
 // clang-format off
+
+// According to QEMU riscv general virt has a NS16550 UART 
+// https://www.qemu.org/docs/master/system/riscv/virt.html
 #define UART_BASE 0x10000000
 
 volatile unsigned char *uart = (volatile unsigned char * ) UART_BASE;
 
 void uart_puts(const char *str) {
-  while (*str) {       // Loop until value at string pointer is zero
-    *uart = *str++; // Write character to transmitter register
+  while (*str) {
+    *uart = *str++;
   }
 }
 
 void main() {
-  uart_puts("Hello World!\n"); // Write the string to the UART
+  char message[10];
+  int a = 5;
+  int b = 4;
+  int c = a + b;
+
+  message[0] = a + '0';
+  message[1] = ' ';
+  message[2] = '+';
+  message[3] = ' ';
+  message[4] = b + '0';
+  message[5] = ' ';
+  message[6] = '=';
+  message[7] = ' ';
+  message[8] = c + '0';
+  message[9] = '\0';
+
+  uart_puts("shadowfax says: ");
+  uart_puts(message); // Write the string to the UART
+  uart_puts("\n"); // Write the string to the UART
   while (1); 
 }
