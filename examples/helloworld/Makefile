@@ -1,8 +1,4 @@
-CC = riscv64-linux-musl-gcc
-LD = riscv64-linux-musl-ld
-
-CFLAGS = -c -Wall -Wextra -Werror
-LDFLAGS = 
+include ../../config.mk
 
 main: baremetal.ld main.o
 	$(LD) $(LDFLAGS) -o $@ -T $^
