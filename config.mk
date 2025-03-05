@@ -3,7 +3,7 @@
 # Centralized file to manage build variables. This will be included in example, tests and scripts.
 # Usage:
 # 	When compiling use CROSS_COMPILE to pass the start of your ie. toolchain
-# 	eg. make CROSS_COMPILE=riscv64-linux-musl
+# 	eg. make CROSS_COMPILE=riscv64-linux-musl-
 
 ifdef CROSS_COMPILE
 CC		=	$(CROSS_COMPILE)gcc
