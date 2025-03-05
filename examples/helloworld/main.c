@@ -1,7 +1,9 @@
 // clang-format off
-
-// According to QEMU riscv general virt has a NS16550 UART 
+// Author: Giuseppe Capasso
+// Email: capassog97@gmail.com
+// According to QEMU riscv general virt has a NS16550 UART
 // https://www.qemu.org/docs/master/system/riscv/virt.html
+
 #define UART_BASE 0x10000000
 
 volatile unsigned char *uart = (volatile unsigned char * ) UART_BASE;
@@ -32,5 +34,5 @@ void main() {
   uart_puts("shadowfax says: ");
   uart_puts(message);
   uart_puts("\n");
-  while (1); 
+  while (1);
 }

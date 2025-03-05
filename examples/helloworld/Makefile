@@ -15,6 +15,3 @@ run: main
 
 clean:
 	rm -f main *.o
-
-
-
