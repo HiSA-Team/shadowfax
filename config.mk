@@ -4,9 +4,9 @@
 # Usage:
 # 	When compiling use CROSS_COMPILE to pass the start of your ie. toolchain
 # 	eg. make CROSS_COMPILE=riscv64-linux-musl
-CC = $(CROSS_COMPILE)-gcc
-LD = $(CROSS_COMPILE)-ld
-AS = $(CROSS_COMPILE)-as
+CC = $(CROSS_COMPILE)gcc
+LD = $(CROSS_COMPILE)ld
+AS = $(CROSS_COMPILE)as
 
 ARCH = rv64gh
 
