@@ -1,10 +1,10 @@
 include ../../config.mk
 
 main: baremetal.ld main.o start.o
-	$(LD) $(LDFLAGS) -o $@ -T $^
+	$(LD) $(LDFLAGS) -static -o $@ -T $^
 
 main.o: main.c
-	$(CC) $(CFLAGS) -ffreestanding -c -march=$(ARCH) -o $@ $<
+	$(CC) $(CFLAGS) -nostdlib -ffreestanding -c -march=$(ARCH) -o $@ $<
 
 start.o: start.s
 	$(AS) -march=$(ARCH) -o $@ $<
