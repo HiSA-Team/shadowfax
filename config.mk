@@ -19,5 +19,6 @@ endif
 
 ARCH = rv64gh
 
-CFLAGS = -Wall -Wextra
+CFLAGS  = -Wall -Wextra -march=$(ARCH)
 LDFLAGS =
+ASFLAGS = -march=$(ARCH)
