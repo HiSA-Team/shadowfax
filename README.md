@@ -32,7 +32,7 @@ sudo ./scripts/setup.sh
 After the installation, you can check if the setup is working with:
 
 ```sh
-make -C examples/helloworld CROSS_COMPILE=cross-riscv64-linux-gnu- run
+make -C examples/helloworld CROSS_COMPILE=riscv64-linux-gnu- run
 ```
 On success, you should see the following output:
 ```
