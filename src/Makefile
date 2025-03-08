@@ -1,6 +1,6 @@
 include ../config.mk
 
-CFLAGS += -Iinclude/
+CFLAGS += -I../include/
 LIBSBI_PATH = ../lib64/lp64/libsbi.a
 
 shadowfax: init.ld init.o
