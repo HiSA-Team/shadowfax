@@ -17,8 +17,9 @@ LD		?=	ld
 AS		?=	as
 endif
 
-ARCH = rv64gh
+ARCH ?= rv64gh
+ABI ?= lp64
 
-CFLAGS  = -Wall -Wextra -march=$(ARCH)
+CFLAGS  = -Wall -Wextra -march=$(ARCH) -mabi=$(ABI)
 LDFLAGS =
-ASFLAGS = -march=$(ARCH)
+ASFLAGS = -march=$(ARCH) -mabi=$(ABI)
