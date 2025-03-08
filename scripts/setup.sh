@@ -1,10 +1,6 @@
-##
  # This file installs dependencies for Linux systems. Distribution name is retrieved using lsb_release.
  # Users must make sure lsb_release is installed on their system before running this script.
- # Authors:
- #   Giuseppe Capasso <capassog97@gmail.com>
- #
- ##
+ # Author:  Giuseppe Capasso <capassog97@gmail.com>
 #!/bin/sh
 
 if [ "$(id -u)" -ne 0 ] || [ ! $SUDO_USER ]; then
