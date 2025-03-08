@@ -5,7 +5,7 @@
  #   Giuseppe Capasso <capassog97@gmail.com>
  #
  ##
-#/bin/sh
+#!/bin/sh
 
 if [ "$(id -u)" -ne 0 ] || [ ! $SUDO_USER ]; then
   echo "This script must be run as root with sudo, not directly as root" >&2
