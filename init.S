@@ -14,6 +14,9 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
+#include <sbi/sbi_platform.h>
+#include <sbi/sbi_scratch.h>
+
 .section .text._start
 .globl _start
 
@@ -40,16 +43,6 @@ struct sbi_scratch {
   The goal is to use sbi_init to jump in M mode to the _main label.
  */
 
-.macro CLEAR_MDT tmp
-#if __riscv_xlen == 32
-	li 	\tmp, MSTATUSH_MDT
-	csrc	CSR_MSTATUSH, \tmp
-#else
-	li 	\tmp, MSTATUS_MDT
-	csrc	CSR_MSTATUS, \tmp
-#endif
-
-.endm
 _start:
   /* Following values contains platform specific data.
    * s8 -> HART stack size

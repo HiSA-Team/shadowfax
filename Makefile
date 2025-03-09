@@ -1,7 +1,7 @@
-include ../config.mk
+include config.mk
 
-CFLAGS += -I../include/
-LIBSBI_PATH = ../lib64/lp64/libsbi.a
+CFLAGS += -Iinclude/
+LIBSBI_PATH = lib64/lp64/opensbi/generic/lib/libplatsbi.a
 
 shadowfax: init.ld init.o
 	$(LD) $(LDFLAGS) -static -o $@ -T $^ $(LIBSBI_PATH)
