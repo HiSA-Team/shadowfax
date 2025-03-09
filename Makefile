@@ -11,7 +11,7 @@ init.o: init.S
 
 run: shadowfax
 	@echo "Press (ctrl + a) and then x to quit"
-	qemu-system-riscv64 -nographic -machine virt -bios $<
+	qemu-system-riscv64 -s -nographic -machine virt -bios $<
 
 clean:
 	rm -f shadowfax *.o

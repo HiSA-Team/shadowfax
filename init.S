@@ -20,7 +20,7 @@
 .section .text._start
 .globl _start
 
-/* A scratch is a per hart data structure reported below defined in <sbi/sbi_scratch.sh>
+/* A scratch is a per hart data structure reported below defined in <sbi/sbi_scratch.h>
 struct sbi_scratch {
     unsigned long fw_start;
     unsigned long fw_size;
@@ -44,75 +44,8 @@ struct sbi_scratch {
  */
 
 _start:
-  /* Following values contains platform specific data.
-   * s8 -> HART stack size
-   * s9 -> Heap size
-   */
-	lwu	s8, SBI_PLATFORM_HART_STACK_SIZE_OFFSET(a4)
-	lwu	s9, SBI_PLATFORM_HEAP_SIZE_OFFSET(a4)
-
-	/* Keep a copy of tp */
-	add	t3, tp, zero
-
-	/* Initialize scratch space */
-	/* Store fw_start and fw_size in scratch space */
-  lla   a4,  _fw_start
-	sub	  a5, t3, a4
-  REG_S a4, SBI_SCRATCH_FW_START_OFFSET(tp)
-  REG_S a5, SBI_SCRATCH_FW_SIZE_OFFSET(tp)
-
-	/* Store R/W section's offset in scratch space */
-	lla	  a5, _fw_rw_start
-	sub	  a5, a5, a4
-	REG_S	a5, SBI_SCRATCH_FW_RW_OFFSET(tp)
-
-  /* Store fw_heap_offset and fw_heap_size in scratch space */
-	lla	  s10, _fw_start
-	sub	  s10, tp, s10
-	REG_S	s10, SBI_SCRATCH_FW_HEAP_OFFSET(tp)
-	REG_S s9, SBI_SCRATCH_FW_HEAP_SIZE_OFFSET(tp)
-
-  /* Store next arg1 in scratch space. Not used at the moment. */
-  add   a0, a1, zero
-	REG_S	a0, SBI_SCRATCH_NEXT_ARG1_OFFSET(tp)
-
-  /* Store _main address in scratch space */
-  lla   a0, _main
-	REG_S	a0, SBI_SCRATCH_NEXT_ADDR_OFFSET(tp)
-
-  /* Our firmware must be in M mode */
-	li	  a0, PRV_M
-  REG_S	a0, SBI_SCRATCH_NEXT_MODE_OFFSET(tp)
-
-  /* Store warm_boot address in scratch space */
-	lla	  a4, zero
-	REG_S	a4, SBI_SCRATCH_WARMBOOT_ADDR_OFFSET(tp)
-
-	/* Store platform address in scratch space */
-	lla	  a4, platform
-	REG_S	a4, SBI_SCRATCH_PLATFORM_ADDR_OFFSET(tp)
-
-  /* Store hartid-to-scratch function address in scratch space */
-	lla	  a4, _hartid_to_scratch
-	REG_S	a4, SBI_SCRATCH_HARTID_TO_SCRATCH_OFFSET(tp)
-
-	/* Clear trap_context and tmp0 in scratch space */
-	REG_S	zero, SBI_SCRATCH_TRAP_CONTEXT_OFFSET(tp)
-	REG_S	zero, SBI_SCRATCH_TMP0_OFFSET(tp)
-
-	/* Store firmware options in scratch space */
-  add   a0, zero, zero
-  REG_S	a0, SBI_SCRATCH_OPTIONS_OFFSET(tp)
-
-  /* Store hart index in scratch space */
-	/* hartid 0 is mandated by ISA */
-	li	  t1, 0
-	REG_S	t1, SBI_SCRATCH_HARTINDEX_OFFSET(tp)
-
-  jal   zero, _main     # Run main entry point - no argc
-loop:
-  wfi
-  j loop                # Spin forever in case main returns
+  call _main
+  j _start_hang
 
 _hartid_to_scratch:
 	/*
@@ -169,17 +102,17 @@ memcmp:
 .globl _trap_handler
 .weak _trap_handler
 _trap_handler:
-
-  CLEAR_MDT t0
   j _start_hang
 
+.globl _start_warm
+_start_warm:
+  j _start_hang
 
 _start_hang:
   wfi
   j _start_hang
 
 # Simple main function for testing purposes.
-.globl _main
 .weak _main
 _main:
  	li a1, 0x10000000
