@@ -5,8 +5,9 @@
 # Args:
 #   - kernel-version (mandatory): kernel version to build; i.e 6.13.2
 #   - busybox-version (optional): busybox version to build. Default 1.36.1
+#   - cross-compile (optional): cross-compile prefix to build on riscv if non native. Default ""
 # Usage:
-#   - ./setup_linux.sh --kernel <kernel-version> --busybox <busybox>
+#   - ./setup_linux.sh --kernel <kernel-version> [--busybox <busybox>] [--cross-compile <riscv64-toolchain>]
 # A quick test can be executed with:
 # qemu-system-riscv64 -M virtual -m 64M \
 #   -kernel linux-<kernel-version>/arch/riscv/boot/Image \
@@ -19,13 +20,8 @@ set -ev
 ARCH="riscv"
 KERNEL_VERSION=""
 BUSYBOX_VERSION="1.36.1"
+CROSS_COMPILE=""
 TEMP_DIR=$(mktemp -d)
-
-if [ "$(uname -m)" = "riscv" ]; then
-  CROSS_COMPILE=""
-else
-  CROSS_COMPILE="riscv64-linux-musl-"
-fi
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -37,6 +33,10 @@ while [ $# -gt 0 ]; do
       BUSYBOX_VERSION="$2"
       shift 2
       ;;
+    --cross-compile)
+      CROSS_COMPILE="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown option: $1"
       exit 1
@@ -44,13 +44,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-ODIR=$(pwd)/linux-${KERNEL_VERSION}
-mkdir -p $ODIR
-
-if [ -z "$KERNEL_VERSION" ] || [ -z "$BUSYBOX_VERSION" ]; then
-  echo "Usage: $0 --kernel <kernel-version> --busybox <busybox-version>"
+if [ -z "$KERNEL_VERSION" ] ; then
+  echo "Usage: $0 --kernel <kernel-version> [--busybox <busybox-version>] [--cross-compile <cross-compile-prefix>]"
   exit 1
 fi
+
+ODIR=$(pwd)/linux-${KERNEL_VERSION}
+mkdir -p $ODIR
 
 echo "Building kernel v${KERNEL_VERSION} with busybox v${BUSYBOX_VERSION}"
 
@@ -61,13 +61,13 @@ curl -fsSL https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KERNEL_VE
 tar -xvf ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz -C ${TEMP_DIR}
 
 # Build linux
-make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} ARCH=$ARCH O=${ODIR} CROSS_COMPILE=$CROSS_COMPILE defconfig
-make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} ARCH=$ARCH O=${ODIR} CROSS_COMPILE=$CROSS_COMPILE -j $(nproc) Image
+make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} ARCH=$ARCH O=${ODIR} CROSS_COMPILE=${CROSS_COMPILE} defconfig
+make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} ARCH=$ARCH O=${ODIR} CROSS_COMPILE=${CROSS_COMPILE} -j $(nproc) Image
 
 # Build busybox
 curl -fsSL https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2 -o ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2
 tar -xvf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
-make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
+make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} ARCH=$ARCH CROSS_COMPILE=${CROSS_COMPILE} defconfig
 
 # Prepare initramfs
 mkdir -p ${TEMP_DIR}/initramfs/bin
@@ -75,7 +75,7 @@ mkdir -p ${TEMP_DIR}/initramfs/etc/init.d
 mkdir -p ${TEMP_DIR}/initramfs/usr
 
 cp -r scripts/initramfs/etc/* ${TEMP_DIR}/initramfs/etc/
-LDFLAGS="--static" make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} CONFIG_PREFIX=${TEMP_DIR}/initramfs ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE -j $(nproc) install
+LDFLAGS="--static" make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} CONFIG_PREFIX=${TEMP_DIR}/initramfs ARCH=$ARCH CROSS_COMPILE=${CROSS_COMPILE} -j $(nproc) install
 mv ${TEMP_DIR}/initramfs/linuxrc ${TEMP_DIR}/initramfs/init
 
 find ${TEMP_DIR}/initramfs -print0 | cpio --null -ov --format=newc > ${TEMP_DIR}/initramfs.cpio
