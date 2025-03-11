@@ -48,6 +48,8 @@ by yourself. You need:
 - a riscv64 toolchain: to compile source code and examples;
 - qemu (for riscv64): to run programs in an emulated machine;
 - make: to assemble projects;
+- rust toolchain: refer to https://rustup.rs/. Install the `riscv64gc-unknown-none-elf` target
+    with `rustup target add riscv64gc-unknown-none-elf`
 
 ## Contributing
 This repository uses [pre-commit](https://pre-commit.com/). Before contributing, setup your environment
