@@ -41,4 +41,4 @@ esac
 su $USER_NAME -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
 
 # Install riscv64 target
-su $USER_NAME -c "rustup target add riscv64gc-unknown-none-elf"
+su $USER_NAME -c "~/.cargo/bin/rustup target add riscv64gc-unknown-none-elf"
