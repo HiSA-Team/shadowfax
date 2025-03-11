@@ -1,3 +1,9 @@
+/* This programs prints an helloworld to QEMU Uart. Similarly to C helloworld, it includes
+ * the basic init.s. The main has no std neither a main function. Init.s sets up the stack
+ * pointer and jumps to the never ending main.
+ *
+ * Author: Giuseppe Capasso <capassog97@gmail.com>
+ */
 #![no_std]
 #![no_main]
 
