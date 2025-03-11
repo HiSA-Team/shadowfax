@@ -4,7 +4,6 @@
 # - installs rust toolchain with riscv target;
 # - builds and install opensbi libraries and header files;
 # - builds a custom clang with static linking from llvm (only for musl systems)
-#
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -31,25 +30,28 @@ get_distro_codename() {
 
 # Function to install necessary build dependencies based on the distribution codename
 install_dependencies() {
-  case "$DISTRO_CODENAME" in
-    # Ubuntu 24.04, Ubuntu 22.04, Debian 12, Debian 11
-    noble | jammy | bookworm | bullseye)
-      apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system build-essential \
-        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc cpio clang cmake ninja-build
-      if [ "$ARCHITECTURE" != "riscv64" ]; then
-        DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-$LIBC_PREFIX
-      fi
-      ;;
-    void)
-      xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf elfutils-devel libdwarf-devel \
-        curl git file cpio git clang cmake ninja if [ "$ARCHITECTURE" != "riscv64" ]; then xbps-install -Sy cross-riscv64-linux-$LIBC_PREFIX
-      fi
-      ;;
-    *)
-      echo "Unsupported distribution: $DISTRO_CODENAME" >&2
-      echo "Make sure you install dependencies according to your distribution."
-      exit 1
-      ;;
+  case "$distro_codename" in
+  # ubuntu 24.04, ubuntu 22.04, debian 12, debian 11
+  noble | jammy | bookworm | bullseye)
+    apt-get update && debian_frontend=noninteractive apt-get -y install \
+      make qemu-system build-essential libncurses-dev bison flex libssl-dev \
+      libelf-dev dwarves curl git file bc cpio clang cmake ninja-build
+    if [ "$architecture" != "riscv64" ]; then
+      debian_frontend=noninteractive apt-get -y install gcc-riscv64-linux-"$libc_prefix"
+    fi
+    ;;
+  void)
+    xbps-install -sy qemu make base-devel bison flex openssl-devel libelf \
+      elfutils-devel libdwarf-devel curl git file cpio clang cmake ninja
+    if [ "$architecture" != "riscv64" ]; then
+      xbps-install -sy cross-riscv64-linux-"$libc_prefix"
+    fi
+    ;;
+  *)
+    echo "unsupported distribution: $distro_codename" >&2
+    echo "make sure you install dependencies according to your distribution."
+    exit 1
+    ;;
   esac
 }
 
@@ -117,6 +119,27 @@ build_clang_from_source() {
 DISTRO_CODENAME=$(get_distro_codename)
 TEMP_DIR=$(mktemp -d)
 USER_NAME="${SUDO_USER:-root}"
+install_opensbi() {
+  printf "Downloading opensbi source..."
+  su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz"
+  printf " done\n"
+
+  su $USER_NAME -c "tar xvf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
+
+  # build opensbi
+  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} PLATFORM=${PLATFORM}"
+
+  # install opensbi in root directory
+  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. PLATFORM=${PLATFORM} install"
+}
+
+# Global variables
+DISTRO_CODENAME=$(get_distro_codename)
+OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
+PLATFORM="${PLATFORM:-generic}"
+TEMP_DIR=$(mktemp -d)
+USER_NAME="$SUDO_USER"
+USER_HOME=$(eval echo ~$USER_NAME)
 
 # Make temp directory owned by the user
 chown -R ${USER_NAME} ${TEMP_DIR}
@@ -135,3 +158,12 @@ if [ "$LIBC_PREFIX" = "musl" ]; then
   echo "Building Clang from source for musl-based system..."
   build_clang_from_source
 fi
+
+# use environment.sh variables
+. ${BASEDIR}/environment.sh
+
+install_opensbi
+
+printf "Removing ${TEMP_DIR}..."
+rm -rf ${TEMP_DIR}
+printf " done\n"

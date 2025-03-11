@@ -19,6 +19,28 @@
  *  - covg: extension used from the guest to access firmware level services;
  *  - supd: supervisor domain extension;
  *
+=======
+ * which is used to launch other firmware types with S or HS mode.
+ *
+ * A scratch is a per hart data structure reported below defined in <sbi/sbi_scratch.h>
+ *
+ * struct sbi_scratch {
+ *   unsigned long fw_start;
+ *   unsigned long fw_size;
+ *   unsigned long fw_rw_offset;
+ *   unsigned long fw_heap_offset;
+ *   unsigned long fw_heap_size;
+ *   unsigned long next_arg1;
+ *   unsigned long next_addr;
+ *   unsigned long next_mode;
+ *   unsigned long warmboot_addr;
+ *   unsigned long platform_addr;
+ *   unsigned long hartid_to_scratch;
+ *   unsigned long trap_context;
+ *   unsigned long tmp0;
+ *   unsigned long options;
+ *   unsigned long hartindex;
+ * };
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 #![doc = include_str!("../README.md")]
@@ -86,7 +108,6 @@ static PAYLOAD: &[u8] = include_bytes!("../test.elf");
 #[link_section = ".dtb"]
 static DTB: [u8; include_bytes!("../device-tree.dtb").len()] =
     *include_bytes!("../device-tree.dtb");
-
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;

@@ -10,7 +10,7 @@ _start:
     add s0, sp, zero      # Set the frame pointer
     jal zero, main        # Run main entry point - no argc
 loop:	j loop              # Spin forever in case main returns
-													
+
 .section .data
 .space 1024*8             # allocate 8K of memory to serve as initial stack
 .align 16                 # Smallest stack allocation is 16 bytes, so align accordingly

@@ -11,11 +11,11 @@
 #include <sbi/sbi_types.h>
 
 #include <sbi/riscv_asm.h>
-#include <sbi/riscv_encoding.h>
 #include <sbi/riscv_atomic.h>
 #include <sbi/riscv_barrier.h>
 #include <sbi/riscv_dbtr.h>
 #include <sbi/riscv_elf.h>
+#include <sbi/riscv_encoding.h>
 #include <sbi/riscv_fp.h>
 #include <sbi/riscv_io.h>
 #include <sbi/riscv_locks.h>
@@ -64,8 +64,11 @@
 #include <sbi/sbi_unit_test.h>
 #include <sbi/sbi_unpriv.h>
 #include <sbi/sbi_version.h>
+<<<<<<< HEAD
 
-extern struct sbi_platform platform;
+    extern struct sbi_platform platform;
 extern unsigned long fw_platform_init(unsigned long arg0, unsigned long arg1,
                                       unsigned long arg2, unsigned long arg3,
                                       unsigned long arg4);
+=======
+>>>>>>> 7d834af (Setting up opensbi bindings)
