@@ -1,0 +1,9 @@
+[build]
+target = "riscv64gc-unknown-none-elf"
+rustflags = [
+    "-C", "link-arg=-Tlinker.ld",   # Add linker script "{projectdir}/res/memory.ld"
+    "-C", "opt-level=0",                # Don't optimize
+]
+
+[target.riscv64gc-unknown-none-elf]
+runner = "qemu-system-riscv64 -machine virt -m 64M -nographic -bios"
