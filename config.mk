@@ -9,7 +9,7 @@ ifdef CROSS_COMPILE
 CC		=	$(CROSS_COMPILE)gcc
 AR		=	$(CROSS_COMPILE)ar
 LD		=	$(CROSS_COMPILE)ld
-AS 		= $(CROSS_COMPILE)as
+AS		= $(CROSS_COMPILE)as
 else
 CC		?=	gcc
 AR		?=	ar
@@ -17,7 +17,7 @@ LD		?=	ld
 AS		?=	as
 endif
 
-ARCH ?= rv64gc
+ARCH ?= $(shell if [ `$(CC) -dumpversion | cut -f1 -d.` -lt 13 ]; then echo rv64gc; else echo rv64gh; fi)
 ABI ?= lp64
 
 CFLAGS  = -Wall -Wextra -march=$(ARCH) -mabi=$(ABI)
