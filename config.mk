@@ -9,7 +9,7 @@ ifdef CROSS_COMPILE
 CC		=	$(CROSS_COMPILE)gcc
 AR		=	$(CROSS_COMPILE)ar
 LD		=	$(CROSS_COMPILE)ld
-AS		= $(CROSS_COMPILE)as
+AS		=	$(CROSS_COMPILE)as
 else
 CC		?=	gcc
 AR		?=	ar
