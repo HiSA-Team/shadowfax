@@ -1,7 +1,7 @@
 # Centralized file to manage build variables. This will be included in example, tests and scripts.
 # Usage:
 # 	When compiling use CROSS_COMPILE to pass the start of your ie. toolchain
-# 	eg. make CROSS_COMPILE=riscv64-linux-musl-
+# 	eg. make CROSS_COMPILE=riscv64-linux-gnu-
 # Authors:
 # 	Giuseppe Capasso <capassog97@gmail.com>
 
@@ -17,7 +17,7 @@ LD		?=	ld
 AS		?=	as
 endif
 
-ARCH ?= rv64gh
+ARCH ?= rv64gc
 ABI ?= lp64
 
 CFLAGS  = -Wall -Wextra -march=$(ARCH) -mabi=$(ABI)
