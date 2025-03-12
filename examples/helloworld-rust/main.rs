@@ -9,7 +9,7 @@
 
 use core::{arch::global_asm, panic::PanicInfo, ptr};
 
-global_asm!(include_str!("init.s"));
+global_asm!(include_str!("../common/init.S"));
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {

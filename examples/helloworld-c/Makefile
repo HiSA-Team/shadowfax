@@ -1,12 +1,12 @@
 include ../../config.mk
 
-main: baremetal.ld main.o start.o
+main: baremetal.ld main.o init.o
 	$(LD) $(LDFLAGS) -static -o $@ -T $^
 
 main.o: main.c
 	$(CC) $(CFLAGS) -nostdlib -ffreestanding -c -o $@ $<
 
-start.o: start.s
+init.o: ../common/init.S
 	$(AS) $(ASFLAGS) -o $@ $<
 
 run: main

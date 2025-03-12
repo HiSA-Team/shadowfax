@@ -1,4 +1,5 @@
-/* Run qemu-system-riscv64 -nographic -machine virt to get machine info.
+/* This is from QEMU.
+ * Run qemu-system-riscv64 -nographic -machine virt to get machine info.
  * Firmware Base             : 0x80000000
  * Domain0 Next Address      : 0x0000000000000000
  * Domain0 Next Arg1         : 0x0000000087e00000
