@@ -42,14 +42,21 @@ shadowfax says: 5 + 4 = 9
 ```
 
 ### Unsupported distributions
-If your distribution is not supported by the script, you can install required dependencies
-by yourself. You need:
+If your distribution is not supported by the script, you can install required dependencies by yourself or refer to the [Docker setup](#docker-setup). You need:
 
 - a riscv64 toolchain: to compile source code and examples;
 - qemu (for riscv64): to run programs in an emulated machine;
-- make: to assemble projects;
-- rust toolchain: refer to https://rustup.rs/. Install the `riscv64gc-unknown-none-elf` target
-    with `rustup target add riscv64gc-unknown-none-elf`
+- dependencies to build the Linux Kernel;
+- rust with the riscv64gc target;
+
+### Docker setup
+For unsupported distributions or for users that want a consistent build environment,
+a debian-based Docker image can be built and executed in container with:
+using `scripts/Dockerfile.setup`:
+```sh
+docker build -t shadowfax-build < scripts/Dockerfile.setup
+docker run -v $(pwd):/shadowfax -w /shadowfax --network=host -it shadowfax-build
+```
 
 ## Contributing
 This repository uses [pre-commit](https://pre-commit.com/). Before contributing, setup your environment

@@ -25,14 +25,14 @@ DISTRO_CODENAME=$(lsb_release -c | awk '{print $2}')
 case "$DISTRO_CODENAME" in
   noble | jammy)
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system \
-      gcc-riscv64-linux-gnu curl
+      gcc-riscv64-linux-gnu build-essential libncurses-dev bison flex libssl-dev libelf-dev dwarves
     ;;
   bookworm | bullseye)
     apt update && DEBIAN_FRONTEND=noninteractive apt -y install make qemu-system \
-      gcc-riscv64-linux-gnu curl
+      gcc-riscv64-linux-gnu build-essential libncurses-dev bison flex libssl-dev libelf-dev dwarves
     ;;
   void)
-    xbps-install -Sy qemu make cross-riscv64-linux-gnu curl
+    xbps-install -Sy qemu make cross-riscv64-linux-gnu base-devel
     ;;
   *)
     echo "Unsupported distribution: $DISTRO_CODENAME" >&2
