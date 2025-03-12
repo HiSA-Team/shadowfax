@@ -1,6 +1,11 @@
 #!/bin/sh
 # This file installs dependencies for Linux systems. Distribution name is retrieved using lsb_release.
 # Users must make sure lsb_release is installed on their system before running this script.
+# The script installs:
+# - make
+# - riscv gnu toolchain
+# - curl
+# - rust and riscv target
 #
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
