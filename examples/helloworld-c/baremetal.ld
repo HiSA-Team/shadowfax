@@ -13,7 +13,7 @@ SECTIONS {
 		*(.text*);														/* Program code here */
 	}
 	. = ALIGN (CONSTANT (COMMONPAGESIZE));	/* Make sure linker does not jam data into text section, making text writable */
-  .data : { 
+  .data : {
 		*(.data*)															/* Stack goes here */
 	}
 }

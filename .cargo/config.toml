@@ -1,0 +1,19 @@
+# This configures the riscv64 toolchain. The builder sections specifes the target
+# architecture. By default it is `riscv64gc-unknown-none-elf`. It can be overridden
+# from cargo cli. For example: cargo run --target <different-target>.
+# Rustflags can be ovveridden with the environment variable RUSTFLAGS.
+# This settings apply to all rust code in this repository as Cargo automatically reads
+# this file.
+#
+# Author: Giuseppe Capasso <capassog97@gmail.com>
+
+[build]
+target = "riscv64gc-unknown-none-elf"
+rustflags = [
+    "-C", "link-arg=-Tlinker.ld",   # Add linker script "{projectdir}/linker.ld"
+    "-C", "opt-level=0",            # Don't optimize
+]
+
+[target.riscv64gc-unknown-none-elf]
+runner = "qemu-system-riscv64 -M virt -m 64M -smp 1 -nographic -bios"
+linker = "riscv64-linux-gnu-ld"
