@@ -1,0 +1,30 @@
+# The goal of this Dockerfile is to build a consistent build environment.
+# The base image is debian:12.
+# Project dependencies are:
+# - rust toolchain (with riscv64gc target)
+# - gcc riscv toolchain
+# - shell utils to build Linux kernel
+# - qemu
+#
+# Usage: run this image in a container mounting the project directory as a bind
+# volume.
+#
+#   docker build -t shadowfax-build < scripts/Dockerfile.setup
+#   docker run -v $(pwd):/shadowfax -w /shadowfax --network=host -it shadowfax-build
+#
+# Author: Giuseppe Capsso <capassog97@gmail.com>
+
+FROM debian:12
+
+# Install dependencies
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt -y install make qemu-system \
+      gcc-riscv64-linux-gnu build-essential libncurses-dev bison flex libssl-dev \
+      libelf-dev dwarves curl git file
+
+# Install and setup rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+RUN echo 'source $HOME/.cargo/env' >> /root/.bashrc
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN rustup target add riscv64gc-unknown-none-elf
