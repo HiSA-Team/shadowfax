@@ -5,9 +5,9 @@ CFLAGS += -Iinclude/
 QEMUFLAGS = -nographic -machine virt -smp 1 -m 64M
 
 ifeq ($(DEBUG), 1)
-    CFLAGS += -g
-    LDFLAGS += -g
-		QEMUFLAGS += -s -S
+	CFLAGS += -g
+	LDFLAGS += -g
+	QEMUFLAGS += -s -S
 endif
 
 shadowfax: init.ld init.o
@@ -21,7 +21,10 @@ run: shadowfax
 	qemu-system-riscv64 $(QEMUFLAGS) -bios $<
 
 gdb: shadowfax
-	gdb shadowfax -ex "set architecture riscv:rv64" -ex "target remote localhost:1234" -ex "break _start"
+	gdb shadowfax -ex "set architecture riscv:rv64" \
+		-ex "target remote localhost:1234" \
+		-ex "set disassemble-next-line on" \
+		-ex "break _start"
 
 clean:
 	rm -f shadowfax *.o
