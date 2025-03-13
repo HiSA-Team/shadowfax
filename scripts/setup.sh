@@ -44,7 +44,7 @@ esac
 # Setup rust toolchain and cross-compile
 # Install rustup: the official toolchain manager
 su $USER_NAME -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-su $USER_NAME -c "echo PATH=~/.cargo/bin:${PATH} > ~/.bashrc"
+su $USER_NAME -c "echo PATH=~/.cargo/bin:${PATH} >> ~/.bashrc"
 
 # Install riscv64 target
 su $USER_NAME -c "~/.cargo/bin/rustup target add riscv64gc-unknown-none-elf"
