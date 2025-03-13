@@ -38,7 +38,7 @@ install_dependencies() {
       apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system build-essential \
         libncurses-dev bison flex libssl-dev libelf-dev dwarves
       if [ "$ARCHITECTURE" != "riscv64" ]; then
-        DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-gnu
+        DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-$LIBC_PREFIX
       fi
       ;;
     void)
@@ -57,7 +57,7 @@ install_dependencies() {
 
 install_rust() {
   su $USER_NAME -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-  su $USER_NAME -c "echo PATH=~/.cargo/bin:${PATH} > ~/.bashrc"
+  su $USER_NAME -c "echo PATH=~/.cargo/bin:${PATH} >> ~/.bashrc"
   if [ "$ARCHITECTURE" != "riscv64" ]; then
     su $USER_NAME -c "~/.cargo/bin/rustup target add riscv64gc-unknown-none-elf"
   else
