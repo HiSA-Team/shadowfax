@@ -20,8 +20,9 @@ All dependencies can be installed with the `scripts/setup.sh` script.
 ```sh
 sudo ./scripts/setup.sh
 ```
-After the installation, configure your shell using `scripts/settings.sh` (this will setup the current
-shell variables like **CROSS_COMPILE**) and run the helloworld to check if the setup is working:
+After the installation, configure your shell using `source scripts/settings.sh` (this will setup
+the current shell variables like **CROSS_COMPILE**) and run the helloworld to check if the setup is
+working:
 
 ```sh
 make -C examples/helloword run
