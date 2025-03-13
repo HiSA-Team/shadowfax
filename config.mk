@@ -17,7 +17,7 @@ LD		?=	ld
 AS		?=	as
 endif
 
-ARCH ?= rv64gh
+ARCH ?= $(shell if [ `$(CC) -dumpversion | cut -f1 -d.` -lt 13 ]; then echo rv64gc; else echo rv64gch; fi)
 ABI ?= lp64
 
 CFLAGS  = -Wall -Wextra -march=$(ARCH) -mabi=$(ABI)

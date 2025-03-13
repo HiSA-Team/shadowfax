@@ -15,7 +15,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 if [ ! $SUDO_USER ]; then
-  echo "WARNING: running this script directly as root may not be what you want. Unless you know what you are doing, use sudo" >&2
+  echo "\033[33mWARNING\033[0m: running this script directly as root may not be what you want. Unless you know what you are doing, use sudo" >&2
 fi
 
 get_distro_codename() {
@@ -37,15 +37,17 @@ get_libc() {
 
 install_dependencies() {
   case "$DISTRO_CODENAME" in
+    # Ubuntu 24.04, Ubuntu 22.04, Debian 12, Debian 11
     noble | jammy | bookworm | bullseye)
       apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system build-essential \
-        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git
+        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-$LIBC_PREFIX
       fi
       ;;
     void)
-      xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf elfutils-devel libdwarf-devel curl \
+      xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf elfutils-devel libdwarf-devel \
+        curl git file
         git
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         xbps-install -Sy cross-riscv64-linux-$LIBC_PREFIX
