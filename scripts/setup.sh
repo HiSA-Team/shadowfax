@@ -1,12 +1,12 @@
 #!/bin/sh
-# This file installs dependencies for Linux systems. Distribution name is retrieved using lsb_release.
-# Users must make sure lsb_release is installed on their system before running this script.
-# The script installs:
-# - linux kernel build dependencies
-# - riscv-gnu toolchain
-# - curl and other shell utilities
-# - rust and rv64gc target
+# This scripts:
+# - installs build dependencies for common distributions;
+# - installs rust toolchain with riscv target;
+# - builds and install opensbi libraries and header files;
 #
+# TODO: add args to customize opensbi build. For example,
+# allow users to choose opensbi version, specify arch and sbi
+# flags
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 #
 if [ "$(id -u)" -ne 0 ]; then
@@ -15,7 +15,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 if [ ! $SUDO_USER ]; then
-  echo "\033[33mWARNING\033[0m: running this script directly as root may not be what you want. Unless you know what you are doing, use sudo" >&2
+  echo "\033[33mWARNING\033[0m: running this script directly as root may not be what you want. Unless you know what you are doing, use sudo." >&2
 fi
 
 get_distro_codename() {
@@ -40,7 +40,7 @@ install_dependencies() {
     # Ubuntu 24.04, Ubuntu 22.04, Debian 12, Debian 11
     noble | jammy | bookworm | bullseye)
       apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system build-essential \
-        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file
+        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-$LIBC_PREFIX
       fi
@@ -71,18 +71,43 @@ install_rust() {
   fi
 }
 
+install_opensbi() {
+  printf "Downloading opensbi source..."
+  su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz"
+  printf "done\n"
+
+  # build opensbi
+  su $USER_NAME -c "tar xvf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
+  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} PLATFORM=generic"
+
+  # install opensbi in root directory
+  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. install"
+}
+
 # Global variables
-DISTRO_CODENAME=$(get_distro_codename)
-USER_NAME="$SUDO_USER"
-USER_HOME=$(eval echo ~$USER_NAME)
 ARCHITECTURE=$(uname -m)
+BASEDIR=$(dirname $(realpath $0))
+DISTRO_CODENAME=$(get_distro_codename)
 LIBC=$(get_libc)
 LIBC_PREFIX=$([ "$LIBC" = "glibc" ] && echo "gnu" || echo "$LIBC")
+OPENSBI_VERSION="1.6"
+TEMP_DIR=$(mktemp -d)
+USER_NAME="$SUDO_USER"
+USER_HOME=$(eval echo ~$USER_NAME)
 
-echo "Running the script as $USER_NAME"
-echo "Detected Architecture: $ARCHITECTURE"
-echo "Detected LIBC: $LIBC"
-echo "Detected Distribution Codename: $DISTRO_CODENAME"
+# Make temp directory owned by the user
+chown -R ${USER_NAME} ${TEMP_DIR}
+
+echo "Running the script as ${USER_NAME}"
+echo "Base directory: ${BASEDIR}"
+echo "Detected Architecture: ${ARCHITECTURE}"
+echo "Detected LIBC: ${LIBC}"
+echo "Detected Distribution Codename: ${DISTRO_CODENAME}"
 
 install_dependencies
 install_rust
+
+# use environment.sh variables
+. ${BASEDIR}/environment.sh
+
+install_opensbi
