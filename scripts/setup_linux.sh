@@ -63,8 +63,8 @@ build_kernel() {
   tar -xvf ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz -C ${TEMP_DIR}
 
   # Build linux
-  make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} ARCH=$ARCH O=${ODIR} defconfig
-  make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} ARCH=$ARCH O=${ODIR} -j $(nproc) Image
+  make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} O=${ODIR} defconfig
+  make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} O=${ODIR} -j $(nproc) Image
 }
 
 build_initramfs() {
@@ -81,7 +81,7 @@ build_initramfs() {
   mkdir -p ${TEMP_DIR}/initramfs/usr
 
   cp -r scripts/initramfs/etc/* ${TEMP_DIR}/initramfs/etc/
-  LDFLAGS="--static" make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} CONFIG_PREFIX=${TEMP_DIR}/initramfs ARCH=$ARCH  -j $(nproc) install
+  LDFLAGS="--static" make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} CONFIG_PREFIX=${TEMP_DIR}/initramfs -j $(nproc) install
   mv ${TEMP_DIR}/initramfs/linuxrc ${TEMP_DIR}/initramfs/init
 
   cd ${TEMP_DIR}/initramfs

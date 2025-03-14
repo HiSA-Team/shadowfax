@@ -20,4 +20,5 @@ LIBC_PREFIX=$([ "$LIBC" = "glibc" ] && echo "gnu" || echo "$LIBC")
 # Export CROSS_COMPILE if not on riscv64
 if [ "$ARCHITECTURE" != "riscv64" ]; then
   export CROSS_COMPILE="riscv64-linux-$LIBC_PREFIX-"
+  export ARCH=riscv
 fi
