@@ -16,7 +16,6 @@
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
 set -e
-ARCH="riscv"
 BASEDIR=$(dirname $(realpath $0))
 BUSYBOX_VERSION="1.36.1"
 KERNEL_VERSION=""
@@ -84,11 +83,9 @@ build_initramfs() {
   LDFLAGS="--static" make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} CONFIG_PREFIX=${TEMP_DIR}/initramfs -j $(nproc) install
   mv ${TEMP_DIR}/initramfs/linuxrc ${TEMP_DIR}/initramfs/init
 
-  cd ${TEMP_DIR}/initramfs
-  find . -print0 | cpio --null -ov --format=newc > ${TEMP_DIR}/initramfs.cpio
-  gzip ${TEMP_DIR}/initramfs.cpio
-  cp ${TEMP_DIR}/initramfs.cpio.gz ${ODIR}/initramfs.cpio.gz
-  cd -
+  find "${TEMP_DIR}/initramfs" -mindepth 1 -printf '%P\0' | cpio --null -ov --format=newc --directory "${TEMP_DIR}/initramfs" > "${TEMP_DIR}/initramfs.cpio"
+  gzip "${TEMP_DIR}/initramfs.cpio"
+  cp "${TEMP_DIR}/initramfs.cpio.gz" "${ODIR}/initramfs.cpio.gz"
 }
 
 build_kernel
