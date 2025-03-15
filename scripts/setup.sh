@@ -13,7 +13,6 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "This script requires root privileges"
   exit 1
 fi
-
 if [ ! $SUDO_USER ]; then
   echo "\033[33mWARNING\033[0m: running this script directly as root may not be what you want. Unless you know what you are doing, use sudo." >&2
 fi
@@ -40,14 +39,14 @@ install_dependencies() {
     # Ubuntu 24.04, Ubuntu 22.04, Debian 12, Debian 11
     noble | jammy | bookworm | bullseye)
       apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system build-essential \
-        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc
+        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc cpio
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-$LIBC_PREFIX
       fi
       ;;
     void)
       xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf elfutils-devel libdwarf-devel \
-        curl git file
+        curl git file cpio
         git
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         xbps-install -Sy cross-riscv64-linux-$LIBC_PREFIX
@@ -111,3 +110,7 @@ install_rust
 . ${BASEDIR}/environment.sh
 
 install_opensbi
+
+printf "Removing ${TEMP_DIR}..."
+rm -rf ${TEMP_DIR}
+printf " done\n"
