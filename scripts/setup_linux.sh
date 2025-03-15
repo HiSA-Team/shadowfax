@@ -90,3 +90,7 @@ build_initramfs() {
 
 build_kernel
 build_initramfs
+
+printf "Removing ${TEMP_DIR}..."
+rm -rf ${TEMP_DIR}
+printf " done\n"
