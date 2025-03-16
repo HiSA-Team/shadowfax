@@ -4,11 +4,8 @@
 # - installs rust toolchain with riscv target;
 # - builds and install opensbi libraries and header files;
 #
-# TODO: add args to customize opensbi build. For example,
-# allow users to choose opensbi version, specify arch and sbi
-# flags
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
-#
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "This script requires root privileges"
   exit 1
@@ -17,6 +14,10 @@ if [ ! $SUDO_USER ]; then
   echo "\033[33mWARNING\033[0m: running this script directly as root may not be what you want. Unless you know what you are doing, use sudo." >&2
 fi
 
+# use environment.sh variables
+BASEDIR=$(dirname $(realpath $0))
+. ${BASEDIR}/environment.sh
+
 get_distro_codename() {
   local codename
   codename=$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release)
@@ -24,14 +25,6 @@ get_distro_codename() {
     codename=$(awk -F= '/^ID=/{print $2}' /etc/os-release)
   fi
   echo "$codename" | xargs
-}
-
-get_libc() {
-  if ldd --version 2>&1 | grep -q musl; then
-    echo "musl"
-  else
-    echo "glibc"
-  fi
 }
 
 install_dependencies() {
@@ -73,26 +66,23 @@ install_rust() {
 install_opensbi() {
   printf "Downloading opensbi source..."
   su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz"
-  printf "done\n"
+  printf " done\n"
+
+  su $USER_NAME -c "tar xvf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
 
   # build opensbi
-  su $USER_NAME -c "tar xvf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
-  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} PLATFORM=generic"
+  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} PLATFORM=${PLATFORM}"
 
   # install opensbi in root directory
   su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. install"
 }
 
 # Global variables
-ARCHITECTURE=$(uname -m)
-BASEDIR=$(dirname $(realpath $0))
 DISTRO_CODENAME=$(get_distro_codename)
-LIBC=$(get_libc)
-LIBC_PREFIX=$([ "$LIBC" = "glibc" ] && echo "gnu" || echo "$LIBC")
-OPENSBI_VERSION="1.6"
+OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
+PLATFORM="${PLATFORM:-generic}"
 TEMP_DIR=$(mktemp -d)
-USER_NAME="$SUDO_USER"
-USER_HOME=$(eval echo ~$USER_NAME)
+USER_NAME="${SUDO_USER:-root}"
 
 # Make temp directory owned by the user
 chown -R ${USER_NAME} ${TEMP_DIR}
@@ -105,10 +95,6 @@ echo "Detected Distribution Codename: ${DISTRO_CODENAME}"
 
 install_dependencies
 install_rust
-
-# use environment.sh variables
-. ${BASEDIR}/environment.sh
-
 install_opensbi
 
 printf "Removing ${TEMP_DIR}..."
