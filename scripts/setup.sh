@@ -74,7 +74,7 @@ install_opensbi() {
   su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} PLATFORM=${PLATFORM}"
 
   # install opensbi in root directory
-  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. install"
+  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. PLATFORM=${PLATFORM} install"
 }
 
 # Global variables

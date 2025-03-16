@@ -61,8 +61,8 @@ RUN rustup target add riscv64gc-unknown-none-elf
 RUN curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v$OPENSBI_VERSION.tar.gz -o /tmp/opensbi-$OPENSBI_VERSION.tar.gz
 
 RUN tar xvf /tmp/opensbi-$OPENSBI_VERSION.tar.gz -C /tmp
-RUN . /environment.sh && make -C /tmp/opensbi-$OPENSBI_VERSION
-RUN make -C /tmp/opensbi-$OPENSBI_VERSION I=/shadowfax install
+RUN . /environment.sh && make -C /tmp/opensbi-$OPENSBI_VERSION PLATFORM=$PLATFORM
+RUN make -C /tmp/opensbi-$OPENSBI_VERSION I=/shadowfax PLATFORM=$PLATFORM install
 
 # Setup entrypoint. This file sets up the shell environment  when the container is created.
 # This is useful for single command run like:
