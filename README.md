@@ -47,7 +47,11 @@ For unsupported distributions or for users that want a consistent build environm
 a debian-based Docker image can be built and executed in container with:
 using `scripts/Dockerfile.setup`:
 ```sh
-docker build -t shadowfax-build --build-arg USER_ID=$(id -u) - < scripts/Dockerfile.setup
+docker build -t shadowfax-build \
+    --build-arg USER_ID=$(id -u) \
+    --build-arg PLATFORM=generic \
+    --build-arg OPENSBI=1.6 \
+    --file scripts/Dockerfile.setup .
 docker run -v $(pwd):/shadowfax -w /shadowfax --network=host -it shadowfax-build
 ```
 
