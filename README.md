@@ -15,24 +15,17 @@ The codename `shadowfax project` has the following goals:
 - Write the implementation in a memory-safe language (e.g., Rust).
 
 ## Environment setup
-All dependencies can be installed with the `scripts/setup.sh` script. It automatically detects your distribution using
-`lsb_release -c` and installs dependencies accordingly. Usually, `lsb_release` is available by default on most systems.
-If the script outputs something like:
-```
-./scripts/setup.sh:18: lsb_release command not found
-```
-You must install `lsb_release` first. For example on Ubuntu:
-```sh
-sudo apt-get install lsb_release
-```
-Now, you can run the script with sudo:
+All dependencies can be installed with the `scripts/setup.sh` script.
+
 ```sh
 sudo ./scripts/setup.sh
 ```
-After the installation, you can check if the setup is working with:
+After the installation, configure your shell using `source scripts/settings.sh` (this will setup
+the current shell variables like **CROSS_COMPILE**) and run the helloworld to check if the setup is
+working:
 
 ```sh
-make -C examples/helloworld CROSS_COMPILE=riscv64-linux-gnu- run
+make -C examples/helloword run
 ```
 On success, you should see the following output:
 ```
@@ -54,7 +47,11 @@ For unsupported distributions or for users that want a consistent build environm
 a debian-based Docker image can be built and executed in container with:
 using `scripts/Dockerfile.setup`:
 ```sh
-docker build -t shadowfax-build < scripts/Dockerfile.setup
+docker build -t shadowfax-build \
+    --build-arg USER_ID=$(id -u) \
+    --build-arg PLATFORM=generic \
+    --build-arg OPENSBI=1.6 \
+    --file scripts/Dockerfile.setup .
 docker run -v $(pwd):/shadowfax -w /shadowfax --network=host -it shadowfax-build
 ```
 
