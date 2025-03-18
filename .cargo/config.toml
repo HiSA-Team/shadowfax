@@ -12,6 +12,7 @@ target = "riscv64gc-unknown-none-elf"
 rustflags = [
     "-C", "link-arg=-Tlinker.ld",   # Add linker script "{projectdir}/linker.ld"
     "-C", "opt-level=0",            # Don't optimize
+    "-C", "link-arg=-static"
 ]
 
 [target.riscv64gc-unknown-none-elf]

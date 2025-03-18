@@ -1,7 +1,14 @@
 [package]
-name = "shadowfax-rust-setup"
+name = "shadowfax"
 version = "0.1.0"
 edition = "2021"
 authors = ["Giuseppe Capasso"]
+
+[lib]
+name = "opensbi_sys"
+path = "src/lib.rs"
+
+[build-dependencies]
+bindgen = "0.71.0"
 
 [dependencies]
