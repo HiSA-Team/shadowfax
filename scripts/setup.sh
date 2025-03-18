@@ -96,7 +96,3 @@ echo "Detected Distribution Codename: ${DISTRO_CODENAME}"
 install_dependencies
 install_rust
 install_opensbi
-
-printf "Removing ${TEMP_DIR}..."
-rm -rf ${TEMP_DIR}
-printf " done\n"
