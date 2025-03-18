@@ -32,7 +32,8 @@ case "$DISTRO_CODENAME" in
       gcc-riscv64-linux-gnu build-essential libncurses-dev bison flex libssl-dev libelf-dev dwarves
     ;;
   void)
-    xbps-install -Sy qemu make cross-riscv64-linux-gnu base-devel
+    xbps-install -Sy qemu make cross-riscv64-linux-gnu base-devel bison flex openssl-devel \
+      libelf elfutils-devel libdwarf-devel
     ;;
   *)
     echo "Unsupported distribution: $DISTRO_CODENAME" >&2
