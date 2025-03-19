@@ -8,23 +8,66 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
-use crate::opensbi;
-use core::{arch::asm, mem::offset_of};
+use riscv::interrupt::supervisor::Exception;
 
-/// The main trap handler function that orchestrates the saving and restoring of registers
-/// and calls the C routine to handle the trap.
-#[no_mangle]
-#[link_section = ".text._trap_handler"]
-#[repr(align(4))]
-pub unsafe extern "C" fn _trap_handler() {
+use crate::{
+    _tee_scratch_start, opensbi,
+    shadowfax_core::state::{Context, TsmType, STATE},
+};
+use core::mem::offset_of;
+
+macro_rules! cove_pack_fid {
+    ($sdid:expr, $fid:expr) => {
+        (($sdid & 0x3F) << 26) | ($fid & 0xFFFF)
+    };
+}
+
+macro_rules! cove_unpack_fid {
+    ($fid:expr) => {
+        (($fid >> 26) & 0x3F, $fid & 0xFFFF)
+    };
+}
+
+pub const TEE_SCRATCH_SIZE: usize = 0x8000;
+
+/// The main trap handler function that orchestrates the saving and restoring of registers.
+/// The handler verifies if the trap is a TEECALL/TEERESUME or a TEERET and handles it with custom
+/// logic.
+#[align(4)]
+pub unsafe extern "C" fn handler() -> ! {
+    /*
+     * Check if the trap is a TEECALL/TEERET and perform the context switch to the tsm
+     */
+    core::arch::asm!(
+        // Swap TP and MSCRATCH
+        "csrrw tp, mscratch, tp",
+        "sd t0, {sbi_scratch_tmp0_offset}(tp)",
+        // check if it's an ecall
+        "csrr t0, mcause",
+        "add t0, t0, -{ecall_code}",
+        "bnez t0, 1f",
+        // if an ecall, check if it's a CoVE request
+        "li t0, {covh_ext_id}",
+        // TODO: a7 may be tampered
+        "sub t0, a7, t0",
+        "bnez t0, 1f",
+
+        // restore t0 and swap back the tp and mscratch
+        "ld t0, {sbi_scratch_tmp0_offset}(tp)",
+        "csrrw tp, mscratch, tp",
+        "j {tee_handler}",
+
+        "1:",
+        sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
+        ecall_code = const Exception::SupervisorEnvCall as usize,
+        covh_ext_id = const 0x434F5648 as usize,
+        tee_handler = sym tee_handler,
+    );
     /*
      * Saves the current stack pointer and sets up the stack pointer for the trap context.
      * It also swaps the TP and MSCRATCH registers.
      */
-    asm!(
-        // Swap TP and MSCRATCH
-        "csrrw tp, mscratch, tp",
-        "sd t0, {sbi_scratch_tmp0_offset}(tp)",
+    core::arch::asm!(
         /*
          * From fw_base.S
          * Set T0 to appropriate exception stack
@@ -59,13 +102,12 @@ pub unsafe extern "C" fn _trap_handler() {
         sbi_trap_regs_offset_sp = const offset_of!(opensbi::sbi_trap_regs, sp),
         sbi_trap_regs_offset_t0 = const offset_of!(opensbi::sbi_trap_regs, t0),
         sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
-
     );
     /*
      * Saves the machine exception program counter (MEPC) and machine status (MSTATUS) registers
      * to the trap context stack.
      */
-    asm!(
+    core::arch::asm!(
         "csrr t0, mepc",
         "sd t0, {sbi_trap_regs_offset_mepc}(sp)",
         "csrr t0, mstatus",
@@ -79,7 +121,7 @@ pub unsafe extern "C" fn _trap_handler() {
      * Saves additional trap information such as cause and trap value to the trap context stack.
      * Clears the machine-dependent trap (MDT) register.
      */
-    asm!(
+    core::arch::asm!(
         "sd zero, {sbi_trap_regs_offset_zero}(sp)",
         "sd ra, {sbi_trap_regs_offset_ra}(sp)",
         "sd gp, {sbi_trap_regs_offset_gp}(sp)",
@@ -141,7 +183,7 @@ pub unsafe extern "C" fn _trap_handler() {
         sbi_trap_regs_offset_t5 = const offset_of!(opensbi::sbi_trap_regs, t5),
         sbi_trap_regs_offset_t6 = const offset_of!(opensbi::sbi_trap_regs, t6),
     );
-    asm!(
+    core::arch::asm!(
         "csrr t0, mcause",
         "sd t0, ({sbi_trap_regs_size} + {sbi_trap_info_offset_cause})(sp)",
         "csrr t0, mtval",
@@ -158,17 +200,17 @@ pub unsafe extern "C" fn _trap_handler() {
         sbi_trap_info_offset_gva = const offset_of!(opensbi::sbi_trap_info, gva),
     );
     // We can take another trap
-    asm!("li t0, 0x40000000000", "csrc mstatus, t0",);
+    core::arch::asm!("li t0, 0x40000000000", "csrc mstatus, t0", options(nostack));
 
     /*
-     * Calls the C routine to handle the trap, passing the stack pointer as an argument.
+     * Call out trap handler which wraps opensbi trap handler
      */
-    asm!("add a0, sp, zero", "call {sbi_trap_handler}", sbi_trap_handler = sym opensbi::sbi_trap_handler);
+    core::arch::asm!("add a0, sp, zero", "call {trap_handler}", trap_handler = sym opensbi::sbi_trap_handler);
 
     /*
      * Restores all general-purpose registers except A0 and T0 from the trap context stack.
      */
-    asm!(
+    core::arch::asm!(
         "ld ra, {sbi_trap_regs_offset_ra}(a0)",
         "ld sp, {sbi_trap_regs_offset_sp}(a0)",
         "ld gp, {sbi_trap_regs_offset_gp}(a0)",
@@ -232,7 +274,7 @@ pub unsafe extern "C" fn _trap_handler() {
      * Restores the machine status (MSTATUS) and machine exception program counter (MEPC)
      * registers from the trap context stack.
      */
-    asm!(
+    core::arch::asm!(
         "ld t0, {sbi_trap_regs_offset_mstatus}(a0)",
         "csrw mstatus, t0",
         "ld t0, {sbi_trap_regs_offset_mepc}(a0)",
@@ -243,12 +285,319 @@ pub unsafe extern "C" fn _trap_handler() {
     /*
      * Restores the A0 and T0 registers from the trap context stack.
      */
-    asm!(
+    core::arch::asm!(
         "ld t0, {sbi_trap_regs_offset_t0}(a0)",
         "ld a0, {sbi_trap_regs_offset_a0}(a0)",
         sbi_trap_regs_offset_t0 = const offset_of!(opensbi::sbi_trap_regs, t0),
         sbi_trap_regs_offset_a0 = const offset_of!(opensbi::sbi_trap_regs, a0),
     );
 
-    asm!("mret")
+    core::arch::asm!("mret", options(noreturn))
+}
+
+extern "C" fn tee_handler() -> ! {
+    unsafe {
+        core::arch::asm!(
+        // calculate new stack pointer for tee handling. To do so, we use the mscratch and adapt to
+        // the opensbi scartch memory layout.
+        // This block needs:
+        // - a7 as base pointer as we assume it as CoVE ID
+        // - t0 as arithemtic register to calculate the offset
+        "csrrw tp, mscratch, tp
+        sd t0, {sbi_scratch_tmp0_offset}(tp)
+        la a7, {tee_stack}
+        li t0, {scratch_size}
+        add t0, t0, {context_size}
+        sub a7, a7, t0
+        sd sp, 8*2(a7)
+        add sp, a7, zero
+        // restore a7 and t0 and swap back the mscratch
+        la a7, {covh_ext_id}
+        ld t0, {sbi_scratch_tmp0_offset}(tp)
+        csrrw tp, mscratch, tp
+        ",
+        // save gprs
+        "
+        sd x0, 8 * 0 (sp)
+        sd x1, 8 * 1 (sp)
+        sd x3, 8 * 3 (sp)
+        sd x4, 8 * 4 (sp)
+        sd x5, 8 * 5 (sp)
+        sd x6, 8 * 6 (sp)
+        sd x7, 8 * 7 (sp)
+        sd x8, 8 * 8 (sp)
+        sd x9, 8 * 9 (sp)
+        sd x10, 8 * 10 (sp)
+        sd x11, 8 * 11 (sp)
+        sd x12, 8 * 12 (sp)
+        sd x13, 8 * 13 (sp)
+        sd x14, 8 * 14 (sp)
+        sd x15, 8 * 15 (sp)
+        sd x16, 8 * 16 (sp)
+        sd x17, 8 * 17 (sp)
+        sd x18, 8 * 18 (sp)
+        sd x19, 8 * 19 (sp)
+        sd x20, 8 * 20 (sp)
+        sd x21, 8 * 21 (sp)
+        sd x22, 8 * 22 (sp)
+        sd x23, 8 * 23 (sp)
+        sd x24, 8 * 24 (sp)
+        sd x25, 8 * 25 (sp)
+        sd x26, 8 * 26 (sp)
+        sd x27, 8 * 27 (sp)
+        sd x28, 8 * 28 (sp)
+        sd x29, 8 * 29 (sp)
+        sd x30, 8 * 30 (sp)
+        sd x31, 8 * 31 (sp)
+        ",
+        // save csrs
+        "
+        csrr t0, sstatus
+        sd t0, 32*8(sp)
+        csrr t0, stvec
+        sd t0, 33*8(sp)
+        csrr t0, sip
+        sd t0, 34*8(sp)
+        csrr  t0,scounteren
+        sd t0, 35*8(sp)
+        csrr  t0, sscratch
+        sd t0, 36*8(sp)
+        csrr t0, satp
+        sd t0, 37*8(sp)
+        csrr t0,senvcfg
+        sd t0, 38*8(sp)
+        // sd t0, 39*8(sp)
+        // csrr scontext, t0
+        csrr t0, mepc
+        sd t0, 40*8(sp)
+        ",
+        // save pmp config
+        "
+        csrr t0, pmpcfg0
+        sd t0, 41*8(sp)
+        csrr t0, pmpaddr0
+        sd t0, 42*8(sp)
+        csrr t0, pmpaddr1
+        sd t0, 43*8(sp)
+        csrr t0, pmpaddr2
+        sd t0, 44*8(sp)
+        csrr t0, pmpaddr3
+        sd t0, 45*8(sp)
+        csrr t0, pmpaddr4
+        sd t0, 46*8(sp)
+        csrr t0, pmpaddr5
+        sd t0, 47*8(sp)
+        csrr t0, pmpaddr6
+        sd t0, 48*8(sp)
+        csrr t0, pmpaddr7
+        sd t0, 49*8(sp)
+        csrr t0, pmpaddr8
+        sd t0, 50*8(sp)
+        csrr t0, pmpaddr9
+        sd t0, 51*8(sp)
+        csrr t0, pmpaddr10
+        sd t0, 52*8(sp)
+        csrr t0, pmpaddr11
+        sd t0, 53*8(sp)
+        csrr t0, pmpaddr12
+        sd t0, 54*8(sp)
+        csrr t0, pmpaddr13
+        sd t0, 55*8(sp)
+        csrr t0, pmpaddr14
+        sd t0, 56*8(sp)
+        csrr t0, pmpaddr15
+        sd t0, 57*8(sp)
+        ",
+        "la sp, {tee_stack}",
+        tee_stack = sym _tee_scratch_start,
+        covh_ext_id = const 0x434F5648 as usize,
+        context_size= const size_of::<Context>(),
+        scratch_size = const TEE_SCRATCH_SIZE,
+        sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
+        options(nostack)
+        )
+    }
+    // unlock the state
+    let mut state_guard = STATE.lock();
+    let state = state_guard.get_mut().unwrap();
+
+    // retrieve the target supervisor domain and the current active domain
+    let mut fid: usize;
+    unsafe {
+        core::arch::asm!("add {}, a6, zero", out(reg) fid, options(readonly, nostack));
+    }
+    let (dst_domain_id, _fid) = cove_unpack_fid!(fid);
+    let active_domain = state.domains.iter().find(|d| d.active != 0).unwrap();
+    let active_domain_id = active_domain.id;
+    let scratch_addr = &raw const _tee_scratch_start as *const u8 as usize;
+    let scratch_ctx = (scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>())) as *mut Context;
+
+    // understand if it we are in a TEECALL or a TEERET. To do so we need to check if the target
+    // domain (which is assumed to be a confidential domain). If the target domain is the same as
+    // the active one, it means that this call comes from a TSM and it is a TEERET, otherwise it is
+    // a TEECALL.
+    // The outcome of this block is the address of the domain to be restored.
+    let dst_addr = if active_domain_id == dst_domain_id {
+        // TEERET
+        // We don't need to store the calling context since we are implementing the
+        // non interruptible TSM. We need a0 and a1 registers to deliver the result
+        //
+        // We need to retrieve the original calling context
+        let src_id = (active_domain.active & !(1 << dst_domain_id)).trailing_zeros() as usize;
+        let dst_addr = scratch_addr
+            - (TEE_SCRATCH_SIZE + size_of::<Context>())
+            - (src_id + 1) * size_of::<Context>();
+        let dst_ctx = dst_addr as *mut Context;
+        unsafe {
+            (*dst_ctx).regs[10] = (*scratch_ctx).regs[10];
+            (*dst_ctx).regs[11] = (*scratch_ctx).regs[11];
+            // increment mepc to avoid loop
+            (*dst_ctx).mepc += 4;
+        }
+        state.domains[active_domain_id].active = 0;
+        state.domains[src_id].active = 1;
+        dst_addr
+    } else {
+        // TEECALL
+        // We need to store the calling context into the right structure
+        let src_ctx = (scratch_addr
+            - (TEE_SCRATCH_SIZE + size_of::<Context>())
+            - (active_domain_id + 1) * size_of::<Context>()) as *mut Context;
+        unsafe {
+            core::ptr::copy_nonoverlapping(scratch_ctx, src_ctx, 1);
+        }
+        let dst_addr = scratch_addr
+            - (TEE_SCRATCH_SIZE + size_of::<Context>())
+            - (dst_domain_id + 1) * size_of::<Context>();
+
+        let dst_ctx = dst_addr as *mut Context;
+        unsafe {
+            // we need to preserve all a0-a7 registers without a5.
+            // Easier (maybe to help prefetch to store everything and to delete a5)
+            for i in 10..18 {
+                (*dst_ctx).regs[i] = (*src_ctx).regs[i];
+            }
+            (*dst_ctx).regs[15] = 0;
+        }
+
+        // deactivate the domain and mark the target supervisor domain active indicating the src
+        // domain
+        state.domains[active_domain_id].active = 0;
+        state.domains[dst_domain_id].active = (1 << active_domain_id) | (1 << dst_domain_id);
+        dst_addr
+    };
+
+    // release the lock
+    drop(state_guard);
+
+    // restore target domain context
+    unsafe {
+        core::arch::asm!(
+            // setup stack
+            "
+            mv sp, {target_domain}
+            ",
+            "
+            .align 4
+            ld zero, 0(sp)
+            ld ra, 1*8(sp)
+            ld gp, 3*8(sp)
+            ld tp, 4*8(sp)
+            ld t0, 5*8(sp)
+            ld t1, 6*8(sp)
+            ld t2, 7*8(sp)
+            ld s0, 8*8(sp)
+            ld s1, 9*8(sp)
+            ld a0, 10*8(sp)
+            ld a1, 11*8(sp)
+            ld a2, 12*8(sp)
+            ld a3, 13*8(sp)
+            ld a4, 14*8(sp)
+            ld a5, 15*8(sp)
+            ld a6, 16*8(sp)
+            ld a7, 17*8(sp)
+            ld s2, 18*8(sp)
+            ld s3, 19*8(sp)
+            ld s4, 20*8(sp)
+            ld s5, 21*8(sp)
+            ld s6, 22*8(sp)
+            ld s7, 23*8(sp)
+            ld s8, 24*8(sp)
+            ld s9, 25*8(sp)
+            ld s10, 26*8(sp)
+            ld s11, 27*8(sp)
+            ld t3, 28*8(sp)
+            ld t4, 29*8(sp)
+            ld t5, 30*8(sp)
+            ld t6, 31*8(sp)
+            ",
+            // restore CSRs
+            "
+            ld t0, 32*8(sp)
+            csrw sstatus, t0
+            ld t0, 33*8(sp)
+            csrw stvec, t0
+            ld t0, 34*8(sp)
+            csrw sip, t0
+            ld t0, 35*8(sp)
+            csrw scounteren, t0
+            ld t0, 36*8(sp)
+            csrw sscratch, t0
+            ld t0, 37*8(sp)
+            csrw satp, t0
+            ld t0, 38*8(sp)
+            csrw senvcfg, t0
+            // ld t0, 39*8(sp)
+            // csrw scontext, t0
+            ld t0, 40*8(sp)
+            csrw mepc, t0
+            ",
+
+            // restore pmp
+            "
+            ld t0, 41*8(sp)
+            csrw pmpcfg0, t0
+            ld t0, 42*8(sp)
+            csrw pmpaddr0, t0
+            ld t0, 43*8(sp)
+            csrw pmpaddr1, t0
+            ld t0, 44*8(sp)
+            csrw pmpaddr2, t0
+            ld t0, 45*8(sp)
+            csrw pmpaddr3, t0
+            ld t0, 46*8(sp)
+            csrw pmpaddr4, t0
+            ld t0, 47*8(sp)
+            csrw pmpaddr5, t0
+            ld t0, 48*8(sp)
+            csrw pmpaddr6, t0
+            ld t0, 49*8(sp)
+            csrw pmpaddr7, t0
+            ld t0, 50*8(sp)
+            csrw pmpaddr8, t0
+            ld t0, 51*8(sp)
+            csrw pmpaddr9, t0
+            ld t0, 52*8(sp)
+            csrw pmpaddr10, t0
+            ld t0, 53*8(sp)
+            csrw pmpaddr11, t0
+            ld t0, 54*8(sp)
+            csrw pmpaddr12, t0
+            ld t0, 55*8(sp)
+            csrw pmpaddr13, t0
+            ld t0, 56*8(sp)
+            csrw pmpaddr14, t0
+            ld t0, 57*8(sp)
+            csrw pmpaddr15, t0
+            ",
+            // restore sp
+            "ld sp, 2*8(sp)",
+            target_domain = in(reg) dst_addr,
+            options(nostack),
+        )
+    };
+    riscv::asm::fence_i();
+    riscv::asm::fence();
+
+    unsafe { core::arch::asm!("mret", options(noreturn, nostack)) }
 }

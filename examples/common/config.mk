@@ -23,3 +23,9 @@ ABI ?= lp64
 CFLAGS  = -Wall -Wextra -march=$(ARCH) -mabi=$(ABI)
 LDFLAGS =
 ASFLAGS = -march=$(ARCH) -mabi=$(ABI)
+
+# Add debugging symbols if DEBUG=1
+ifeq ($(DEBUG), 1)
+	CFLAGS += -g
+	LDFLAGS += -g
+endif

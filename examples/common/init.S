@@ -9,7 +9,8 @@ _start:
     la sp, __stack_top    # Load the stack pointer
     add s0, sp, zero      # Set the frame pointer
     jal zero, main        # Run main entry point - no argc
-loop:	j loop              # Spin forever in case main returns
+loop:			  # Spin forever in case main returns
+    j loop
 
 .section .data
 .space 1024*8             # allocate 8K of memory to serve as initial stack

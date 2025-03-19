@@ -135,7 +135,11 @@ build_initramfs() {
   printf "Downloading busybox source..."
   curl -fsSL https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2 -o ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2
   printf "done\n"
-  tar -xvf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
+
+  printf "Extracting busybox source..."
+  tar -xf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
+  printf "done\n"
+
   make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} ARCH=${ARCH} defconfig
 
   # Prepare initramfs

@@ -2,8 +2,8 @@
  *  which are:
  *      - link opensbi static library;
  *      - generate rust bindings from opensbi include;
- *      - specify correct linkerscript and define symbols depending on the platform
- *      - compile the device tree
+ *      - specify correct linkerscript;
+ *      - compile the device tree;
  *
  *  The idea of a build script is well documented here
  *  "https://doc.rust-lang.org/cargo/reference/build-scripts.html".
@@ -24,11 +24,6 @@ fn main() {
     // Sourcing `scripts/environment.sh` allow users to specify a PLATFORM (defaults to 'generic').
     // Retrieve platform details if exists otherwise throw an error
     let platform = env::var("PLATFORM").unwrap_or_else(|_| "generic".to_string());
-    let platform = if platform == "generic" {
-        "qemu-generic".to_string()
-    } else {
-        platform
-    };
 
     // write the selected linkerscript where the rust can find it
     let platform_dir = PathBuf::from(PLATFORM_BASE).join(platform);
@@ -39,7 +34,7 @@ fn main() {
 
     // compile the device tree
     let dts_file = platform_dir.join("device-tree.dts");
-    let dtb_file = "device-tree.dtb";
+    let dtb_file = "bin/device-tree.dtb";
     let status = Command::new("dtc")
         .args([
             "-I",
@@ -89,7 +84,9 @@ fn main() {
         // this is the include directory installed from opensbi using the
         // command `make PLATFORM=generic install I=<path-to-shadowfax>`
         .clang_arg("-Iinclude/")
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .derive_debug(true)
+        .derive_default(true)
+        .ctypes_prefix("::core::ffi")
         .generate()
         .expect("Unable to generate bindings");
 

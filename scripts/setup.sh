@@ -133,10 +133,40 @@ install_opensbi() {
   su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. PLATFORM=${PLATFORM} install"
 }
 
+# Function to download, build, and install Clang from source for musl-based systems
+build_clang_from_source() {
+  printf "Downloading LLVM source..."
+  su $USER_NAME -c "curl -fsSL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz \
+    -o ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
+  printf " done\n"
+
+  printf "Extracting LLVM source..."
+  su $USER_NAME -c "tar -xf ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
+  printf " done\n"
+
+  printf "Creating build directory..."
+  su $USER_NAME -c "mkdir llvm-project-${LLVM_VERSION}.src/build"
+  printf " done\n"
+
+  printf "Configuring LLVM build with CMake..."
+  su $USER_NAME -c "cmake -G 'Ninja' \
+    -S llvm-project-${LLVM_VERSION}.src/llvm/ \
+    -B llvm-project-${LLVM_VERSION}.src/build \
+    -DLLVM_ENABLE_PROJECTS='clang' \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLIBCLANG_BUILD_STATIC=ON \
+    -DLLVM_ENABLE_ZSTD=OFF \
+    -DLLVM_TARGETS_TO_BUILD='X86;RISCV' \
+    -DLLVM_HOST_TRIPLE=${ARCHITECTURE}-unknown-linux-${LIBC_PREFIX}"
+  printf " done\n"
+
+  printf "Building LLVM with Ninja...\n"
+  su $USER_NAME -c "ninja -C llvm-project-${LLVM_VERSION}.src/build"
+  printf " done\n"
+}
+
 # Global variables
 DISTRO_CODENAME=$(get_distro_codename)
-OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
-PLATFORM="${PLATFORM:-generic}"
 TEMP_DIR=$(mktemp -d)
 USER_NAME="$SUDO_USER"
 USER_HOME=$(eval echo ~$USER_NAME)
