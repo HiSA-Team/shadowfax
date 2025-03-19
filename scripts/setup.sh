@@ -79,6 +79,7 @@ install_opensbi() {
   # install opensbi in root directory
   su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. PLATFORM=${PLATFORM} install"
 }
+
 # Function to download, build, and install Clang from source for musl-based systems
 build_clang_from_source() {
   printf "Downloading LLVM source...\n"
@@ -86,21 +87,20 @@ build_clang_from_source() {
     -o ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
 
   printf "Extracting LLVM source...\n"
-  su $USER_NAME -c "tar -xf ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz -C llvm-project"
+  su $USER_NAME -c "tar -xf ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
 
   printf "Creating build directory...\n"
-  su $USER_NAME -c "mkdir llvm-project/build"
+  su $USER_NAME -c "mkdir llvm-project-${LLVM_VERSION}.src/build"
 
   printf "Configuring LLVM build with CMake...\n"
-  su $USER_NAME -c "cmake -G 'ninja' \
-    -S llvm-project-src/llvm/ \
-    -B llvm-project-src/build \
+  su $USER_NAME -c "cmake -G 'Ninja' \
+    -S llvm-project-${LLVM_VERSION}.src/llvm/ \
+    -B llvm-project-${LLVM_VERSION}.src/build \
     -DLLVM_ENABLE_PROJECTS='clang' \
     -DCMAKE_BUILD_TYPE=Release \
-    -DLLVM_ENABLE_PROJECTS=clang \
     -DLIBCLANG_BUILD_STATIC=ON \
     -DLLVM_ENABLE_ZSTD=OFF \
-    -DLLVM_TARGETS_TO_BUILD='${ARCHITECTURE}' \
+    -DLLVM_TARGETS_TO_BUILD='X86;RISCV' \
     -DLLVM_HOST_TRIPLE=${ARCHITECTURE}-unknown-linux-${LIBC_PREFIX}"
 
   printf "Building LLVM with Ninja...\n"
@@ -128,7 +128,7 @@ echo "Detected Distribution Codename: ${DISTRO_CODENAME}"
 # install_rust
 # install_opensbi
 
-if [ "$LIBC_PREFIX" == "musl" ]; then
+if [ "$LIBC_PREFIX" = "musl" ]; then
   echo "Building Clang from source for musl-based system..."
   build_clang_from_source
 fi
