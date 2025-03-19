@@ -1,0 +1,19 @@
+[package]
+name = "shadowfax"
+version = "0.1.0"
+edition = "2021"
+authors = ["Giuseppe Capasso"]
+
+# Uncomment this for musl systems
+# [build-dependencies]
+# bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
+#
+# [build-dependencies.clang-sys]
+# version = "1.8.1"
+# features = ["static"]
+
+[build-dependencies]
+bindgen = "0.71.1"
+
+
+[dependencies]
