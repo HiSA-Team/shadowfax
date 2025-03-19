@@ -22,3 +22,10 @@ if [ "$ARCHITECTURE" != "riscv64" ]; then
   export CROSS_COMPILE="riscv64-linux-$LIBC_PREFIX-"
   export ARCH=riscv
 fi
+
+if [ "$LIBC_PREFIX" == "musl" ]; then
+  export LIBCLANG_STATIC=1
+  export LIBCLANG_PATH=$(pwd)/llvm-project/build/lib
+  export LLVM_CONFIG_PATH=$(pwd)/scripts/llvm-config.sh
+  export LIBCLANG_STATIC_PATH=$(pwd)/llvm-project/build/lib
+fi
