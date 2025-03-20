@@ -59,7 +59,10 @@ build_kernel() {
   printf "Downloading kernel source... "
   curl -fsSL https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KERNEL_VERSION}.tar.xz -o ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz
   printf "done\n"
-  tar -xvf ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz -C ${TEMP_DIR}
+
+  printf "Extracting kernel source... "
+  tar -xf ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz -C ${TEMP_DIR}
+  printf "done\n"
 
   # Build linux
   make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} O=${ODIR} defconfig
@@ -71,7 +74,11 @@ build_initramfs() {
   printf "Downloading busybox source..."
   curl -fsSL https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2 -o ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2
   printf "done\n"
-  tar -xvf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
+
+  printf "Extracting busybox source..."
+  tar -xf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
+  printf "done\n"
+
   make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} ARCH=${ARCH} defconfig
 
   # Prepare initramfs

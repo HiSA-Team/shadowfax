@@ -3,6 +3,7 @@
 # - installs build dependencies for common distributions;
 # - installs rust toolchain with riscv target;
 # - builds and install opensbi libraries and header files;
+# - builds a custom clang with static linking from llvm (only for musl systems)
 #
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
@@ -34,7 +35,7 @@ install_dependencies() {
     # Ubuntu 24.04, Ubuntu 22.04, Debian 12, Debian 11
     noble | jammy | bookworm | bullseye)
       apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system build-essential \
-        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc cpio clang cmake ninja
+        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc cpio clang cmake ninja-build
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-$LIBC_PREFIX
       fi
@@ -71,7 +72,9 @@ install_opensbi() {
   su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz"
   printf " done\n"
 
-  su $USER_NAME -c "tar xvf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
+  printf "Extracting opensbi source..."
+  su $USER_NAME -c "tar xf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
+  printf " done\n"
 
   # build opensbi
   su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} PLATFORM=${PLATFORM}"
@@ -82,17 +85,20 @@ install_opensbi() {
 
 # Function to download, build, and install Clang from source for musl-based systems
 build_clang_from_source() {
-  printf "Downloading LLVM source...\n"
+  printf "Downloading LLVM source..."
   su $USER_NAME -c "curl -fsSL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz \
     -o ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
+  printf " done\n"
 
-  printf "Extracting LLVM source...\n"
+  printf "Extracting LLVM source..."
   su $USER_NAME -c "tar -xf ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
+  printf " done\n"
 
-  printf "Creating build directory...\n"
+  printf "Creating build directory..."
   su $USER_NAME -c "mkdir llvm-project-${LLVM_VERSION}.src/build"
+  printf " done\n"
 
-  printf "Configuring LLVM build with CMake...\n"
+  printf "Configuring LLVM build with CMake..."
   su $USER_NAME -c "cmake -G 'Ninja' \
     -S llvm-project-${LLVM_VERSION}.src/llvm/ \
     -B llvm-project-${LLVM_VERSION}.src/build \
@@ -102,16 +108,15 @@ build_clang_from_source() {
     -DLLVM_ENABLE_ZSTD=OFF \
     -DLLVM_TARGETS_TO_BUILD='X86;RISCV' \
     -DLLVM_HOST_TRIPLE=${ARCHITECTURE}-unknown-linux-${LIBC_PREFIX}"
+  printf " done\n"
 
   printf "Building LLVM with Ninja...\n"
   su $USER_NAME -c "ninja -C llvm-project-${LLVM_VERSION}.src/build"
+  printf " done\n"
 }
 
 # Global variables
 DISTRO_CODENAME=$(get_distro_codename)
-OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
-LLVM_VERSION="${LLVM_VERSION:-17.0.6}"
-PLATFORM="${PLATFORM:-generic}"
 TEMP_DIR=$(mktemp -d)
 USER_NAME="${SUDO_USER:-root}"
 
@@ -124,9 +129,9 @@ echo "Detected Architecture: ${ARCHITECTURE}"
 echo "Detected LIBC: ${LIBC}"
 echo "Detected Distribution Codename: ${DISTRO_CODENAME}"
 
-# install_dependencies
-# install_rust
-# install_opensbi
+install_dependencies
+install_rust
+install_opensbi
 
 if [ "$LIBC_PREFIX" = "musl" ]; then
   echo "Building Clang from source for musl-based system..."

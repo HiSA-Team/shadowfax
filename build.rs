@@ -14,12 +14,6 @@ fn main() {
     println!("cargo:rustc-link-search={}", libdir_path.to_str().unwrap());
     println!("cargo:rustc-link-lib=platsbi");
 
-    if cfg!(target_env = "musl") {
-        println!("cargo:rustc-linker=riscv64-linux-musl-ld");
-    } else {
-        println!("cargo:rustc-linker=riscv64-linux-gnu-ld");
-    }
-
     let bindings = bindgen::Builder::default()
         .use_core()
         .header("wrapper.h")
