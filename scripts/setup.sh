@@ -6,10 +6,14 @@
 #
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
+# Ensure this script is run with root privileges
 if [ "$(id -u)" -ne 0 ]; then
   echo "This script requires root privileges"
   exit 1
 fi
+
+# Running directly from root (without sudo) is discoureged, but we only print a warning message
+# because an expert user could test this script in a container.
 if [ ! $SUDO_USER ]; then
   echo "\033[33mWARNING\033[0m: running this script directly as root may not be what you want. Unless you know what you are doing, use sudo." >&2
 fi
@@ -18,6 +22,8 @@ fi
 BASEDIR=$(dirname $(realpath $0))
 . ${BASEDIR}/environment.sh
 
+# Retrieves distro code name from /etc/os-release file. First,
+# it tries to get it from VERSION_CODENAME field, then from ID.
 get_distro_codename() {
   local codename
   codename=$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release)
@@ -27,6 +33,17 @@ get_distro_codename() {
   echo "$codename" | xargs
 }
 
+# Installs required dependencies on supported distributions. It also installs
+# cross-compilation if we are not on RISCV machine. We are installing:ù
+# - basic build packages (gcc, make) to build shadowfax and the linux kernel
+# - qemu
+#
+# Supported distributions are:
+# - Ubuntu 24.04
+# - Ubuntu 22.04
+# - Debian 12
+# - Debian 11
+# - Void Linux
 install_dependencies() {
   case "$DISTRO_CODENAME" in
     # Ubuntu 24.04, Ubuntu 22.04, Debian 12, Debian 11
@@ -39,8 +56,7 @@ install_dependencies() {
       ;;
     void)
       xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf elfutils-devel libdwarf-devel \
-        curl git file cpio
-        git
+        curl git file cpio git
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         xbps-install -Sy cross-riscv64-linux-$LIBC_PREFIX
       fi
@@ -53,11 +69,14 @@ install_dependencies() {
   esac
 }
 
+# Installs rust and updates the .bashrc profile with the toolchain path.
+# It also installs riscv64 toolchain in case we are cross compiling.
 install_rust() {
   su $USER_NAME -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
   su $USER_NAME -c "echo PATH=~/.cargo/bin:${PATH} >> ~/.bashrc"
   if [ "$ARCHITECTURE" != "riscv64" ]; then
     su $USER_NAME -c "~/.cargo/bin/rustup target add riscv64gc-unknown-none-elf"
+    su $USER_NAME -c "~/.cargo/bin/rustup target add riscv64imac-unknown-none-elf"
   else
     echo "Running on RISC-V architecture, skipping Rust RISC-V target setup."
   fi
