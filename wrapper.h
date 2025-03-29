@@ -55,3 +55,8 @@
 #include <sbi/sbi_unit_test.h>
 #include <sbi/sbi_unpriv.h>
 #include <sbi/sbi_version.h>
+
+extern struct sbi_platform platform;
+extern unsigned long fw_platform_init(unsigned long arg0, unsigned long arg1,
+                                      unsigned long arg2, unsigned long arg3,
+                                      unsigned long arg4);
