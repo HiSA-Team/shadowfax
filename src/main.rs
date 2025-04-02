@@ -251,7 +251,7 @@ extern "C" fn init_scratch_space() {
         fw_start = sym _fw_start,
         fw_end = sym _fw_end,
         fw_rw_start = sym _fw_rw_start,
-        payload = sym payload,
+        payload = sym kernel,
         next_priv = const 1,
         platform = sym opensbi::platform,
         hartid_to_scratch = sym hartid_to_scratch,
@@ -358,10 +358,23 @@ extern "C" fn _start_warm() {
     }
 }
 
+static MSG: [u8; 22] = *b"Hello world shadowfax\n";
+
 #[no_mangle]
-#[link_section = ".payload"]
-extern "C" fn payload() {
-    unsafe { asm!("li a7, 0x53555044", "li a6, 0x0", "ecall") }
+#[link_section = ".payload.kernel"]
+extern "C" fn kernel() {
+    unsafe {
+        asm!(
+            "li a7, 0x4442434E",
+            "li a6, 0x0",
+            "li a0, {len}",
+            "lla a1, {msg}",
+            "li a2, 0",
+            "ecall",
+            len = const 22,
+            msg = sym MSG,
+        )
+    }
     loop {}
 }
 
