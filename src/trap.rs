@@ -19,7 +19,7 @@ pub fn _trap_handler() {
 fn trap_save_and_setup_sp_t0() {
     unsafe {
         asm!(
-            //  Swap TP and MSCRATCH
+            // Swap TP and MSCRATCH
             "csrrw tp, {csr_mscratch}, tp",
             "sd t0, {sbi_scratch_tmp0_offset}(tp)",
             /*
