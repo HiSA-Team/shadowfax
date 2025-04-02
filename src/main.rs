@@ -278,7 +278,9 @@ fn init_scratch_space() {
 
 #[no_mangle]
 fn start_hang() {
-    loop {}
+    loop {
+        unsafe { asm!("wfi") }
+    }
 }
 
 #[no_mangle]
@@ -316,6 +318,7 @@ fn hartid_to_scratch() {
 fn _start_warm() {
     unsafe { asm!("li ra, 0") }
 
+    register_extension();
     unsafe {
         asm!(
             // Load platform details: stack offset and hart_index2id
@@ -357,22 +360,75 @@ fn _start_warm() {
         )
     }
 }
+const COVEH_EXT_NAME: [u8; 8] = *b"COVEH   ";
+const COVEH_EXT_ID: u64 = 0x434F5648;
+
+#[no_mangle]
+#[link_section = ".text"]
+unsafe extern "C" fn sbi_coveh_handler(
+    extid: u64,
+    fid: u64,
+    _: *mut opensbi::sbi_trap_regs,
+    _: *mut opensbi::sbi_ecall_return,
+) -> i32 {
+    const UART: *mut u8 = 0x10000000 as *mut u8;
+
+    for c in "hello from coveh".chars() {
+        unsafe {
+            core::ptr::write_volatile(UART, c as u8);
+        }
+    }
+    0
+}
+
+#[no_mangle]
+#[link_section = ".text"]
+fn register_extension() {
+    let mut extension = opensbi::sbi_ecall_extension {
+        experimental: true,
+        probe: None,
+        name: COVEH_EXT_NAME,
+        extid_start: COVEH_EXT_ID,
+        extid_end: COVEH_EXT_ID,
+        handle: Some(sbi_coveh_handler),
+        register_extensions: None,
+        head: opensbi::sbi_dlist {
+            next: core::ptr::null_mut(),
+            prev: core::ptr::null_mut(),
+        },
+    };
+
+    unsafe { opensbi::sbi_ecall_register_extension(&mut extension) };
+}
 
 static MSG: [u8; 22] = *b"Hello world shadowfax\n";
 
 #[no_mangle]
 #[link_section = ".payload.kernel"]
 fn kernel() {
+    // unsafe {
+    //     asm!(
+    //         "li a7, {extid}",
+    //         "li a6, {fid}",
+    //         "li a0, {len}",
+    //         "lla a1, {msg}",
+    //         "li a2, 0",
+    //         "ecall",
+    //         extid = const 0x4442434E,
+    //         fid = const 0x00,
+    //         len = const 22,
+    //         msg = sym MSG,
+    //     )
+    // }
     unsafe {
         asm!(
-            "li a7, 0x4442434E",
-            "li a6, 0x0",
-            "li a0, {len}",
-            "lla a1, {msg}",
+            "li a7, {extid}",
+            "li a6, {fid}",
             "li a2, 0",
+            "li a0, 0",
             "ecall",
-            len = const 22,
-            msg = sym MSG,
+            extid = const COVEH_EXT_ID,
+            fid = const 0x00,
         )
     }
     loop {}
