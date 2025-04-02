@@ -78,7 +78,7 @@ fn main() -> ! {
 
 #[no_mangle]
 #[inline]
-extern "C" fn zero_bss() {
+fn zero_bss() {
     unsafe {
         asm!(
             "la s4, {bss_start}", // Load the address of _bss_start into s4
@@ -95,7 +95,7 @@ extern "C" fn zero_bss() {
 }
 
 #[no_mangle]
-extern "C" fn reset_regs() {
+fn reset_regs() {
     unsafe {
         asm!(
             "fence.i",
@@ -154,7 +154,7 @@ extern "C" fn reset_regs() {
  * };
  */
 #[no_mangle]
-extern "C" fn init_scratch_space() {
+fn init_scratch_space() {
     trap::clear_mdt_t0();
     unsafe {
         asm!(
@@ -277,13 +277,13 @@ extern "C" fn init_scratch_space() {
 }
 
 #[no_mangle]
-extern "C" fn start_hang() {
+fn start_hang() {
     loop {}
 }
 
 #[no_mangle]
 #[link_section = ".text._hartid_to_scratch"]
-extern "C" fn hartid_to_scratch() {
+fn hartid_to_scratch() {
     /*
      * a0 -> HART ID (passed by caller)
      * a1 -> HART Index (passed by caller)
@@ -313,7 +313,7 @@ extern "C" fn hartid_to_scratch() {
 
 #[no_mangle]
 #[link_section = ".text_start_warm"]
-extern "C" fn _start_warm() {
+fn _start_warm() {
     unsafe { asm!("li ra, 0") }
 
     unsafe {
@@ -362,7 +362,7 @@ static MSG: [u8; 22] = *b"Hello world shadowfax\n";
 
 #[no_mangle]
 #[link_section = ".payload.kernel"]
-extern "C" fn kernel() {
+fn kernel() {
     unsafe {
         asm!(
             "li a7, 0x4442434E",
@@ -380,6 +380,6 @@ extern "C" fn kernel() {
 
 #[inline(always)]
 #[no_mangle]
-extern "C" fn disable_interrupts() {
+fn disable_interrupts() {
     unsafe { asm!("csrw {csr_mie}, zero", csr_mie = const opensbi::CSR_MIE ) }
 }
