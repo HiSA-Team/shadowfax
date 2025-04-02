@@ -47,7 +47,7 @@ SECTIONS {
   . = ALIGN(0x1000);
   .payload : {
     PROVIDE(_payload_start = .);
-    *(.payload)
+    *(.payload.kernel)
     . = ALIGN(8);
     PROVIDE(_payload_end = .);
   }
