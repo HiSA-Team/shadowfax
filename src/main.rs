@@ -8,38 +8,12 @@
  * when calling the functions sbi_init() and sbi_trap_handler().
  *
  * Part of this code is taken from https://github.com/riscv-software-src/opensbi/blob/master/firmware/fw_base.S
- * which is used to launch other firmware types with S or HS mode.
+ * which is used to launch other firmwares.
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 #![no_std]
 #![no_main]
-const SBI_PLATFORM_HART_STACK_SIZE_OFFSET: usize =
-    mem::offset_of!(opensbi::sbi_platform, hart_stack_size);
-const SBI_PLATFORM_HART_INDEX2ID_OFFSET: usize =
-    mem::offset_of!(opensbi::sbi_platform, hart_index2id);
-const SBI_PLATFORM_HART_COUNT_OFFSET: usize = mem::offset_of!(opensbi::sbi_platform, hart_count);
-const SBI_PLATFORM_HEAP_SIZE_OFFSET: usize = mem::offset_of!(opensbi::sbi_platform, heap_size);
-const SBI_SCRATCH_FW_START_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, fw_start);
-const SBI_SCRATCH_FW_SIZE_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, fw_size);
-const SBI_SCRATCH_FW_RW_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, fw_rw_offset);
-const SBI_SCRATCH_FW_HEAP_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, fw_heap_offset);
-const SBI_SCRATCH_FW_HEAP_SIZE_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, fw_heap_size);
-const SBI_SCRATCH_NEXT_ARG1_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, next_arg1);
-const SBI_SCRATCH_NEXT_ADDR_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, next_addr);
-const SBI_SCRATCH_NEXT_MODE_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, next_mode);
-const SBI_SCRATCH_WARMBOOT_ADDR_OFFSET: usize =
-    mem::offset_of!(opensbi::sbi_scratch, warmboot_addr);
-const SBI_SCRATCH_PLATFORM_ADDR_OFFSET: usize =
-    mem::offset_of!(opensbi::sbi_scratch, platform_addr);
-const SBI_SCRATCH_HARTID_TO_SCRATCH_OFFSET: usize =
-    mem::offset_of!(opensbi::sbi_scratch, hartid_to_scratch);
-
-const SBI_SCRATCH_TRAP_CONTEXT_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, trap_context);
-const SBI_SCRATCH_TMP0_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, tmp0);
-const SBI_SCRATCH_OPTIONS_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, options);
-const SBI_SCRATCH_HARTINDEX_OFFSET: usize = mem::offset_of!(opensbi::sbi_scratch, hartindex);
-
-use core::{arch::asm, mem, panic::PanicInfo, ptr};
+use core::{arch::asm, mem, panic::PanicInfo};
 
 mod opensbi {
     #![allow(non_upper_case_globals)]
@@ -49,8 +23,9 @@ mod opensbi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+mod trap;
+
 extern "C" {
-    static _payload_start: u8;
     static _fw_start: u8;
     static _fw_end: u8;
     static _fw_rw_start: u8;
@@ -58,41 +33,15 @@ extern "C" {
     static _bss_end: u8;
 }
 
-fn num_to_str<T: Into<u64>>(num: T, buf: &mut [u8]) -> &str {
-    let mut i = buf.len();
-    let mut num = num.into();
-    if num == 0 {
-        i -= 1;
-        buf[i] = b'0';
-    } else {
-        while num > 0 {
-            i -= 1;
-            buf[i] = b'0' + (num % 10) as u8;
-            num /= 10;
-        }
-    }
-    unsafe { core::str::from_utf8_unchecked(&buf[i..]) }
-}
-
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-fn uart_print(message: &str) {
-    const UART: *mut u8 = 0x10000000 as *mut u8;
-
-    for c in message.chars() {
-        unsafe {
-            ptr::write_volatile(UART, c as u8);
-        }
-    }
-}
-
 #[no_mangle]
 #[inline(always)]
 #[link_section = ".text._start"]
-extern "C" fn _start() -> ! {
+fn _start() -> ! {
     unsafe {
         asm!(
             // Load the address of the stack variable into t0.
@@ -112,14 +61,12 @@ extern "C" fn _start() -> ! {
     }
 }
 #[no_mangle]
-extern "C" fn main() -> ! {
+fn main() -> ! {
     // zero out bss
     zero_bss();
 
     // fw_platform_init correctly configures the "platform" struct
     unsafe { asm!("call fw_platform_init") }
-
-    // dump_config();
 
     init_scratch_space();
 
@@ -208,7 +155,7 @@ extern "C" fn reset_regs() {
  */
 #[no_mangle]
 extern "C" fn init_scratch_space() {
-    clear_mdt_t0();
+    trap::clear_mdt_t0();
     unsafe {
         asm!(
         // get platform details
@@ -298,9 +245,9 @@ extern "C" fn init_scratch_space() {
         // Store hart index in scratch space
         "sd zero, {sbi_scratch_hartindex_offset}(tp)",
 
-        sbi_platform_hart_stack_size_offset = const SBI_PLATFORM_HART_STACK_SIZE_OFFSET,
-        sbi_platform_hart_count_offset = const SBI_PLATFORM_HART_COUNT_OFFSET,
-        sbi_platform_heap_size_offset = const SBI_PLATFORM_HEAP_SIZE_OFFSET,
+        sbi_platform_hart_stack_size_offset = const mem::offset_of!(opensbi::sbi_platform, hart_stack_size),
+        sbi_platform_hart_count_offset = const mem::offset_of!(opensbi::sbi_platform, hart_count),
+        sbi_platform_heap_size_offset = const mem::offset_of!(opensbi::sbi_platform, heap_size),
         fw_start = sym _fw_start,
         fw_end = sym _fw_end,
         fw_rw_start = sym _fw_rw_start,
@@ -310,21 +257,21 @@ extern "C" fn init_scratch_space() {
         hartid_to_scratch = sym hartid_to_scratch,
         warmboot_addr = sym _start_warm,
         scratch_size = const opensbi::SBI_SCRATCH_SIZE,
-        sbi_scratch_fw_start_offset = const SBI_SCRATCH_FW_START_OFFSET,
-        sbi_scratch_fw_size_offset = const SBI_SCRATCH_FW_SIZE_OFFSET,
-        sbi_scratch_fw_rw_offset = const SBI_SCRATCH_FW_RW_OFFSET,
-        sbi_scratch_fw_heap_offset = const SBI_SCRATCH_FW_HEAP_OFFSET,
-        sbi_scratch_fw_heap_size_offset = const SBI_SCRATCH_FW_HEAP_SIZE_OFFSET,
-        sbi_scratch_next_arg1_offset = const SBI_SCRATCH_NEXT_ARG1_OFFSET,
-        sbi_scratch_next_addr_offset = const SBI_SCRATCH_NEXT_ADDR_OFFSET,
-        sbi_scratch_next_mode_offset = const SBI_SCRATCH_NEXT_MODE_OFFSET,
-        sbi_scratch_warmboot_addr_offset = const SBI_SCRATCH_WARMBOOT_ADDR_OFFSET,
-        sbi_scratch_platform_addr_offset = const SBI_SCRATCH_PLATFORM_ADDR_OFFSET,
-        sbi_scratch_hartid_to_scratch_offset = const SBI_SCRATCH_HARTID_TO_SCRATCH_OFFSET,
-        sbi_scratch_trap_context_offset = const SBI_SCRATCH_TRAP_CONTEXT_OFFSET,
-        sbi_scratch_tmp0_offset = const SBI_SCRATCH_TMP0_OFFSET,
-        sbi_scratch_options_offset = const SBI_SCRATCH_OPTIONS_OFFSET,
-        sbi_scratch_hartindex_offset = const SBI_SCRATCH_HARTINDEX_OFFSET,
+        sbi_scratch_fw_start_offset = const mem::offset_of!(opensbi::sbi_scratch, fw_start),
+        sbi_scratch_fw_size_offset = const mem::offset_of!(opensbi::sbi_scratch, fw_size),
+        sbi_scratch_fw_rw_offset = const mem::offset_of!(opensbi::sbi_scratch, fw_rw_offset),
+        sbi_scratch_fw_heap_offset = const mem::offset_of!(opensbi::sbi_scratch, fw_heap_offset),
+        sbi_scratch_fw_heap_size_offset = const mem::offset_of!(opensbi::sbi_scratch, fw_heap_size),
+        sbi_scratch_next_arg1_offset = const mem::offset_of!(opensbi::sbi_scratch, next_arg1),
+        sbi_scratch_next_addr_offset = const mem::offset_of!(opensbi::sbi_scratch, next_addr),
+        sbi_scratch_next_mode_offset = const mem::offset_of!(opensbi::sbi_scratch, next_mode),
+        sbi_scratch_warmboot_addr_offset = const mem::offset_of!(opensbi::sbi_scratch, warmboot_addr),
+        sbi_scratch_platform_addr_offset = const mem::offset_of!(opensbi::sbi_scratch, platform_addr),
+        sbi_scratch_hartid_to_scratch_offset = const mem::offset_of!(opensbi::sbi_scratch, hartid_to_scratch),
+        sbi_scratch_trap_context_offset = const mem::offset_of!(opensbi::sbi_scratch, trap_context),
+        sbi_scratch_tmp0_offset = const mem::offset_of!(opensbi::sbi_scratch, tmp0),
+        sbi_scratch_options_offset = const mem::offset_of!(opensbi::sbi_scratch, options),
+        sbi_scratch_hartindex_offset = const mem::offset_of!(opensbi::sbi_scratch, hartindex),
         )
     }
 }
@@ -332,26 +279,6 @@ extern "C" fn init_scratch_space() {
 #[no_mangle]
 extern "C" fn start_hang() {
     loop {}
-}
-
-#[no_mangle]
-extern "C" fn dump_config() {
-    uart_print("opensbi version: ");
-    let mut buf = [0u8; 11];
-    let major = num_to_str(opensbi::OPENSBI_VERSION_MAJOR, &mut buf);
-    uart_print(major);
-    uart_print(".");
-    let mut buf = [0u8; 11];
-    let minor = num_to_str(opensbi::OPENSBI_VERSION_MINOR, &mut buf);
-    uart_print(minor);
-    uart_print("\n");
-    uart_print("hart count: ");
-    let mut buf = [0u8; 11];
-    let hart_count = num_to_str(unsafe { opensbi::platform.hart_count }, &mut buf);
-    uart_print(hart_count);
-    uart_print("\n");
-    uart_print(unsafe { core::str::from_utf8_unchecked(&*&raw const opensbi::platform.name) });
-    uart_print("\n");
 }
 
 #[no_mangle]
@@ -376,8 +303,8 @@ extern "C" fn hartid_to_scratch() {
             "li t2, {scratch_size}",
             "sub a0, t1, t2",
             platform = sym opensbi::platform,
-            sbi_platform_hart_stack_size_offset = const SBI_PLATFORM_HART_STACK_SIZE_OFFSET,
-            sbi_platform_hart_count_offset = const SBI_PLATFORM_HART_COUNT_OFFSET,
+            sbi_platform_hart_stack_size_offset = const mem::offset_of!(opensbi::sbi_platform, hart_stack_size),
+            sbi_platform_hart_count_offset = const mem::offset_of!(opensbi::sbi_platform, hart_count),
             fw_end = sym _fw_end,
             scratch_size = const opensbi::SBI_SCRATCH_SIZE,
         )
@@ -388,9 +315,6 @@ extern "C" fn hartid_to_scratch() {
 #[link_section = ".text_start_warm"]
 extern "C" fn _start_warm() {
     unsafe { asm!("li ra, 0") }
-    // reset_regs();
-
-    disable_interrupts();
 
     unsafe {
         asm!(
@@ -421,16 +345,15 @@ extern "C" fn _start_warm() {
             "call {sbi_init}",
 
             platform = sym opensbi::platform,
-            sbi_platform_hart_stack_size_offset = const SBI_PLATFORM_HART_STACK_SIZE_OFFSET,
-            sbi_platform_hart_index2id_offset = const SBI_PLATFORM_HART_INDEX2ID_OFFSET,
+            sbi_platform_hart_stack_size_offset = const mem::offset_of!(opensbi::sbi_platform, hart_stack_size),
+            sbi_platform_hart_index2id_offset = const mem::offset_of!(opensbi::sbi_platform, hart_index2id),
             csr_mhartid = const opensbi::CSR_MHARTID,
             fw_end = sym _fw_end,
             scratch_size = const opensbi::SBI_SCRATCH_SIZE,
             csr_mscratch = const opensbi::CSR_MSCRATCH,
-            trap_handler = sym _trap_handler,
+            trap_handler = sym trap::_trap_handler,
             csr_mtvec = const opensbi::CSR_MTVEC,
             sbi_init = sym opensbi::sbi_init,
-
         )
     }
 }
@@ -446,293 +369,4 @@ extern "C" fn payload() {
 #[no_mangle]
 extern "C" fn disable_interrupts() {
     unsafe { asm!("csrw {csr_mie}, zero", csr_mie = const opensbi::CSR_MIE ) }
-}
-
-#[inline(always)]
-#[no_mangle]
-#[link_section = ".entry"]
-extern "C" fn _trap_handler() {
-    trap_save_and_setup_sp_t0();
-    trap_save_mepc_status();
-    trap_save_general_regs_except_sp_t0();
-    trap_save_info();
-    trap_call_c_routine();
-    trap_restore_general_regs_except_a0_t0();
-    trap_restore_mepc_status();
-    trap_restore_a0_t0()
-}
-
-#[no_mangle]
-#[inline(always)]
-extern "C" fn trap_save_and_setup_sp_t0() {
-    unsafe {
-        asm!(
-            //  Swap TP and MSCRATCH
-            "csrrw tp, {csr_mscratch}, tp",
-            "sd t0, {sbi_scratch_tmp0_offset}(tp)",
-            /*
-             * Set T0 to appropriate exception stack
-             *
-             * Came_From_M_Mode = ((MSTATUS.MPP < PRV_M) ? 1 : 0) - 1;
-             * Exception_Stack = TP ^ (Came_From_M_Mode & (SP ^ TP))
-             *
-             * Came_From_M_Mode = 0    ==>    Exception_Stack = TP
-             * Came_From_M_Mode = -1   ==>    Exception_Stack = SP
-             */
-            "csrr t0, {csr_mstatus}",
-            "srl t0, t0, {mstatus_mpp_shift}",
-            "and t0, t0, {priv_m}",
-            "slti t0, t0, {priv_m}",
-            "add t0, t0, -1",
-            "xor sp, sp, tp",
-            "and t0, t0, sp",
-            "xor sp, sp, tp",
-            "xor t0, tp, t0",
-            // Save original SP on exception st
-            "sd sp,  ({sbi_trap_regs_offset_tp}-{sbi_trap_context_size})(t0)",
-            // Set SP to exception stack and make room for trap context
-            "add sp, t0, -{sbi_trap_context_size}",
-            // Restore T0 from scratch space
-            "ld t0, {sbi_scratch_tmp0_offset}(tp)",
-            // Save T0 on stack
-            "sd t0, {sbi_trap_regs_offset_t0}(sp)",
-            // Swap TP and MSCRATCH
-            "csrrw tp, {csr_mscratch}, tp",
-
-            csr_mscratch = const opensbi::CSR_MSCRATCH,
-            csr_mstatus = const opensbi::CSR_MSTATUS,
-            mstatus_mpp_shift = const opensbi::MSTATUS_MPP_SHIFT,
-            sbi_trap_context_size = const (size_of::<opensbi::sbi_trap_regs>() +size_of::<opensbi::sbi_trap_info>() + 8),
-            sbi_trap_regs_offset_tp = const opensbi::SBI_TRAP_REGS_tp * 8,
-            sbi_trap_regs_offset_t0 = const opensbi::SBI_TRAP_REGS_t0 * 8,
-            sbi_scratch_tmp0_offset = const SBI_SCRATCH_TMP0_OFFSET,
-            priv_m = const 3,
-
-        )
-    }
-}
-#[no_mangle]
-#[inline(always)]
-extern "C" fn trap_save_mepc_status() {
-    unsafe {
-        asm!(
-            "csrr t0, {csr_mepc}",
-            "sd t0, {sbi_trap_regs_offset_mepc}(sp)",
-            "csrr t0, {csr_mstatus}",
-            "sd t0, {sbi_trap_regs_offset_mstatus}(sp)",
-            "sd zero, {sbi_trap_regs_offset_mstatush}(sp)",
-            csr_mstatus = const opensbi::CSR_MSTATUS,
-            csr_mepc= const opensbi::CSR_MEPC,
-            sbi_trap_regs_offset_mepc = const opensbi::SBI_TRAP_REGS_mepc * 8,
-            sbi_trap_regs_offset_mstatus= const opensbi::SBI_TRAP_REGS_mstatus * 8,
-            sbi_trap_regs_offset_mstatush = const opensbi::SBI_TRAP_REGS_mstatusH * 8,
-        )
-    }
-}
-
-#[no_mangle]
-#[inline(always)]
-extern "C" fn trap_save_general_regs_except_sp_t0() {
-    unsafe {
-        asm!(
-            "sd zero, {sbi_trap_regs_offset_zero}(sp)",
-            "sd ra, {sbi_trap_regs_offset_ra}(sp)",
-            "sd gp, {sbi_trap_regs_offset_gp}(sp)",
-            "sd tp, {sbi_trap_regs_offset_tp}(sp)",
-            "sd t1, {sbi_trap_regs_offset_t1}(sp)",
-            "sd t2, {sbi_trap_regs_offset_t2}(sp)",
-            "sd s0, {sbi_trap_regs_offset_s0}(sp)",
-            "sd s1, {sbi_trap_regs_offset_s1}(sp)",
-            "sd a0, {sbi_trap_regs_offset_a0}(sp)",
-            "sd a1, {sbi_trap_regs_offset_a1}(sp)",
-            "sd a2, {sbi_trap_regs_offset_a2}(sp)",
-            "sd a3, {sbi_trap_regs_offset_a3}(sp)",
-            "sd a4, {sbi_trap_regs_offset_a4}(sp)",
-            "sd a5, {sbi_trap_regs_offset_a5}(sp)",
-            "sd a6, {sbi_trap_regs_offset_a6}(sp)",
-            "sd a7, {sbi_trap_regs_offset_a7}(sp)",
-            "sd s2, {sbi_trap_regs_offset_s2}(sp)",
-            "sd s3, {sbi_trap_regs_offset_s3}(sp)",
-            "sd s4, {sbi_trap_regs_offset_s4}(sp)",
-            "sd s5, {sbi_trap_regs_offset_s5}(sp)",
-            "sd s6, {sbi_trap_regs_offset_s6}(sp)",
-            "sd s7, {sbi_trap_regs_offset_s7}(sp)",
-            "sd s8, {sbi_trap_regs_offset_s8}(sp)",
-            "sd s9, {sbi_trap_regs_offset_s9}(sp)",
-            "sd s10, {sbi_trap_regs_offset_s10}(sp)",
-            "sd s11, {sbi_trap_regs_offset_s11}(sp)",
-            "sd t3, {sbi_trap_regs_offset_t3}(sp)",
-            "sd t4, {sbi_trap_regs_offset_t4}(sp)",
-            "sd t5, {sbi_trap_regs_offset_t5}(sp)",
-            "sd t6, {sbi_trap_regs_offset_t6}(sp)",
-            sbi_trap_regs_offset_zero = const opensbi::SBI_TRAP_REGS_zero * 8,
-            sbi_trap_regs_offset_ra = const opensbi::SBI_TRAP_REGS_ra * 8,
-            sbi_trap_regs_offset_gp = const opensbi::SBI_TRAP_REGS_gp * 8,
-            sbi_trap_regs_offset_tp = const opensbi::SBI_TRAP_REGS_tp * 8,
-            sbi_trap_regs_offset_t1 = const opensbi::SBI_TRAP_REGS_t1 * 8,
-            sbi_trap_regs_offset_t2 = const opensbi::SBI_TRAP_REGS_t2 * 8,
-            sbi_trap_regs_offset_s0 = const opensbi::SBI_TRAP_REGS_s0 * 8,
-            sbi_trap_regs_offset_s1 = const opensbi::SBI_TRAP_REGS_s1 * 8,
-            sbi_trap_regs_offset_a0 = const opensbi::SBI_TRAP_REGS_a0 * 8,
-            sbi_trap_regs_offset_a1 = const opensbi::SBI_TRAP_REGS_a1 * 8,
-            sbi_trap_regs_offset_a2 = const opensbi::SBI_TRAP_REGS_a2 * 8,
-            sbi_trap_regs_offset_a3 = const opensbi::SBI_TRAP_REGS_a3 * 8,
-            sbi_trap_regs_offset_a4 = const opensbi::SBI_TRAP_REGS_a4 * 8,
-            sbi_trap_regs_offset_a5 = const opensbi::SBI_TRAP_REGS_a5 * 8,
-            sbi_trap_regs_offset_a6 = const opensbi::SBI_TRAP_REGS_a6 * 8,
-            sbi_trap_regs_offset_a7 = const opensbi::SBI_TRAP_REGS_a7 * 8,
-            sbi_trap_regs_offset_s2 = const opensbi::SBI_TRAP_REGS_s2 * 8,
-            sbi_trap_regs_offset_s3 = const opensbi::SBI_TRAP_REGS_s3 * 8,
-            sbi_trap_regs_offset_s4 = const opensbi::SBI_TRAP_REGS_s4 * 8,
-            sbi_trap_regs_offset_s5 = const opensbi::SBI_TRAP_REGS_s5 * 8,
-            sbi_trap_regs_offset_s6 = const opensbi::SBI_TRAP_REGS_s6 * 8,
-            sbi_trap_regs_offset_s7 = const opensbi::SBI_TRAP_REGS_s7 * 8,
-            sbi_trap_regs_offset_s8 = const opensbi::SBI_TRAP_REGS_s8 * 8,
-            sbi_trap_regs_offset_s9 = const opensbi::SBI_TRAP_REGS_s9 * 8,
-            sbi_trap_regs_offset_s10 = const opensbi::SBI_TRAP_REGS_s10 * 8,
-            sbi_trap_regs_offset_s11 = const opensbi::SBI_TRAP_REGS_s11 * 8,
-            sbi_trap_regs_offset_t3 = const opensbi::SBI_TRAP_REGS_t3 * 8,
-            sbi_trap_regs_offset_t4 = const opensbi::SBI_TRAP_REGS_t4 * 8,
-            sbi_trap_regs_offset_t5 = const opensbi::SBI_TRAP_REGS_t5 * 8,
-            sbi_trap_regs_offset_t6 = const opensbi::SBI_TRAP_REGS_t6 * 8,
-        )
-    }
-}
-#[no_mangle]
-#[inline(always)]
-extern "C" fn trap_save_info() {
-    unsafe {
-        asm!(
-            "csrr t0, {csr_mcause}",
-            "sd t0, ({sbi_trap_regs_size} + {sbi_trap_info_offset_cause})(sp)",
-            "csrr t0, {csr_mtval}",
-            "sd t0, ({sbi_trap_regs_size} + {sbi_trap_info_offset_tval})(sp)",
-            "sd zero, ({sbi_trap_regs_size} + {sbi_trap_info_offset_tval2})(sp)",
-            "sd zero, ({sbi_trap_regs_size} + {sbi_trap_info_offset_tinst})(sp)",
-            "li t0, 0",
-            "sd t0, ({sbi_trap_regs_size} + {sbi_trap_info_offset_gva})(sp)",
-            csr_mcause = const opensbi::CSR_MCAUSE,
-            csr_mtval = const opensbi::CSR_MTVAL,
-            sbi_trap_regs_size = const 8 * opensbi::SBI_TRAP_REGS_last,
-            sbi_trap_info_offset_cause = const 8 * opensbi::SBI_TRAP_INFO_cause,
-            sbi_trap_info_offset_tval = const 8 * opensbi::SBI_TRAP_INFO_tval,
-            sbi_trap_info_offset_tval2 = const 8 * opensbi::SBI_TRAP_INFO_tval2,
-            sbi_trap_info_offset_tinst = const 8 * opensbi::SBI_TRAP_INFO_tinst,
-            sbi_trap_info_offset_gva = const 8 * opensbi::SBI_TRAP_INFO_gva,
-        )
-    };
-    clear_mdt_t0();
-}
-#[no_mangle]
-#[inline(always)]
-extern "C" fn trap_call_c_routine() {
-    unsafe {
-        asm!("add a0, sp, zero", "call {sbi_trap_handler}", sbi_trap_handler = sym opensbi::sbi_trap_handler)
-    }
-}
-#[no_mangle]
-#[inline(always)]
-extern "C" fn trap_restore_general_regs_except_a0_t0() {
-    unsafe {
-        asm!(
-            "ld ra, {sbi_trap_regs_offset_ra}(a0)",
-            "ld sp, {sbi_trap_regs_offset_sp}(a0)",
-            "ld gp, {sbi_trap_regs_offset_gp}(a0)",
-            "ld tp, {sbi_trap_regs_offset_tp}(a0)",
-            "ld t1, {sbi_trap_regs_offset_t1}(a0)",
-            "ld t2, {sbi_trap_regs_offset_t2}(a0)",
-            "ld s0, {sbi_trap_regs_offset_s0}(a0)",
-            "ld s1, {sbi_trap_regs_offset_s1}(a0)",
-            "ld a1, {sbi_trap_regs_offset_a1}(a0)",
-            "ld a2, {sbi_trap_regs_offset_a2}(a0)",
-            "ld a3, {sbi_trap_regs_offset_a3}(a0)",
-            "ld a4, {sbi_trap_regs_offset_a4}(a0)",
-            "ld a5, {sbi_trap_regs_offset_a5}(a0)",
-            "ld a6, {sbi_trap_regs_offset_a6}(a0)",
-            "ld a7, {sbi_trap_regs_offset_a7}(a0)",
-            "ld s2, {sbi_trap_regs_offset_s2}(a0)",
-            "ld s3, {sbi_trap_regs_offset_s3}(a0)",
-            "ld s4, {sbi_trap_regs_offset_s4}(a0)",
-            "ld s5, {sbi_trap_regs_offset_s5}(a0)",
-            "ld s6, {sbi_trap_regs_offset_s6}(a0)",
-            "ld s7, {sbi_trap_regs_offset_s7}(a0)",
-            "ld s8, {sbi_trap_regs_offset_s8}(a0)",
-            "ld s9, {sbi_trap_regs_offset_s9}(a0)",
-            "ld s10, {sbi_trap_regs_offset_s10}(a0)",
-            "ld s11, {sbi_trap_regs_offset_s11}(a0)",
-            "ld t3, {sbi_trap_regs_offset_t3}(a0)",
-            "ld t4, {sbi_trap_regs_offset_t4}(a0)",
-            "ld t5, {sbi_trap_regs_offset_t5}(a0)",
-            "ld t6, {sbi_trap_regs_offset_t6}(a0)",
-            sbi_trap_regs_offset_sp = const opensbi::SBI_TRAP_REGS_sp * 8,
-            sbi_trap_regs_offset_ra = const opensbi::SBI_TRAP_REGS_ra * 8,
-            sbi_trap_regs_offset_gp = const opensbi::SBI_TRAP_REGS_gp * 8,
-            sbi_trap_regs_offset_tp = const opensbi::SBI_TRAP_REGS_tp * 8,
-            sbi_trap_regs_offset_t1 = const opensbi::SBI_TRAP_REGS_t1 * 8,
-            sbi_trap_regs_offset_t2 = const opensbi::SBI_TRAP_REGS_t2 * 8,
-            sbi_trap_regs_offset_s0 = const opensbi::SBI_TRAP_REGS_s0 * 8,
-            sbi_trap_regs_offset_s1 = const opensbi::SBI_TRAP_REGS_s1 * 8,
-            sbi_trap_regs_offset_a1 = const opensbi::SBI_TRAP_REGS_a1 * 8,
-            sbi_trap_regs_offset_a2 = const opensbi::SBI_TRAP_REGS_a2 * 8,
-            sbi_trap_regs_offset_a3 = const opensbi::SBI_TRAP_REGS_a3 * 8,
-            sbi_trap_regs_offset_a4 = const opensbi::SBI_TRAP_REGS_a4 * 8,
-            sbi_trap_regs_offset_a5 = const opensbi::SBI_TRAP_REGS_a5 * 8,
-            sbi_trap_regs_offset_a6 = const opensbi::SBI_TRAP_REGS_a6 * 8,
-            sbi_trap_regs_offset_a7 = const opensbi::SBI_TRAP_REGS_a7 * 8,
-            sbi_trap_regs_offset_s2 = const opensbi::SBI_TRAP_REGS_s2 * 8,
-            sbi_trap_regs_offset_s3 = const opensbi::SBI_TRAP_REGS_s3 * 8,
-            sbi_trap_regs_offset_s4 = const opensbi::SBI_TRAP_REGS_s4 * 8,
-            sbi_trap_regs_offset_s5 = const opensbi::SBI_TRAP_REGS_s5 * 8,
-            sbi_trap_regs_offset_s6 = const opensbi::SBI_TRAP_REGS_s6 * 8,
-            sbi_trap_regs_offset_s7 = const opensbi::SBI_TRAP_REGS_s7 * 8,
-            sbi_trap_regs_offset_s8 = const opensbi::SBI_TRAP_REGS_s8 * 8,
-            sbi_trap_regs_offset_s9 = const opensbi::SBI_TRAP_REGS_s9 * 8,
-            sbi_trap_regs_offset_s10 = const opensbi::SBI_TRAP_REGS_s10 * 8,
-            sbi_trap_regs_offset_s11 = const opensbi::SBI_TRAP_REGS_s11 * 8,
-            sbi_trap_regs_offset_t3 = const opensbi::SBI_TRAP_REGS_t3 * 8,
-            sbi_trap_regs_offset_t4 = const opensbi::SBI_TRAP_REGS_t4 * 8,
-            sbi_trap_regs_offset_t5 = const opensbi::SBI_TRAP_REGS_t5 * 8,
-            sbi_trap_regs_offset_t6 = const opensbi::SBI_TRAP_REGS_t6 * 8,
-        )
-    }
-}
-
-#[no_mangle]
-#[inline(always)]
-extern "C" fn trap_restore_mepc_status() {
-    unsafe {
-        asm!(
-            "ld t0, {sbi_trap_regs_offset_mstatus}(a0)",
-            "csrw {csr_mstatus}, t0",
-            "ld t0, {sbi_trap_regs_offset_mepc}(a0)",
-            "csrw {csr_mepc}, t0",
-            csr_mstatus = const opensbi::CSR_MSTATUS,
-            csr_mepc= const opensbi::CSR_MEPC,
-            sbi_trap_regs_offset_mepc = const opensbi::SBI_TRAP_REGS_mepc * 8,
-            sbi_trap_regs_offset_mstatus= const opensbi::SBI_TRAP_REGS_mstatus * 8,
-        )
-    }
-}
-#[no_mangle]
-#[inline(always)]
-extern "C" fn trap_restore_a0_t0() {
-    unsafe {
-        asm!(
-            "ld t0, {sbi_trap_regs_offset_t0}(a0)",
-            "ld a0, {sbi_trap_regs_offset_a0}(a0)",
-            sbi_trap_regs_offset_t0 = const opensbi::SBI_TRAP_REGS_t0 * 8,
-            sbi_trap_regs_offset_a0 = const opensbi::SBI_TRAP_REGS_a0 * 8,
-        )
-    }
-}
-#[no_mangle]
-#[inline(always)]
-extern "C" fn clear_mdt_t0() {
-    unsafe {
-        asm!(
-            "li t0, 0x40000000000",
-            "csrc {csr_mstatus}, t0",
-            csr_mstatus = const opensbi::CSR_MSTATUS,
-        )
-    }
 }
