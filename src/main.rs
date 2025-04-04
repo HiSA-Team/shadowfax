@@ -39,7 +39,6 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[no_mangle]
-#[inline(always)]
 #[link_section = ".text._start"]
 fn _start() -> ! {
     unsafe {
@@ -66,7 +65,7 @@ fn main() -> ! {
     zero_bss();
 
     // fw_platform_init correctly configures the "platform" struct
-    unsafe { asm!("call fw_platform_init") }
+    unsafe { asm!("call {fw_platform_init}", fw_platform_init = sym opensbi::fw_platform_init ) }
 
     init_scratch_space();
 
@@ -94,7 +93,6 @@ fn zero_bss() {
     }
 }
 
-#[no_mangle]
 fn reset_regs() {
     unsafe {
         asm!(
@@ -277,13 +275,6 @@ fn init_scratch_space() {
 }
 
 #[no_mangle]
-fn start_hang() {
-    loop {
-        unsafe { asm!("wfi") }
-    }
-}
-
-#[no_mangle]
 #[link_section = ".text._hartid_to_scratch"]
 fn hartid_to_scratch() {
     /*
@@ -368,7 +359,6 @@ fn _start_warm() {
 const COVEH_EXT_NAME: [u8; 8] = *b"coveh  ,";
 const COVEH_EXT_ID: u64 = 0x434F5648;
 
-#[no_mangle]
 #[link_section = ".text"]
 unsafe extern "C" fn sbi_coveh_handler(
     _: u64,
@@ -386,7 +376,6 @@ unsafe extern "C" fn sbi_coveh_handler(
     0
 }
 
-#[no_mangle]
 #[link_section = ".text"]
 fn register_extension() {
     let mut extension = opensbi::sbi_ecall_extension {
@@ -439,7 +428,6 @@ fn kernel() {
 }
 
 #[inline(always)]
-#[no_mangle]
 fn disable_interrupts() {
     unsafe { asm!("csrw {csr_mie}, zero", csr_mie = const opensbi::CSR_MIE ) }
 }

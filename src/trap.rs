@@ -16,7 +16,6 @@ pub fn _trap_handler() {
     unsafe { asm!("mret") }
 }
 
-#[no_mangle]
 #[inline(always)]
 fn trap_save_and_setup_sp_t0() {
     unsafe {
@@ -85,7 +84,6 @@ fn trap_save_mepc_status() {
     }
 }
 
-#[no_mangle]
 #[inline(always)]
 fn trap_save_general_regs_except_sp_t0() {
     unsafe {
@@ -153,7 +151,7 @@ fn trap_save_general_regs_except_sp_t0() {
         )
     }
 }
-#[no_mangle]
+
 #[inline(always)]
 fn trap_save_info() {
     unsafe {
@@ -178,14 +176,14 @@ fn trap_save_info() {
     };
     clear_mdt_t0();
 }
-#[no_mangle]
+
 #[inline(always)]
 fn trap_call_c_routine() {
     unsafe {
         asm!("add a0, sp, zero", "call {sbi_trap_handler}", sbi_trap_handler = sym opensbi::sbi_trap_handler)
     }
 }
-#[no_mangle]
+
 #[inline(always)]
 fn trap_restore_general_regs_except_a0_t0() {
     unsafe {
@@ -252,7 +250,6 @@ fn trap_restore_general_regs_except_a0_t0() {
     }
 }
 
-#[no_mangle]
 #[inline(always)]
 fn trap_restore_mepc_status() {
     unsafe {
@@ -268,7 +265,6 @@ fn trap_restore_mepc_status() {
         )
     }
 }
-#[no_mangle]
 #[inline(always)]
 fn trap_restore_a0_t0() {
     unsafe {
@@ -281,7 +277,6 @@ fn trap_restore_a0_t0() {
     }
 }
 
-#[no_mangle]
 #[inline(always)]
 pub fn clear_mdt_t0() {
     unsafe {
