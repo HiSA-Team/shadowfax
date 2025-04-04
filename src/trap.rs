@@ -11,7 +11,9 @@ pub fn _trap_handler() {
     trap_call_c_routine();
     trap_restore_general_regs_except_a0_t0();
     trap_restore_mepc_status();
-    trap_restore_a0_t0()
+    trap_restore_a0_t0();
+
+    unsafe { asm!("mret") }
 }
 
 #[no_mangle]
@@ -41,7 +43,7 @@ fn trap_save_and_setup_sp_t0() {
             "xor sp, sp, tp",
             "xor t0, tp, t0",
             // Save original SP on exception st
-            "sd sp,  ({sbi_trap_regs_offset_tp}-{sbi_trap_context_size})(t0)",
+            "sd sp,  ({sbi_trap_regs_offset_sp}-{sbi_trap_context_size})(t0)",
             // Set SP to exception stack and make room for trap context
             "add sp, t0, -{sbi_trap_context_size}",
             // Restore T0 from scratch space
@@ -54,8 +56,8 @@ fn trap_save_and_setup_sp_t0() {
             csr_mscratch = const opensbi::CSR_MSCRATCH,
             csr_mstatus = const opensbi::CSR_MSTATUS,
             mstatus_mpp_shift = const opensbi::MSTATUS_MPP_SHIFT,
-            sbi_trap_context_size = const (size_of::<opensbi::sbi_trap_regs>() + size_of::<opensbi::sbi_trap_info>() + 8),
-            sbi_trap_regs_offset_tp = const opensbi::SBI_TRAP_REGS_tp * 8,
+            sbi_trap_context_size = const 8 * ( opensbi::SBI_TRAP_REGS_last + opensbi::SBI_TRAP_INFO_last +1 ) ,
+            sbi_trap_regs_offset_sp = const opensbi::SBI_TRAP_REGS_sp * 8,
             sbi_trap_regs_offset_t0 = const opensbi::SBI_TRAP_REGS_t0 * 8,
             sbi_scratch_tmp0_offset = const mem::offset_of!(opensbi::sbi_scratch, tmp0),
             priv_m = const 3,
@@ -63,6 +65,7 @@ fn trap_save_and_setup_sp_t0() {
         )
     }
 }
+
 #[no_mangle]
 #[inline(always)]
 fn trap_save_mepc_status() {
@@ -258,10 +261,10 @@ fn trap_restore_mepc_status() {
             "csrw {csr_mstatus}, t0",
             "ld t0, {sbi_trap_regs_offset_mepc}(a0)",
             "csrw {csr_mepc}, t0",
-            csr_mstatus = const opensbi::CSR_MSTATUS,
-            csr_mepc= const opensbi::CSR_MEPC,
-            sbi_trap_regs_offset_mepc = const opensbi::SBI_TRAP_REGS_mepc * 8,
             sbi_trap_regs_offset_mstatus= const opensbi::SBI_TRAP_REGS_mstatus * 8,
+            csr_mstatus = const opensbi::CSR_MSTATUS,
+            sbi_trap_regs_offset_mepc = const opensbi::SBI_TRAP_REGS_mepc * 8,
+            csr_mepc= const opensbi::CSR_MEPC,
         )
     }
 }
@@ -283,7 +286,7 @@ fn trap_restore_a0_t0() {
 pub fn clear_mdt_t0() {
     unsafe {
         asm!(
-            "li t0, 0x40000000000",
+            "li t0, 0x0000040000000000",
             "csrc {csr_mstatus}, t0",
             csr_mstatus = const opensbi::CSR_MSTATUS,
         )

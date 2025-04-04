@@ -343,6 +343,10 @@ fn _start_warm() {
             "lla a4, {trap_handler}",
             "csrw {csr_mtvec}, a4",
 
+            // clear mdt
+            "li t0, 0x0000040000000000",
+            "csrc {csr_mstatus}, t0",
+
             // init sbi for scratch
             "csrr a0, {csr_mscratch}",
             "call {sbi_init}",
@@ -356,24 +360,25 @@ fn _start_warm() {
             csr_mscratch = const opensbi::CSR_MSCRATCH,
             trap_handler = sym trap::_trap_handler,
             csr_mtvec = const opensbi::CSR_MTVEC,
+            csr_mstatus = const opensbi::CSR_MSTATUS,
             sbi_init = sym opensbi::sbi_init,
         )
     }
 }
-const COVEH_EXT_NAME: [u8; 8] = *b"COVEH   ";
+const COVEH_EXT_NAME: [u8; 8] = *b"coveh  ,";
 const COVEH_EXT_ID: u64 = 0x434F5648;
 
 #[no_mangle]
 #[link_section = ".text"]
 unsafe extern "C" fn sbi_coveh_handler(
-    extid: u64,
-    fid: u64,
+    _: u64,
+    _: u64,
     _: *mut opensbi::sbi_trap_regs,
     _: *mut opensbi::sbi_ecall_return,
 ) -> i32 {
     const UART: *mut u8 = 0x10000000 as *mut u8;
 
-    for c in "hello from coveh".chars() {
+    for c in "hello from coveh\n".chars() {
         unsafe {
             core::ptr::write_volatile(UART, c as u8);
         }
@@ -401,35 +406,34 @@ fn register_extension() {
     unsafe { opensbi::sbi_ecall_register_extension(&mut extension) };
 }
 
-static MSG: [u8; 22] = *b"Hello world shadowfax\n";
-
 #[no_mangle]
 #[link_section = ".payload.kernel"]
 fn kernel() {
-    // unsafe {
-    //     asm!(
-    //         "li a7, {extid}",
-    //         "li a6, {fid}",
-    //         "li a0, {len}",
-    //         "lla a1, {msg}",
-    //         "li a2, 0",
-    //         "ecall",
-    //         extid = const 0x4442434E,
-    //         fid = const 0x00,
-    //         len = const 22,
-    //         msg = sym MSG,
-    //     )
-    // }
+    static MSG: [u8; 22] = *b"Hello world shadowfax\n";
     unsafe {
         asm!(
-            "li a7, {extid}",
-            "li a6, {fid}",
+            // First ecall
+            "li a7, {extid1}",
+            "li a6, {fid1}",
+            "li a0, {len}",
+            "lla a1, {msg}",
             "li a2, 0",
-            "li a0, 0",
             "ecall",
-            extid = const COVEH_EXT_ID,
-            fid = const 0x00,
-        )
+
+            // second ecall
+            "li a7, {extid2}",
+            "li a2, 0",
+            "ecall",
+
+            // params
+            extid1 = const 0x4442434E,
+            fid1 = const 0x00,
+            len = const 22,
+            msg = sym MSG,
+
+            extid2 = const COVEH_EXT_ID
+
+        );
     }
     loop {}
 }
