@@ -1,4 +1,4 @@
-include ../../config.mk
+include ../common/config.mk
 
 main: baremetal.ld main.o init.o
 	$(LD) $(LDFLAGS) -static -o $@ -T $^
