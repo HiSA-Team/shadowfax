@@ -69,7 +69,7 @@ fn main() -> ! {
 
     init_scratch_space();
 
-    disable_interrupts();
+    cove::init();
 
     _start_warm();
     loop {}
@@ -93,11 +93,11 @@ fn zero_bss() {
     }
 }
 
-fn reset_regs() {
+#[inline(always)]
+fn reset_registers() {
     unsafe {
         asm!(
             "fence.i",
-            "li sp, 0",
             "li gp, 0",
             "li tp, 0",
             "li t0, 0",
@@ -308,8 +308,10 @@ fn hartid_to_scratch() {
 #[link_section = ".text_start_warm"]
 fn _start_warm() {
     unsafe { asm!("li ra, 0") }
+    reset_registers();
 
-    register_extension();
+    disable_interrupts();
+
     unsafe {
         asm!(
             // Load platform details: stack offset and hart_index2id
@@ -353,46 +355,9 @@ fn _start_warm() {
             csr_mtvec = const opensbi::CSR_MTVEC,
             csr_mstatus = const opensbi::CSR_MSTATUS,
             sbi_init = sym opensbi::sbi_init,
+            options(noreturn)
         )
     }
-}
-const COVEH_EXT_NAME: [u8; 8] = *b"coveh  ,";
-const COVEH_EXT_ID: u64 = 0x434F5648;
-
-#[link_section = ".text"]
-unsafe extern "C" fn sbi_coveh_handler(
-    _: u64,
-    _: u64,
-    _: *mut opensbi::sbi_trap_regs,
-    _: *mut opensbi::sbi_ecall_return,
-) -> i32 {
-    const UART: *mut u8 = 0x10000000 as *mut u8;
-
-    for c in "hello from coveh\n".chars() {
-        unsafe {
-            core::ptr::write_volatile(UART, c as u8);
-        }
-    }
-    0
-}
-
-#[link_section = ".text"]
-fn register_extension() {
-    let mut extension = opensbi::sbi_ecall_extension {
-        experimental: true,
-        probe: None,
-        name: COVEH_EXT_NAME,
-        extid_start: COVEH_EXT_ID,
-        extid_end: COVEH_EXT_ID,
-        handle: Some(sbi_coveh_handler),
-        register_extensions: None,
-        head: opensbi::sbi_dlist {
-            next: core::ptr::null_mut(),
-            prev: core::ptr::null_mut(),
-        },
-    };
-
-    unsafe { opensbi::sbi_ecall_register_extension(&mut extension) };
 }
 
 #[no_mangle]
@@ -420,7 +385,7 @@ fn kernel() {
             len = const 22,
             msg = sym MSG,
 
-            extid2 = const COVEH_EXT_ID
+            extid2 = const cove::COVH_EXT_ID
 
         );
     }
@@ -430,4 +395,52 @@ fn kernel() {
 #[inline(always)]
 fn disable_interrupts() {
     unsafe { asm!("csrw {csr_mie}, zero", csr_mie = const opensbi::CSR_MIE ) }
+}
+
+mod cove {
+    use crate::opensbi;
+
+    const COVH_EXT_NAME: [u8; 8] = *b"covh   ,";
+    pub const COVH_EXT_ID: u64 = 0x434F5648;
+
+    #[link_section = ".text"]
+    unsafe extern "C" fn sbi_covh_handler(
+        _extid: u64,
+        _fid: u64,
+        _regs: *mut opensbi::sbi_trap_regs,
+        _ret: *mut opensbi::sbi_ecall_return,
+    ) -> i32 {
+        const UART: *mut u8 = 0x10000000 as *mut u8;
+
+        for c in "hello from coveh\n".chars() {
+            unsafe {
+                core::ptr::write_volatile(UART, c as u8);
+            }
+        }
+        0
+    }
+
+    pub fn init() {
+        register_extensions();
+    }
+
+    fn register_extensions() {
+        let mut extensions: [opensbi::sbi_ecall_extension; 1] = [opensbi::sbi_ecall_extension {
+            experimental: true,
+            probe: None,
+            name: COVH_EXT_NAME,
+            extid_start: COVH_EXT_ID,
+            extid_end: COVH_EXT_ID,
+            handle: Some(sbi_covh_handler),
+            register_extensions: None,
+            head: opensbi::sbi_dlist {
+                next: core::ptr::null_mut(),
+                prev: core::ptr::null_mut(),
+            },
+        }];
+
+        for extension in &mut extensions {
+            unsafe { opensbi::sbi_ecall_register_extension(extension) };
+        }
+    }
 }
