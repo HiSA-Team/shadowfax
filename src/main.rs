@@ -150,6 +150,41 @@ fn reset_registers() {
  *   unsigned long options;
  *   unsigned long hartindex;
  * };
+ *
+ * This structure describes the memory layout of the firmware:
+ *                 Memory Layout
+                -------------
++---------------------------------------------------------+
+| Firmware Region                                         |
+|                                                         |
+|  _fw_start                                              |
+|    +-----------------------------------------------+    |
+|    |   Firmware Code & Data                        |    |
+|    |                                               |    |
+|    |   (Includes the read/write (R/W) section,     |    |
+|    |    beginning at _fw_rw_start)                   |    |
+|    +-----------------------------------------------+    |
+|  _fw_end                                                |
++---------------------------------------------------------+
+| HART Stacks (for all HARTs, total size = s7 * s8)        |
+|                                                         |
+|  Hart 0 Stack:                                          |
+|    +---------------------------+                        |
+|    |  (Stack space)            |                        |
+|    |                           |                        |
+|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE    |
+|    |    (holds various fields: |    (e.g., fw_start,     |
+|    |     fw_start, fw_size,     |     fw_size, RW offset,  |
+|    |     fw_rw_offset,         |     heap offset/size,    |
+|    |     heap offset/size,     |     boot parameters,     |
+|    |     boot addresses, etc.) |     etc.)                |
+|    +---------------------------+                        |
++---------------------------------------------------------+
+| Heap Region                                             |
+|  (Contiguous block of size s9)                          |
+|                                                         |
++---------------------------------------------------------+
+
  */
 #[no_mangle]
 fn init_scratch_space() {
