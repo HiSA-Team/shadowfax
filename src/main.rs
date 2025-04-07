@@ -59,13 +59,41 @@ fn _start() -> ! {
         )
     }
 }
-#[no_mangle]
+
 fn main() -> ! {
     // zero out bss
     zero_bss();
 
     // fw_platform_init correctly configures the "platform" struct
-    unsafe { asm!("call {fw_platform_init}", fw_platform_init = sym opensbi::fw_platform_init ) }
+    unsafe {
+        asm!(
+            // Save registers a0-a4 to s0-s4
+            "add s0, a0, zero",
+            "add s1, a1, zero",
+            "add s2, a2, zero",
+            "add s3, a3, zero",
+            "add s4, a4, zero",
+
+            // fw_platform_init returns the new device tree in a0
+            // let's put it in a1
+            "call {fw_platform_init}",
+
+            // save a0 to t0 temporary
+            "add t0, a0, zero",
+
+            // Restore registers a0-a4 from s0-s4
+            "add s0, a0, zero",
+            "add s1, a1, zero",
+            "add s2, a2, zero",
+            "add s3, a3, zero",
+            "add s4, a4, zero",
+
+            // save the new device tree in a1
+            "add a1, t0, zero",
+
+            fw_platform_init = sym opensbi::fw_platform_init
+        )
+    }
 
     init_scratch_space();
 
