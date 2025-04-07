@@ -1,7 +1,7 @@
 # The goal of this Dockerfile is to create a consistent build environment.
 # The base image is debian:12.
 # Project dependencies are:
-# - rust toolchain (with riscv64gc target)
+# - rust toolchain (with riscv64gc and riscv64imac target)
 # - gcc riscv toolchain
 # - shell utils to build Linux kernel
 # - qemu
@@ -33,7 +33,7 @@ ARG OPENSBI_VERSION=1.6
 # Install dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system \
       gcc-riscv64-linux-gnu build-essential libncurses-dev bison flex libssl-dev \
-      libelf-dev dwarves curl git file cpio sudo bc clang
+      libelf-dev dwarves curl git file cpio sudo bc clang clang-dev
 
 # Create a user with the specified or default UID and add him to the sudo group
 # and allow for passwordless sudo
@@ -55,6 +55,7 @@ RUN echo 'source $HOME/.cargo/env' >> /home/user/.bashrc
 ENV PATH="/home/user/.cargo/bin:${PATH}"
 
 RUN rustup target add riscv64gc-unknown-none-elf
+RUN rustup target add riscv64imac-unknown-none-elf
 RUN rustup component add rust-analyzer
 
 # Install opensbi

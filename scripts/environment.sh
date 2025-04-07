@@ -10,6 +10,7 @@ LLVM_VERSION="${LLVM_VERSION:-17.0.6}"
 OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
 PLATFORM="${PLATFORM:-generic}"
 
+
 get_libc() {
   if ldd --version 2>&1 | grep -q musl; then
     echo "musl"
