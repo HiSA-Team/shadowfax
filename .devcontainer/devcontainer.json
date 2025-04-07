@@ -1,0 +1,8 @@
+{
+  "name": "shadowfax-build",
+  "build": {
+     "dockerfile": "../scripts/Dockerfile.setup",
+     "context": "../",
+  },
+  "mounts": ["source=${localWorkspaceFolder},target=/shadowfax,type=bind"]
+}

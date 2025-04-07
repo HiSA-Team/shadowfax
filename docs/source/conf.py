@@ -7,15 +7,15 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'shadowfax'
-copyright = "2025, Giuseppe Capasso" 
+copyright = "2025, Giuseppe Capasso"
 author = "Giuseppe Capasso"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    "sphinx_copybutton", 
-    "sphinx_rtd_dark_mode", 
+    "sphinx_copybutton",
+    "sphinx_rtd_dark_mode",
     "sphinx_toolbox.collapse"
 ]
 
