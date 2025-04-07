@@ -137,4 +137,3 @@ if [ "$LIBC_PREFIX" = "musl" ]; then
   echo "Building Clang from source for musl-based system..."
   build_clang_from_source
 fi
-
