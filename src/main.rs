@@ -119,8 +119,7 @@ fn main() -> ! {
     loop {}
 }
 
-#[no_mangle]
-#[inline]
+#[inline(always)]
 fn zero_bss() {
     unsafe {
         asm!(
