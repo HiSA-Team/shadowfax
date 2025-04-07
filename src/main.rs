@@ -64,6 +64,22 @@ fn main() -> ! {
     // zero out bss
     zero_bss();
 
+    // setup a temporary trap handler
+    // so we can debug if there are errors
+    unsafe {
+        asm!(
+            "lla s4, {start_hang}",
+            "csrw {csr_mtvec}, s4",
+
+            // clear mdt
+            "li t0, 0x0000040000000000",
+            "csrc {csr_mstatus}, t0",
+            start_hang = sym start_hang,
+            csr_mtvec = const opensbi::CSR_MTVEC,
+            csr_mstatus = const opensbi::CSR_MSTATUS,
+        )
+    }
+
     // fw_platform_init correctly configures the "platform" struct
     unsafe {
         asm!(
@@ -452,6 +468,11 @@ fn kernel() {
 
         );
     }
+    loop {}
+}
+
+#[inline(always)]
+fn start_hang() {
     loop {}
 }
 
