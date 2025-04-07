@@ -15,10 +15,11 @@ SECTIONS {
   . = ALIGN (0x1000);
   .text : {
     KEEP(*(.text._start));                  /* Ensure _start is placed first */
-    *(.entry*);
+    KEEP(*(.text._trap_handler));
     *(.text*);                              /* Program code here */
   }
 
+  /* PMP mandates R/W sections aligned in power of 2 */
   . = ALIGN(1 << LOG2CEIL(SIZEOF(.text)));
 
   PROVIDE(_fw_rw_start = .);

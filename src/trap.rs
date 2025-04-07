@@ -2,7 +2,7 @@ use crate::opensbi;
 use core::{arch::asm, mem};
 
 #[no_mangle]
-#[link_section = ".entry"]
+#[link_section = ".text._trap_handler"]
 pub fn _trap_handler() {
     trap_save_and_setup_sp_t0();
     trap_save_mepc_status();
