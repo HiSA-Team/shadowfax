@@ -1,10 +1,11 @@
 /* Linkerscript used by shadowfax. It defines 3 main sections:
  *  - text: where firmware code is stored;
  *  - data: where r/w and bss is placed;
- *  - payload: a section where the payload leaves
+ *  - payload: a section where the payload lives
  *
  * Each section defines symbols to be used in the firmware to calculate offsets.
  * Currently the linkerscript works only on QEMU.
+ *
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
