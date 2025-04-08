@@ -580,7 +580,7 @@ fn disable_interrupts() {
 mod cove {
     use crate::opensbi;
 
-    const COVH_EXT_NAME: [u8; 8] = *b"covh   ,";
+    const COVH_EXT_NAME: [u8; 8] = *b"covh\0\0\0\0";
     pub const COVH_EXT_ID: u64 = 0x434F5648;
 
     #[link_section = ".text"]
