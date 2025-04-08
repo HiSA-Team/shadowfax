@@ -32,8 +32,8 @@ ARG OPENSBI_VERSION=1.6
 
 # Install dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system \
-      gcc-riscv64-linux-gnu build-essential libncurses-dev bison flex libssl-dev \
-      libelf-dev dwarves curl git file cpio sudo bc clang clang-dev
+  gcc-riscv64-linux-gnu build-essential libncurses-dev bison flex libssl-dev \
+  libelf-dev dwarves curl git file cpio sudo bc clang libclang-dev
 
 # Create a user with the specified or default UID and add him to the sudo group
 # and allow for passwordless sudo
