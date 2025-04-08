@@ -1,6 +1,17 @@
+/* This file contains functions used to handle the trap. Basically, this is a 1:1 port from
+ * https://github.com/riscv-software-src/opensbi/blob/master/firmware/fw_base.S
+ *
+ * We need to expose the _trap_handler function which is executed when a trap occurs.
+ * We are forwarding everythin to `sbi_trap_handler`.
+ *
+ * Author: Giuseppe Capasso <capassog97@gmail.com>
+ */
+
 use crate::opensbi;
 use core::{arch::asm, mem};
 
+/// The main trap handler function that orchestrates the saving and restoring of registers
+/// and calls the C routine to handle the trap.
 #[no_mangle]
 #[link_section = ".text._trap_handler"]
 pub fn _trap_handler() {
@@ -16,6 +27,8 @@ pub fn _trap_handler() {
     unsafe { asm!("mret") }
 }
 
+/// Saves the current stack pointer and sets up the stack pointer for the trap context.
+/// It also swaps the TP and MSCRATCH registers.
 #[inline(always)]
 fn trap_save_and_setup_sp_t0() {
     unsafe {
@@ -65,6 +78,8 @@ fn trap_save_and_setup_sp_t0() {
     }
 }
 
+/// Saves the machine exception program counter (MEPC) and machine status (MSTATUS) registers
+/// to the trap context stack.
 #[no_mangle]
 #[inline(always)]
 fn trap_save_mepc_status() {
@@ -84,6 +99,7 @@ fn trap_save_mepc_status() {
     }
 }
 
+/// Saves all general-purpose registers except SP and T0 to the trap context stack.
 #[inline(always)]
 fn trap_save_general_regs_except_sp_t0() {
     unsafe {
@@ -152,6 +168,8 @@ fn trap_save_general_regs_except_sp_t0() {
     }
 }
 
+/// Saves additional trap information such as cause and trap value to the trap context stack.
+/// Clears the machine-dependent trap (MDT) register.
 #[inline(always)]
 fn trap_save_info() {
     unsafe {
@@ -177,6 +195,7 @@ fn trap_save_info() {
     clear_mdt_t0();
 }
 
+/// Calls the C routine to handle the trap, passing the stack pointer as an argument.
 #[inline(always)]
 fn trap_call_c_routine() {
     unsafe {
@@ -184,6 +203,7 @@ fn trap_call_c_routine() {
     }
 }
 
+/// Restores all general-purpose registers except A0 and T0 from the trap context stack.
 #[inline(always)]
 fn trap_restore_general_regs_except_a0_t0() {
     unsafe {
@@ -250,6 +270,8 @@ fn trap_restore_general_regs_except_a0_t0() {
     }
 }
 
+/// Restores the machine status (MSTATUS) and machine exception program counter (MEPC)
+/// registers from the trap context stack.
 #[inline(always)]
 fn trap_restore_mepc_status() {
     unsafe {
@@ -265,6 +287,7 @@ fn trap_restore_mepc_status() {
         )
     }
 }
+/// Restores the A0 and T0 registers from the trap context stack.
 #[inline(always)]
 fn trap_restore_a0_t0() {
     unsafe {
@@ -277,6 +300,7 @@ fn trap_restore_a0_t0() {
     }
 }
 
+/// Clears the machine-dependent trap (MDT) register using the T0 register.
 #[inline(always)]
 pub fn clear_mdt_t0() {
     unsafe {

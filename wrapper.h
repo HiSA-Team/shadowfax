@@ -1,3 +1,12 @@
+/* This file is an entrypoint to rust-bindgen. According to their documentation
+ * (https://rust-lang.github.io/rust-bindgen/library-usage.html), we need this
+ * `wrapper.h` that will be used to generate rust types from opensbi include
+ * files. This is done in `build.rs` and is somehow similar to pass compile a
+ * C/C++ project using an -Iinclude/ flag. The output of rust bindgen is a
+ * `bindings.rs` file in project output directory.
+ *
+ * Author: Giuseppe Capasso <capassog97@gmail.com>
+ */
 #include <sbi/sbi_const.h>
 #include <sbi/sbi_types.h>
 
