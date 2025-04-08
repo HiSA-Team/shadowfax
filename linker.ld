@@ -10,7 +10,7 @@
  */
 
 SECTIONS {
-  . = 0x80000000;                           /* QEMU default load address to run bios */
+  . = FW_TEXT_START;                           /* QEMU default load address to run bios */
   PROVIDE(_fw_start = .);
 
   . = ALIGN (0x1000);
@@ -45,7 +45,7 @@ SECTIONS {
   PROVIDE(_fw_end = .);
 
   /* Payload */
-  . = 0x80060000;
+  . = FW_PAYLOAD_START;
   . = ALIGN(0x1000);
   .payload : {
     PROVIDE(_payload_start = .);
