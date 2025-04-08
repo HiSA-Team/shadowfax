@@ -3,7 +3,12 @@
 > [!WARNING]
 > `shadowfax` is an early development project.
 
-Further details can be found in the documentation.
+The codename `shadowfax project` aims to establish the foundation for an open-source software ecosystem for
+confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC-V standard for confidential
+computing is defined in the RISC-V AP-TEE specification, also known as CoVE
+(**Co**nfidential **V**irtualization **E**xtension).
+
+Further details can be found in the [documentation](https://granp4sso.github.io/shadowfax/).
 
 ### Goals
 The codename `shadowfax project` has the following goals:
@@ -14,25 +19,16 @@ The codename `shadowfax project` has the following goals:
 
 ### OpenSBI integration
 Shadowfax is an *M-mode* firmware which uses [**opensbi**](https://github.com/riscv-software-src/opensbi) as
-<<<<<<< HEAD
 static library. Shadowfax registers 3 SBI extensions described in the [CoVE specification](https://github.com/riscv-non-isa/riscv-ap-tee)
-=======
-static library. Shadowfax registers 4 SBI extensions described in the [CoVE specification](https://github.com/riscv-non-isa/riscv-ap-tee)
->>>>>>> f4b2fc9 (Added Opensbi reference in README.md)
 which are:
 
 - SUPD: supervisor doamin extension to enumerate active supervisor domain and get capabilities information on them;
 - CoVE-H: cove host extension. It allows for **TVM** management for hosts;
 - CoVE-G: cove guest extension. It allows guest to use firmware services like remote attestation primitives;
-<<<<<<< HEAD
 
 The CoVE specification also introduces the **CoVE-I** SBI extension. It allows to supplements CoVE-H with hardware-assisted
 interrupt virtualization using RISC-V **Advanced Interrupt Architecture**(*AIA*), if the platform supports it.
 For now, shadowfax **does not** implement this part of the specification.
-=======
-- CoVE-I: cove interrupt extension. It allows to supplements CoVE-H with hardware-assisted interrupt virtualization
-    using RISC-V Advanced Interrupt Architecture (AIA), if the platform supports it;
->>>>>>> f4b2fc9 (Added Opensbi reference in README.md)
 
 ## Environment setup
 

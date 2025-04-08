@@ -1,5 +1,8 @@
 /**/build
 /**/.venv
+*.elf
+*.bin
+*.o
 
 
 # Added by cargo
