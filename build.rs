@@ -13,12 +13,14 @@
 use std::env;
 use std::path::PathBuf;
 
+// Platform holds platform specific data needed at build time.
 struct Platform<'a> {
     name: &'a str,
     fw_text_start_address: u32,
     fw_payload_start_address: u32,
 }
 
+// PLATFORMS describe all supported platform by shadowafax
 const PLATFORMS: &[Platform] = &[Platform {
     name: "generic",
     fw_text_start_address: 0x80000000u32,
