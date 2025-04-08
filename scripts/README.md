@@ -6,13 +6,17 @@ This folder contains utilities which are used to setup and automate some process
 
 - **environment.sh**: a script which detects and configures the current host. For example, the host architecture, the libc implementation and sets variables according this parameters to build shadowafax binary. This script is meant to be **sourced** and **not executed**. For example, `source scripts/environment.sh`;
 
-- **setup.sh**: this scripts must be run as superuser and it install correct dependencies to build and run shadowafax. This script detects the current distributions and install dependencies accordingly. Major `debian-based` distribution are supported (managed with *apt*). Next, it installs rust toolchain if not present. Finally, it builds and installs **opensbi**. The output of opensbi installation is:
+- **setup.sh**: this script must be run as superuser and it install correct dependencies to build and run shadowafax. This script detects the current distributions and install dependencies accordingly. Major `debian-based` distributions are supported (managed with *apt*). Next, it installs rust toolchain if not present. Finally, it builds and installs **opensbi**. The output of opensbi installation is:
     * **include/**: an include directory for all type definitions. This folder is targeted by `build.rs` which used *bindgen* to generate rust types;
     * **lib64/**: this directory contains the static library which will be linked against shadowfax binary;
-In case of *musl* systems, the `setup.sh` attempts to build *clang* from scratch because *musl* does not support dynamic linking. This is due to the fact that *bindgen* requires libclang and most Linux distribution do not package `libclang.a`.
+In case of *musl* systems, the `setup.sh` attempts to build *clang* from scratch because *musl* does not support dynamic linking. This is due to the fact that *bindgen* requires libclang and most Linux distributions do not package `libclang.a`.
 
 - **Dockerfile.setup**: a Dockerfile which creates a reproducibile build environment based on *debian-12* similarly to what it is done in `setup.sh`;
-
+- **setup_linux.sh**: this script downloads and build a Linux kernel and create initramfs using [busybox](https://www.busybox.net/). The output is placed in `linux-<version>/` directory. The script can be executed specifying the kernel version and (optionally busybox version):
+```sh
+./scripts/setup_linux.sh --kernel-version 6.13.2 --busybox-version 1.36.1
+```
+The busybox build needs files which are stored in `scripts/initramfs` directory.
 
 ## Quick start
 The typical development workflow is:
