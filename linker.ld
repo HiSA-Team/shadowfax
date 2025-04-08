@@ -4,13 +4,16 @@
  *  - payload: a section where the payload lives
  *
  * Each section defines symbols to be used in the firmware to calculate offsets.
- * Currently the linkerscript works only on QEMU.
+ * This linkerscript is parametric and it expects the linker to define required symbols
+ * to work. Currently it expects:
+ *  - FW_TEXT_START: the firware starting address;
+ *  - FW_PAYLOAD_START: payload starting address;
  *
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
 SECTIONS {
-  . = FW_TEXT_START;                           /* QEMU default load address to run bios */
+  . = FW_TEXT_START;
   PROVIDE(_fw_start = .);
 
   . = ALIGN (0x1000);
