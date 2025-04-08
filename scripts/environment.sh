@@ -1,7 +1,7 @@
 #!/bin/sh
 # This script is meant to be sourced by the user to ensure correct settings are applied to
 # the current shell. Based on platform (architecture and libc), it sets up the CROSS_COMPILE
-# variable.
+# variable and LIBCLANG info.
 #
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 
