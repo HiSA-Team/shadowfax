@@ -1,11 +1,14 @@
 # shadowfax
 
+> [!WARNING]
+> `shadowfax` is an early development project.
+
 The codename `shadowfax project` aims to establish the foundation for an open-source software ecosystem for
 confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC-V standard for confidential
 computing is defined in the RISC-V AP-TEE specification, also known as CoVE
 (**Co**nfidential **V**irtualization **E**xtension).
 
-Further details can be found in the [documentation] (https://granp4sso.github.io/shadowfax/).
+Further details can be found in the [documentation](https://granp4sso.github.io/shadowfax/).
 
 ### Goals
 The codename `shadowfax project` has the following goals:
