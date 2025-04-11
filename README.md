@@ -31,7 +31,8 @@ Shadowfax generates automatically bindings using `bindgen` API in `build.rs`.
 
 ## Environment setup
 
-**_NOTE:_**: if you are building on a **musl** system make sure to check out the [building on musl systems](#building-on-musl-systems).
+> [!NOTE]
+> if you are building on a **musl** system make sure to check out the [building on musl systems](#building-on-musl-systems).
 
 The `scripts` directory contains utilities to help setup the shadowafax build environment. It also contains scripts
 that help building and running examples (ie. bare metal *S-mode* kernel or to launch Linux). More information [here](/scripts/README.md).
