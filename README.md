@@ -87,7 +87,7 @@ export LIBCLANG_STATIC_PATH=$(pwd)/llvm-project-${LLVM_VERSION}.src/build/lib
 export LLVM_CONFIG_PATH=$(pwd)/scripts/llvm-config.sh
 ```
 
-Due to some in [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#environment-variables), the `scripts/llvm-config.sh` is needed as a workaround as described [here](https://github.com/rust-lang/rust-bindgen/issues/2360).
+Due to some bugs in [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#environment-variables), the `scripts/llvm-config.sh` is needed as a workaround as described [here](https://github.com/rust-lang/rust-bindgen/issues/2360).
 
 Also, users will need to change the linker in `.cargo/config.toml` from `riscv64-linux-gnu-ld` to `riscv64-linux-musl-ld`.
 
