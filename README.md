@@ -77,7 +77,7 @@ features = ["static"]
 ```
 
 > [!TIP]
-> everything related to `build-dependencies` and `build.rs` affect the host building systema and not the `ŧarget` itself.
+> everything related to `build-dependencies` and `build.rs` affect the host building system and not the `ŧarget` itself.
 
 The `scripts/environment.sh` will setup extra clang variables to point to the new built `libclang`:
 ```sh
