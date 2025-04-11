@@ -50,13 +50,7 @@ the current shell variables like **CROSS_COMPILE**) and run the helloworld to ch
 working:
 
 ```sh
-make -C examples/helloword run
-```
-On success, you should see the following output:
-```
-Press (ctrl + a) and then x to quit
-qemu-system-riscv64 -nographic -machine virt -bios main
-shadowfax says: 5 + 4 = 9
+cargo run
 ```
 
 ### Builing on musl systems
