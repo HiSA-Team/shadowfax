@@ -44,13 +44,24 @@ SECTIONS {
   . = ALIGN(0x1000); /* Need this to create proper sections */
   PROVIDE(_fw_end = .);
 
-  /* Payload */
+  /* Payload Domain 0*/
   . = 0x80060000;
   . = ALIGN(0x1000);
-  .payload : {
-    PROVIDE(_payload_start = .);
-    *(.payload.kernel)
+  .payload_dom0 : {
+    PROVIDE(_payload_dom0_start = .);
+    *(.payload_dom0)
     . = ALIGN(8);
-    PROVIDE(_payload_end = .);
+    PROVIDE(_payload_dom0_end = .);
+  }
+  . = ALIGN(0x1000);
+
+  /* Payload Domain 1*/
+  . = 0x80100000;
+  . = ALIGN(0x1000);
+  .payload_dom1 : {
+    PROVIDE(_payload_dom1_start = .);
+    KEEP(*(.payload_dom1))
+    . = ALIGN(8);
+    PROVIDE(_payload_dom1_end = .);
   }
 }

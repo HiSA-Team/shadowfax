@@ -66,6 +66,10 @@ fn panic(_info: &PanicInfo) -> ! {
 fn _start() -> ! {
     unsafe {
         asm!(
+            // If there are multiple hart, init only hartid 0
+            "csrr s6, {csr_mhartid}",
+            // If not zero, go to wait loop
+            "bnez s6, {wait_for_boot_hart}",
             // Load the address of the stack variable into t0.
             "la   t0, {stack}",
             // Jump to the main function// Load the stack size (8K) into t1.
@@ -74,6 +78,8 @@ fn _start() -> ! {
             "add  sp, t0, t1",
             // Jump to main
             "j    {main}",
+            csr_mhartid = const opensbi::CSR_MHARTID,
+            wait_for_boot_hart = sym wait_for_boot_hart,
             stack = sym _fw_end,
             // Use the same size as the allocation (8KB)
             stack_size = const opensbi::SBI_SCRATCH_SIZE * 2,
@@ -82,6 +88,11 @@ fn _start() -> ! {
         )
     }
 }
+
+/// This variable holds the boot_status. The boot hart (our case always hartid 0)
+/// The boot hart sets this variable to 1 awakening other harts to call start_warm
+#[link_section = ".data"]
+static mut BOOT_STATUS: u64 = 0;
 
 /// The main function serves as the entry point for the firmware execution. It performs
 /// several critical initialization tasks to prepare the system for operation. These tasks
@@ -97,7 +108,7 @@ fn main() -> ! {
     // zero out bss
     zero_bss();
 
-    // setup a temporary trap handler
+    // setup a temporary trap handler (just a busy loop)
     // so we can debug if there are errors
     unsafe {
         asm!(
@@ -149,6 +160,10 @@ fn main() -> ! {
 
     // initialize cove extension
     cove::init();
+
+    unsafe {
+        BOOT_STATUS = 1;
+    }
 
     // call sbi_init for the current hart
     _start_warm()
@@ -283,7 +298,7 @@ fn reset_registers() {
 // -|                                                         |
 // -+---------------------------------------------------------+
 // -
-#[no_mangle]
+
 fn init_scratch_space() {
     trap::clear_mdt_t0();
     unsafe {
@@ -519,7 +534,7 @@ fn _start_warm() -> ! {
 }
 
 #[no_mangle]
-#[link_section = ".payload.kernel"]
+#[link_section = ".payload_dom0"]
 /// The `kernel` function is the entry point for the kernel payload. It performs
 /// two system calls (ecalls) to demonstrate interaction with the system's
 /// supervisor binary interface (SBI). The function sends a message to the console
@@ -531,7 +546,50 @@ fn _start_warm() -> ! {
 /// machine-level registers and relies on specific memory layout assumptions. It
 /// should only be called in a controlled environment where these assumptions hold true.
 fn kernel() {
-    static MSG: [u8; 22] = *b"Hello world shadowfax\n";
+    static FIRST: [u8; 32] = *b"Hello world shadowfax from dom0\n";
+    static SECOND: [u8; 53] = *b"Hello world shadowfax from dom0 after context switch\n";
+    unsafe {
+        asm!(
+            // First ecall: Send a message to the console
+            "li a7, {extid1}",
+            "li a6, {fid1}",
+            "li a0, {len}",
+            "lla a1, {msg}",
+            "li a2, 0",
+            "ecall",
+
+            // Second ecall: Perform a custom operation defined by the COVH extension
+            // A context switch happens here
+            "li a7, {extid2}",
+            "li a2, 0",
+            "ecall",
+
+            // Third ecall: after context switch the program resumes from here
+            "li a7, {extid1}",
+            "li a6, {fid1}",
+            "li a0, {len2}",
+            "lla a1, {msg2}",
+            "li a2, 0",
+            "ecall",
+
+            // Parameters for the ecalls
+            extid1 = const 0x4442434E,
+            fid1 = const 0x00,
+            len = const FIRST.len(),
+            msg = sym FIRST,
+            msg2 = sym SECOND,
+            len2 = const SECOND.len(),
+
+            extid2 = const cove::COVH_EXT_ID
+        );
+    }
+    loop {}
+}
+
+#[no_mangle]
+#[link_section = ".payload_dom1"]
+fn kernel_dom1() {
+    static MSG: [u8; 32] = *b"Hello world shadowfax from dom1\n";
     unsafe {
         asm!(
             // First ecall: Send a message to the console
@@ -547,10 +605,11 @@ fn kernel() {
             "li a2, 0",
             "ecall",
 
+
             // Parameters for the ecalls
             extid1 = const 0x4442434E,
             fid1 = const 0x00,
-            len = const 22,
+            len = const 32,
             msg = sym MSG,
 
             extid2 = const cove::COVH_EXT_ID
@@ -597,7 +656,8 @@ mod cove {
                 core::ptr::write_volatile(UART, c as u8);
             }
         }
-        0
+
+        opensbi::sbi_domain_context_exit()
     }
 
     pub fn init() {
@@ -621,6 +681,19 @@ mod cove {
 
         for extension in &mut extensions {
             unsafe { opensbi::sbi_ecall_register_extension(extension) };
+        }
+    }
+}
+
+#[link_section = ".text"]
+fn wait_for_boot_hart() {
+    loop {
+        // unsafe { asm!("div t2, t2, zero", "div t2, t2, zero", "div t2, t2, zero",) }
+
+        unsafe {
+            if BOOT_STATUS == 1 {
+                _start_warm()
+            }
         }
     }
 }
