@@ -609,7 +609,7 @@ fn kernel_dom1() {
             // Parameters for the ecalls
             extid1 = const 0x4442434E,
             fid1 = const 0x00,
-            len = const 32,
+            len = const MSG.len(),
             msg = sym MSG,
 
             extid2 = const cove::COVH_EXT_ID
