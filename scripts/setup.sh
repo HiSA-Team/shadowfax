@@ -3,17 +3,14 @@
 # - installs build dependencies for common distributions;
 # - installs rust toolchain with riscv target;
 # - builds and install opensbi libraries and header files;
+# - builds a custom clang with static linking from llvm (only for musl systems)
 #
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
-# Ensure this script is run with root privileges
 if [ "$(id -u)" -ne 0 ]; then
   echo "This script requires root privileges"
   exit 1
 fi
-
-# Running directly from root (without sudo) is discoureged, but we only print a warning message
-# because an expert user could test this script in a container.
 if [ ! $SUDO_USER ]; then
   echo "\033[33mWARNING\033[0m: running this script directly as root may not be what you want. Unless you know what you are doing, use sudo." >&2
 fi
@@ -22,8 +19,7 @@ fi
 BASEDIR=$(dirname $(realpath $0))
 . ${BASEDIR}/environment.sh
 
-# Retrieves distro code name from /etc/os-release file. First,
-# it tries to get it from VERSION_CODENAME field, then from ID.
+# Function to determine the distribution codename from /etc/os-release
 get_distro_codename() {
   local codename
   codename=$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release)
@@ -33,30 +29,20 @@ get_distro_codename() {
   echo "$codename" | xargs
 }
 
-# Installs required dependencies on supported distributions. It also installs
-# cross-compilation if we are not on RISCV machine. We are installing:ù
-# - basic build packages (gcc, make) to build shadowfax and the linux kernel
-# - qemu
-#
-# Supported distributions are:
-# - Ubuntu 24.04
-# - Ubuntu 22.04
-# - Debian 12
-# - Debian 11
-# - Void Linux
+# Function to install necessary build dependencies based on the distribution codename
 install_dependencies() {
   case "$DISTRO_CODENAME" in
     # Ubuntu 24.04, Ubuntu 22.04, Debian 12, Debian 11
     noble | jammy | bookworm | bullseye)
       apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system build-essential \
-        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc cpio
+        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc cpio clang cmake ninja-build
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-$LIBC_PREFIX
       fi
       ;;
     void)
       xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf elfutils-devel libdwarf-devel \
-        curl git file cpio git
+        curl git file cpio git clang cmake ninja
       if [ "$ARCHITECTURE" != "riscv64" ]; then
         xbps-install -Sy cross-riscv64-linux-$LIBC_PREFIX
       fi
@@ -69,25 +55,26 @@ install_dependencies() {
   esac
 }
 
-# Installs rust and updates the .bashrc profile with the toolchain path.
-# It also installs riscv64 toolchain in case we are cross compiling.
+# Function to install the Rust toolchain and add the RISC-V target if not on RISC-V architecture
 install_rust() {
   su $USER_NAME -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
   su $USER_NAME -c "echo PATH=~/.cargo/bin:${PATH} >> ~/.bashrc"
   if [ "$ARCHITECTURE" != "riscv64" ]; then
     su $USER_NAME -c "~/.cargo/bin/rustup target add riscv64gc-unknown-none-elf"
-    su $USER_NAME -c "~/.cargo/bin/rustup target add riscv64imac-unknown-none-elf"
   else
     echo "Running on RISC-V architecture, skipping Rust RISC-V target setup."
   fi
 }
 
+# Function to download, build, and install OpenSBI
 install_opensbi() {
   printf "Downloading opensbi source..."
   su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz"
   printf " done\n"
 
-  su $USER_NAME -c "tar xvf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
+  printf "Extracting opensbi source..."
+  su $USER_NAME -c "tar xf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
+  printf " done\n"
 
   # build opensbi
   su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} PLATFORM=${PLATFORM}"
@@ -96,10 +83,40 @@ install_opensbi() {
   su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. PLATFORM=${PLATFORM} install"
 }
 
+# Function to download, build, and install Clang from source for musl-based systems
+build_clang_from_source() {
+  printf "Downloading LLVM source..."
+  su $USER_NAME -c "curl -fsSL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz \
+    -o ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
+  printf " done\n"
+
+  printf "Extracting LLVM source..."
+  su $USER_NAME -c "tar -xf ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
+  printf " done\n"
+
+  printf "Creating build directory..."
+  su $USER_NAME -c "mkdir llvm-project-${LLVM_VERSION}.src/build"
+  printf " done\n"
+
+  printf "Configuring LLVM build with CMake..."
+  su $USER_NAME -c "cmake -G 'Ninja' \
+    -S llvm-project-${LLVM_VERSION}.src/llvm/ \
+    -B llvm-project-${LLVM_VERSION}.src/build \
+    -DLLVM_ENABLE_PROJECTS='clang' \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLIBCLANG_BUILD_STATIC=ON \
+    -DLLVM_ENABLE_ZSTD=OFF \
+    -DLLVM_TARGETS_TO_BUILD='X86;RISCV' \
+    -DLLVM_HOST_TRIPLE=${ARCHITECTURE}-unknown-linux-${LIBC_PREFIX}"
+  printf " done\n"
+
+  printf "Building LLVM with Ninja...\n"
+  su $USER_NAME -c "ninja -C llvm-project-${LLVM_VERSION}.src/build"
+  printf " done\n"
+}
+
 # Global variables
 DISTRO_CODENAME=$(get_distro_codename)
-OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
-PLATFORM="${PLATFORM:-generic}"
 TEMP_DIR=$(mktemp -d)
 USER_NAME="${SUDO_USER:-root}"
 
@@ -115,3 +132,8 @@ echo "Detected Distribution Codename: ${DISTRO_CODENAME}"
 install_dependencies
 install_rust
 install_opensbi
+
+if [ "$LIBC_PREFIX" = "musl" ]; then
+  echo "Building Clang from source for musl-based system..."
+  build_clang_from_source
+fi

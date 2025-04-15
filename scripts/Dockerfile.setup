@@ -21,7 +21,6 @@
 #
 # Execute an example with:
 #   docker run --rm -v $(pwd):/shadowfax -it shadowfax-build make -C examples/helloworld-c run
-#
 # Author: Giuseppe Capsso <capassog97@gmail.com>
 
 FROM debian:12
@@ -34,7 +33,7 @@ ARG OPENSBI_VERSION=1.6
 # Install dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system \
   gcc-riscv64-linux-gnu build-essential libncurses-dev bison flex libssl-dev \
-  libelf-dev dwarves curl git file cpio sudo bc
+  libelf-dev dwarves curl git file cpio sudo bc clang libclang-dev
 
 # Create a user with the specified or default UID and add him to the sudo group
 # and allow for passwordless sudo
@@ -60,6 +59,7 @@ RUN rustup target add riscv64imac-unknown-none-elf
 RUN rustup component add rust-analyzer
 
 # Install opensbi
+
 RUN curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v$OPENSBI_VERSION.tar.gz -o /tmp/opensbi-$OPENSBI_VERSION.tar.gz
 
 RUN tar xvf /tmp/opensbi-$OPENSBI_VERSION.tar.gz -C /tmp

@@ -13,6 +13,7 @@
 #   -initrd linux-<kernel-version>/initramfs.cpio.gz \
 #   -nographic \
 #   -append "console=ttyS0 root=/dev/sda earlyprintk=serial net.ifnames=0 nokaslr"
+#
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
 set -e
@@ -52,6 +53,8 @@ mkdir -p $ODIR
 
 echo "Building kernel v${KERNEL_VERSION} with busybox v${BUSYBOX_VERSION}"
 
+# This function downloads and builds the linux kernel.
+# Output files are created in the current directory in linux-<version>/
 build_kernel() {
   MAJOR=$(echo ${KERNEL_VERSION} | awk -F . '{print $1}')
 
@@ -59,19 +62,29 @@ build_kernel() {
   printf "Downloading kernel source... "
   curl -fsSL https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KERNEL_VERSION}.tar.xz -o ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz
   printf "done\n"
-  tar -xvf ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz -C ${TEMP_DIR}
+
+  printf "Extracting kernel source... "
+  tar -xf ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz -C ${TEMP_DIR}
+  printf "done\n"
 
   # Build linux
   make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} O=${ODIR} defconfig
   make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} O=${ODIR} -j $(nproc) Image
 }
 
+# This function builds the initramfs which runs on top of the kernel providing a minimal shell environment.
+# This projects uses busybox which downloaded and built as a static binary
 build_initramfs() {
   # Build busybox
   printf "Downloading busybox source..."
   curl -fsSL https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2 -o ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2
   printf "done\n"
-  tar -xvf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
+
+  printf "Extracting busybox source..."
+  tar -xf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
+  printf "done\n"
+
+
   make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} ARCH=${ARCH} defconfig
 
   # Prepare initramfs
