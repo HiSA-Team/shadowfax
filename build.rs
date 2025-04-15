@@ -7,7 +7,7 @@
  *  The idea of a build script is well documented here
  *  "https://doc.rust-lang.org/cargo/reference/build-scripts.html".
  *
- * The `build.rs` is executed on the build host ant not on the target.
+ * The `build.rs` is executed on the build host and not on the target.
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 use std::env;
@@ -55,7 +55,6 @@ fn main() {
     println!("cargo:rustc-link-arg=-Tlinker.ld");
     println!("cargo:rustc-link-arg=-static");
     println!("cargo:rustc-link-arg=-nostdlib");
-
 
     // Link the openbsi platform library. We specify the opensbi installation path
     // (by default this is obtained from `make PLATFORM=generic install I=<path-to-shadowfax>`)
