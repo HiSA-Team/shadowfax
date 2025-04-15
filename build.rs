@@ -56,6 +56,7 @@ fn main() {
     println!("cargo:rustc-link-arg=-static");
     println!("cargo:rustc-link-arg=-nostdlib");
 
+
     // Link the openbsi platform library. We specify the opensbi installation path
     // (by default this is obtained from `make PLATFORM=generic install I=<path-to-shadowfax>`)
     let libdir_path = PathBuf::from("./lib64/lp64/opensbi/generic/lib/")

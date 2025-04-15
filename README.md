@@ -1,11 +1,14 @@
 # shadowfax
 
+> [!WARNING]
+> `shadowfax` is an early development project.
+
 The codename `shadowfax project` aims to establish the foundation for an open-source software ecosystem for
 confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC-V standard for confidential
 computing is defined in the RISC-V AP-TEE specification, also known as CoVE
 (**Co**nfidential **V**irtualization **E**xtension).
 
-Further details can be found in the [documentation] (https://granp4sso.github.io/shadowfax/).
+Further details can be found in the [documentation](https://granp4sso.github.io/shadowfax/).
 
 ### Goals
 The codename `shadowfax project` has the following goals:
@@ -29,6 +32,12 @@ For now, shadowfax **does not** implement this part of the specification.
 
 ## Environment setup
 
+Shadowfax generates automatically opensbi bindings using `bindgen` API in `build.rs`.
+
+
+> [!NOTE]
+> if you are building on a **musl** system make sure to check out the [building on musl systems](#building-on-musl-systems).
+
 The `scripts` directory contains utilities to help setup the shadowafax build environment. It also contains scripts
 that help building and running examples (ie. bare metal *S-mode* kernel or to launch Linux). More information [here](/scripts/README.md).
 
@@ -42,14 +51,45 @@ the current shell variables like **CROSS_COMPILE**) and run the helloworld to ch
 working:
 
 ```sh
-make -C examples/helloword run
+cargo run
 ```
-On success, you should see the following output:
+
+### Builing on musl systems
+Musl is a security and safety oriented libc implementation which requires static linking. Building on
+musl needs more setup because `bindgen` has a direct depenndency with `libclang` and most Linux distribution 
+do not ship `libclang.a`, so during the setup phase (this is handled by `scripts/setup.sh`), `shadowfax`
+will attempt to build `libclang.a` from source (requires some time). `Cargo.toml` will be modified removing 
+the following:
+
+```toml
+[build-dependencies]
+bindgen = "0.71.1"
 ```
-Press (ctrl + a) and then x to quit
-qemu-system-riscv64 -nographic -machine virt -bios main
-shadowfax says: 5 + 4 = 9
+And adding the `bindgen` and `clang` crate with the *static* feature enabled.
+
+```toml
+[build-dependencies]
+bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
+
+[build-dependencies.clang-sys]
+version = "1.8.1"
+features = ["static"]
 ```
+
+> [!TIP]
+> everything related to `build-dependencies` and `build.rs` affect the host building system and not the `ŧarget` itself.
+
+The `scripts/environment.sh` will setup extra clang variables to point to the new built `libclang`:
+```sh
+export LIBCLANG_STATIC=1
+export LIBCLANG_PATH=$(pwd)/llvm-project-${LLVM_VERSION}.src/build/lib
+export LIBCLANG_STATIC_PATH=$(pwd)/llvm-project-${LLVM_VERSION}.src/build/lib
+export LLVM_CONFIG_PATH=$(pwd)/scripts/llvm-config.sh
+```
+
+Due to some bugs in [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#environment-variables), the `scripts/llvm-config.sh` is needed as a workaround as described [here](https://github.com/rust-lang/rust-bindgen/issues/2360).
+
+Also, users will need to change the linker in `.cargo/config.toml` from `riscv64-linux-gnu-ld` to `riscv64-linux-musl-ld`.
 
 ### Unsupported distributions
 If your distribution is not supported by the script, you can install required dependencies by yourself or refer to the [Docker setup](#docker-setup). You need:

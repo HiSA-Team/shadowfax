@@ -4,7 +4,15 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Giuseppe Capasso"]
 
-# Uncomment this for musl systems
+
+# build-dependencies are related to the host building the application.
+# Since, this firmware aims to provide support minimal environments (ie. alpine linux),
+# it can also be built for musl libc. Also this could give an hand for eventual
+# certification/formal-verification process, since musl is much smaller than glibc
+# (gnu-libc). For now, there are no better ways of configuring the "host" build system.
+# So, users on standard systems should comment the following two dependencies and use
+# the standard bindgen version below.
+
 # [build-dependencies]
 # bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
 #
@@ -15,5 +23,8 @@ authors = ["Giuseppe Capasso"]
 [build-dependencies]
 bindgen = "0.71.1"
 
+# comment previous build-dependencies bindgen and clang and use the following for glibc systems.
+[build-dependencies]
+bindgen = "0.71.1"
 
 [dependencies]
