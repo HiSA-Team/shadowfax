@@ -23,8 +23,4 @@ authors = ["Giuseppe Capasso"]
 [build-dependencies]
 bindgen = "0.71.1"
 
-# comment previous build-dependencies bindgen and clang and use the following for glibc systems.
-[build-dependencies]
-bindgen = "0.71.1"
-
 [dependencies]
