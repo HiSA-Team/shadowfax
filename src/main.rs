@@ -539,17 +539,6 @@ fn _start_warm() -> ! {
 /// machine-level registers and relies on specific memory layout assumptions. It
 /// should only be called in a controlled environment where these assumptions hold true.
 fn kernel() {
-    // let tsm_info = cove::TsmInfo {
-    //     tsm_state: cove::TsmState::TsmNotLoaded,
-    //     tsm_impl_id: 0,
-    //     tvm_vcpu_state_pages: 0,
-    //     tvm_max_vcpus: 0,
-    //     tvm_state_pages: 0,
-    //     tsm_capabilities: 0,
-    //     tsm_version: 0,
-    // };
-    // let tsm_info_addr = &tsm_info as *const _ as u64;
-
     #[link_section = ".payload_dom0.tsm_info"]
     static TSM_INFO: cove::TsmInfo = cove::TsmInfo {
         tsm_state: cove::TsmState::TsmNotLoaded,
