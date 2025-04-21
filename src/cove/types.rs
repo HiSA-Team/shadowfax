@@ -43,6 +43,7 @@ pub struct TsmInfo {
     pub tvm_vcpu_state_pages: usize,
 }
 
+#[repr(C)]
 pub struct Sbiret {
     pub error: usize,
     pub value: usize,
