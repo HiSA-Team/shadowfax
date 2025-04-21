@@ -24,6 +24,8 @@
 #![no_main]
 use core::{arch::asm, mem, panic::PanicInfo};
 
+mod cove;
+
 /* This module includes the `bindings.rs` generated
  * using `build.rs` which translates opensbi C definitions
  * in Rust. This could be also be included without the module,
@@ -79,7 +81,7 @@ fn _start() -> ! {
             // Jump to main
             "j    {main}",
             csr_mhartid = const opensbi::CSR_MHARTID,
-            wait_for_boot_hart = sym wait_for_boot_hart,
+            wait_for_boot_hart = sym start_hang,
             stack = sym _fw_end,
             // Use the same size as the allocation (8KB)
             stack_size = const opensbi::SBI_SCRATCH_SIZE * 2,
@@ -88,11 +90,6 @@ fn _start() -> ! {
         )
     }
 }
-
-/// This variable holds the boot_status. The boot hart (our case always hartid 0)
-/// The boot hart sets this variable to 1 awakening other harts to call start_warm
-#[link_section = ".data"]
-static mut BOOT_STATUS: u64 = 0;
 
 /// The main function serves as the entry point for the firmware execution. It performs
 /// several critical initialization tasks to prepare the system for operation. These tasks
@@ -160,10 +157,6 @@ fn main() -> ! {
 
     // initialize cove extension
     cove::init();
-
-    unsafe {
-        BOOT_STATUS = 1;
-    }
 
     // call sbi_init for the current hart
     _start_warm()
@@ -546,41 +539,29 @@ fn _start_warm() -> ! {
 /// machine-level registers and relies on specific memory layout assumptions. It
 /// should only be called in a controlled environment where these assumptions hold true.
 fn kernel() {
-    static FIRST: [u8; 32] = *b"Hello world shadowfax from dom0\n";
-    static SECOND: [u8; 53] = *b"Hello world shadowfax from dom0 after context switch\n";
+    #[link_section = ".payload_dom0.tsm_info"]
+    static TSM_INFO: cove::TsmInfo = cove::TsmInfo {
+        tsm_state: cove::TsmState::TsmNotLoaded,
+        tsm_impl_id: 0,
+        tvm_vcpu_state_pages: 0,
+        tvm_max_vcpus: 0,
+        tvm_state_pages: 0,
+        tsm_capabilities: 0,
+        tsm_version: 0,
+    };
     unsafe {
         asm!(
-            // First ecall: Send a message to the console
-            "li a7, {extid1}",
-            "li a6, {fid1}",
-            "li a0, {len}",
-            "lla a1, {msg}",
-            "li a2, 0",
+
+            // struct sbiret sbi_covh_get_tsm_info(unsigned long tsm_info_address, unsigned long tsm_info_len)
+            "li a7, {coveh_ext_id}",
+            "li a6, 0",
+            "lla a0, {tsm_info_addr}",
+            "li a1, {tsm_info_size}",
             "ecall",
 
-            // Second ecall: Perform a custom operation defined by the COVH extension
-            // A context switch happens here
-            "li a7, {extid2}",
-            "li a2, 0",
-            "ecall",
-
-            // Third ecall: after context switch the program resumes from here
-            "li a7, {extid1}",
-            "li a6, {fid1}",
-            "li a0, {len2}",
-            "lla a1, {msg2}",
-            "li a2, 0",
-            "ecall",
-
-            // Parameters for the ecalls
-            extid1 = const 0x4442434E,
-            fid1 = const 0x00,
-            len = const FIRST.len(),
-            msg = sym FIRST,
-            msg2 = sym SECOND,
-            len2 = const SECOND.len(),
-
-            extid2 = const cove::COVH_EXT_ID
+            coveh_ext_id = const cove::COVEH_EXT_ID,
+            tsm_info_addr = sym TSM_INFO,
+            tsm_info_size = const core::mem::size_of::<cove::TsmInfo>(),
         );
     }
     loop {}
@@ -612,7 +593,7 @@ fn kernel_dom1() {
             len = const MSG.len(),
             msg = sym MSG,
 
-            extid2 = const cove::COVH_EXT_ID
+            extid2 = const cove::COVEH_EXT_ID,
         );
     }
     loop {}
@@ -634,66 +615,4 @@ fn start_hang() {
 /// It should be used with caution as it affects the global interrupt state.
 fn disable_interrupts() {
     unsafe { asm!("csrw {csr_mie}, zero", csr_mie = const opensbi::CSR_MIE ) }
-}
-
-mod cove {
-    use crate::opensbi;
-
-    const COVH_EXT_NAME: [u8; 8] = *b"covh\0\0\0\0";
-    pub const COVH_EXT_ID: u64 = 0x434F5648;
-
-    #[link_section = ".text"]
-    unsafe extern "C" fn sbi_covh_handler(
-        _extid: u64,
-        _fid: u64,
-        _regs: *mut opensbi::sbi_trap_regs,
-        _ret: *mut opensbi::sbi_ecall_return,
-    ) -> i32 {
-        const UART: *mut u8 = 0x10000000 as *mut u8;
-
-        for c in "Hello from coveh\n".chars() {
-            unsafe {
-                core::ptr::write_volatile(UART, c as u8);
-            }
-        }
-
-        opensbi::sbi_domain_context_exit()
-    }
-
-    pub fn init() {
-        register_extensions();
-    }
-
-    fn register_extensions() {
-        let mut extensions: [opensbi::sbi_ecall_extension; 1] = [opensbi::sbi_ecall_extension {
-            experimental: true,
-            probe: None,
-            name: COVH_EXT_NAME,
-            extid_start: COVH_EXT_ID,
-            extid_end: COVH_EXT_ID,
-            handle: Some(sbi_covh_handler),
-            register_extensions: None,
-            head: opensbi::sbi_dlist {
-                next: core::ptr::null_mut(),
-                prev: core::ptr::null_mut(),
-            },
-        }];
-
-        for extension in &mut extensions {
-            unsafe { opensbi::sbi_ecall_register_extension(extension) };
-        }
-    }
-}
-
-#[link_section = ".text"]
-fn wait_for_boot_hart() {
-    loop {
-        // unsafe { asm!("div t2, t2, zero", "div t2, t2, zero", "div t2, t2, zero",) }
-
-        unsafe {
-            if BOOT_STATUS == 1 {
-                _start_warm()
-            }
-        }
-    }
 }

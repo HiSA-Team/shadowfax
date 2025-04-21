@@ -24,3 +24,4 @@ authors = ["Giuseppe Capasso"]
 bindgen = "0.71.1"
 
 [dependencies]
+spin = { version = "0.10.0", features = ["spin_mutex"] }

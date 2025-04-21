@@ -2,23 +2,59 @@
  *  which are:
  *      - link opensbi static library;
  *      - generate rust bindings from opensbi include;
+ *      - specify correct linkerscript and define symbols depending on the platform
  *
  *  The idea of a build script is well documented here
  *  "https://doc.rust-lang.org/cargo/reference/build-scripts.html".
  *
- * The `build.rs` is executed on the build host ant not on the target.
+ * The `build.rs` is executed on the build host and not on the target.
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 use std::env;
 use std::path::PathBuf;
 
+// Platform holds platform specific data needed at build time.
+struct Platform<'a> {
+    name: &'a str,
+    fw_text_start_address: u32,
+    fw_payload_start_address: u32,
+}
+
+// PLATFORMS describe all supported platform by shadowafax
+const PLATFORMS: &[Platform] = &[Platform {
+    name: "generic",
+    fw_text_start_address: 0x80000000u32,
+    fw_payload_start_address: 0x80060000u32,
+}];
+
 fn main() {
+    // Sourcing `scripts/environment.sh` allow users to specify a PLATFORM (defaults to 'generic').
+    // Retrieve platform details if exists otherwise throw an error
+    let platform = env::var("PLATFORM").unwrap_or("generic".to_string());
+    let platform = PLATFORMS
+        .iter()
+        .find(|v| v.name == platform.as_str())
+        .unwrap_or_else(|| panic!("Unsupported platform: {}", platform));
+
     // Disable compiler optimization for now.
     println!("cargo:rustc=opt-level=0");
 
-    // Tell the linker to use our linkerscript "linker.ld" and pass `--static` flag
+    // Define variables for linkerscript to make it parametric. The next instructions
+    // populate the FW_TEXT_START and FW_PAYLOAD_START symbols in `linker.ld`
+    println!(
+        "cargo:rustc-link-arg=--defsym=FW_TEXT_START={}",
+        platform.fw_text_start_address,
+    );
+
+    println!(
+        "cargo:rustc-link-arg=--defsym=FW_PAYLOAD_START={}",
+        platform.fw_payload_start_address,
+    );
+
+    // Tell the linker to use our linkerscript "linker.ld" and pass `-static` and `-nostdlib` flags
     println!("cargo:rustc-link-arg=-Tlinker.ld");
     println!("cargo:rustc-link-arg=-static");
+    println!("cargo:rustc-link-arg=-nostdlib");
 
     // Link the openbsi platform library. We specify the opensbi installation path
     // (by default this is obtained from `make PLATFORM=generic install I=<path-to-shadowfax>`)
