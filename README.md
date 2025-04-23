@@ -30,9 +30,10 @@ The CoVE specification also introduces the **CoVE-I** SBI extension. It allows t
 interrupt virtualization using RISC-V **Advanced Interrupt Architecture**(*AIA*), if the platform supports it.
 For now, shadowfax **does not** implement this part of the specification.
 
-Shadowfax generates automatically bindings using `bindgen` API in `build.rs`.
-
 ## Environment setup
+
+Shadowfax generates automatically opensbi bindings using `bindgen` API in `build.rs`.
+
 
 > [!NOTE]
 > if you are building on a **musl** system make sure to check out the [building on musl systems](#building-on-musl-systems).
@@ -54,10 +55,12 @@ cargo run
 ```
 
 ### Builing on musl systems
-Musl is a security and safety oriented libc implementation which requires static linking. This requires more setup
-because `bindgen` requires `libclang` and most distribution do not ship `libclang.a`, so during the setup phase (this
-is handled by `scripts/setup.sh`), `shadowfax` will attempt to build `libclang.a` from source (requires some time).
-`Cargo.toml` will be modified removing the following:
+Musl is a security and safety oriented libc implementation which requires static linking. Building on
+musl needs more setup because `bindgen` has a direct depenndency with `libclang` and most Linux distribution
+do not ship `libclang.a`, so during the setup phase (this is handled by `scripts/setup.sh`), `shadowfax`
+will attempt to build `libclang.a` from source (requires some time). `Cargo.toml` will be modified removing
+the following:
+
 ```toml
 [build-dependencies]
 bindgen = "0.71.1"
