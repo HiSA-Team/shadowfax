@@ -30,9 +30,10 @@ The CoVE specification also introduces the **CoVE-I** SBI extension. It allows t
 interrupt virtualization using RISC-V **Advanced Interrupt Architecture**(*AIA*), if the platform supports it.
 For now, shadowfax **does not** implement this part of the specification.
 
-Shadowfax generates automatically bindings using `bindgen` API in `build.rs`.
-
 ## Environment setup
+
+Shadowfax generates automatically opensbi bindings using `bindgen` API in `build.rs`.
+
 
 > [!NOTE]
 > if you are building on a **musl** system make sure to check out the [building on musl systems](#building-on-musl-systems).
