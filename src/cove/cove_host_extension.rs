@@ -10,7 +10,10 @@ use spin::mutex::SpinMutex;
 
 use crate::opensbi;
 
-use super::{Sbiret, TsmInfo, TsmState, COVEH_EXT_ID, COVEH_EXT_NAME, SHADOWFAX_IMPL_ID};
+use super::{
+    Sbiret, TsmInfo, TsmState, COVEH_EXT_ID, COVEH_EXT_NAME, SBI_EXT_COVE_HOST_CONVERT_PAGES,
+    SBI_EXT_COVE_HOST_CREATE_TVM, SBI_EXT_COVE_HOST_GET_TSM_INFO, SHADOWFAX_IMPL_ID,
+};
 
 /*
  * This static variable represents the global state of the TSM (Trusted Software Module).
@@ -46,13 +49,17 @@ pub unsafe extern "C" fn sbi_coveh_handler(
     let regs = *regs;
     let mut ret = *ret;
     match fid {
-        0 => {
-            opensbi::sbi_printf("called sbi_covh_get_tsm_info\n\0".as_ptr());
+        SBI_EXT_COVE_HOST_GET_TSM_INFO => {
             let result = sbi_covh_get_tsm_info(regs.a0, regs.a1);
             ret.value = result.value as u64;
-            opensbi::sbi_printf("returned from sbi_covh_get_tsm_info\n\0".as_ptr());
 
             opensbi::SBI_SUCCESS as i32
+        }
+        SBI_EXT_COVE_HOST_CONVERT_PAGES => {
+            todo!()
+        }
+        SBI_EXT_COVE_HOST_CREATE_TVM => {
+            todo!()
         }
         _ => {
             opensbi::sbi_printf("unsupported fid\n\0".as_ptr());
@@ -121,4 +128,8 @@ fn sbi_covh_get_tsm_info(tsm_info_address: u64, tsm_info_len: u64) -> Sbiret {
         error: 0,
         value: needed as usize,
     }
+}
+
+fn sbi_covh_convert_pages(base_page_address: u64, num_pages: u64) -> Sbiret {
+    todo!()
 }

@@ -9,7 +9,7 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
-use super::{Sbiret, SUPD_EXT_ID, SUPD_EXT_NAME};
+use super::{Sbiret, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SUPD_EXT_ID, SUPD_EXT_NAME};
 use crate::opensbi;
 
 /*
@@ -40,7 +40,7 @@ pub unsafe extern "C" fn sbi_supd_handler(
     let mut ret = *ret;
 
     match fid {
-        0 => {
+        SBI_EXT_SUPD_GET_ACTIVE_DOMAINS => {
             // SUPD_FID_GET_ACTIVE_DOMAINS
             opensbi::sbi_printf("called sbi_supd_get_active_domains\n\0".as_ptr());
             let result = sbi_supd_get_active_domains(regs.a0);
