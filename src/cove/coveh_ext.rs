@@ -16,7 +16,7 @@ use super::{Sbiret, TsmInfo, TsmState, COVEH_EXT_ID, COVEH_EXT_NAME, SHADOWFAX_I
  * This static variable represents the global state of the TSM (Trusted Software Module).
  * It is protected by a SpinMutex to ensure safe concurrent access across different threads.
  * The TsmInfo struct holds various state information about the TSM, such as its current state,
- * implementation ID, version, capabilities, and other related metrics.
+ * implementation ID, version, capabilities, and other info.
  *
  */
 #[link_section = ".data"]
