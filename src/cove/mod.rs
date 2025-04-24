@@ -5,13 +5,13 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 mod constants;
-mod coveh_ext;
-mod supd_ext;
+mod cove_host_extension;
+mod supd_extension;
 mod types;
 
 pub use crate::cove::constants::*;
 pub use crate::cove::types::*;
 
 pub fn init() {
-    coveh_ext::init();
+    cove_host_extension::init();
 }
