@@ -47,24 +47,24 @@ SECTIONS {
   . = ALIGN(0x1000); /* Need this to create proper sections */
   PROVIDE(_fw_end = .);
 
-  /* Payload Domain 0*/
-  . = FW_PAYLOAD_START;
+  /* Payload Untrusted Domain*/
+  . = FW_UDOM_PAYLOAD_START;
   . = ALIGN(0x1000);
-  .payload_dom0 : {
-    PROVIDE(_payload_dom0_start = .);
-    *(.payload_dom0)
+  .payload_udom : {
+    PROVIDE(_payload_udom_start = .);
+    *(.payload_udom)
     . = ALIGN(8);
-    PROVIDE(_payload_dom0_end = .);
+    PROVIDE(_payload_udom_end = .);
   }
   . = ALIGN(0x1000);
 
-  /* Payload Domain 1*/
-  . = 0x80100000;
+  /* Payload Trusted Domain*/
+  . = FW_TDOM_PAYLOAD_START;
   . = ALIGN(0x1000);
-  .payload_dom1 : {
-    PROVIDE(_payload_dom1_start = .);
-    KEEP(*(.payload_dom1))
+  .payload_tdom : {
+    PROVIDE(_payload_tdom_start = .);
+    KEEP(*(.payload_tdom))
     . = ALIGN(8);
-    PROVIDE(_payload_dom1_end = .);
+    PROVIDE(_payload_tdom_end = .);
   }
 }

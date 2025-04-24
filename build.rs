@@ -17,14 +17,16 @@ use std::path::PathBuf;
 struct Platform<'a> {
     name: &'a str,
     fw_text_start_address: u32,
-    fw_payload_start_address: u32,
+    fw_udom_payload_start_address: u32,
+    fw_tdom_payload_start_address: u32,
 }
 
 // PLATFORMS describe all supported platform by shadowafax
 const PLATFORMS: &[Platform] = &[Platform {
     name: "generic",
     fw_text_start_address: 0x80000000u32,
-    fw_payload_start_address: 0x80060000u32,
+    fw_udom_payload_start_address: 0x80060000u32,
+    fw_tdom_payload_start_address: 0x80100000u32,
 }];
 
 fn main() {
@@ -47,8 +49,13 @@ fn main() {
     );
 
     println!(
-        "cargo:rustc-link-arg=--defsym=FW_PAYLOAD_START={}",
-        platform.fw_payload_start_address,
+        "cargo:rustc-link-arg=--defsym=FW_UDOM_PAYLOAD_START={}",
+        platform.fw_udom_payload_start_address,
+    );
+
+    println!(
+        "cargo:rustc-link-arg=--defsym=FW_TDOM_PAYLOAD_START={}",
+        platform.fw_tdom_payload_start_address,
     );
 
     // Tell the linker to use our linkerscript "linker.ld" and pass `-static` and `-nostdlib` flags
