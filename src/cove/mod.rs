@@ -13,6 +13,5 @@ pub use crate::cove::constants::*;
 pub use crate::cove::types::*;
 
 pub fn init() {
-    supd_ext::init();
     coveh_ext::init();
 }
