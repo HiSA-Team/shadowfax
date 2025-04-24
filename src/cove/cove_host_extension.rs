@@ -61,6 +61,7 @@ pub unsafe extern "C" fn sbi_coveh_handler(
         SBI_EXT_COVE_HOST_CREATE_TVM => {
             todo!()
         }
+        // Default case for unsupported function IDs, logs a message and returns an error.
         _ => {
             opensbi::sbi_printf("unsupported fid\n\0".as_ptr());
             opensbi::SBI_ENOTSUPP
@@ -75,9 +76,9 @@ pub unsafe extern "C" fn sbi_coveh_handler(
  */
 #[link_section = ".text"]
 pub fn init() {
-    let mut info = SHADOWFAX_INFO.lock();
-    info.tsm_state = TsmState::TsmLoaded;
-
+    // First we need to register the cove host extension using the OpenSBI API.
+    // The goal is to register an handler (sbi_coveh_handler) when our extension
+    // is called with an ecall.
     let mut extension = opensbi::sbi_ecall_extension {
         experimental: true,
         probe: None,
@@ -93,6 +94,14 @@ pub fn init() {
     };
 
     unsafe { opensbi::sbi_ecall_register_extension(&mut extension) };
+
+    // This section should make validation checks for the TSM-driver and
+    // init the global state.
+    let mut info = SHADOWFAX_INFO.lock();
+    info.tsm_state = TsmState::TsmLoaded;
+    // TODO: make the actual check to understand what platform do we have
+    // what capabilities do we have, perform integrity check and validate the
+    // TCB.
 
     info.tsm_capabilities = 0;
     info.tsm_state = TsmState::TsmReady;
@@ -111,7 +120,7 @@ pub fn init() {
 fn sbi_covh_get_tsm_info(tsm_info_address: u64, tsm_info_len: u64) -> Sbiret {
     let needed = core::mem::size_of::<TsmInfo>() as u64;
 
-    // TODO: check if an address is valid
+    // TODO: check if the address is valid
     if tsm_info_len < needed {
         return Sbiret {
             error: opensbi::SBI_ERR_INVALID_PARAM as usize,
