@@ -1,8 +1,6 @@
 use crate::opensbi;
 
-use super::{Sbiret, SUPD_EXT_ID};
-
-const SUPD_EXT_NAME: [u8; 8] = *b"supd\0\0\0\0";
+use super::{Sbiret, SUPD_EXT_ID, SUPD_EXT_NAME};
 
 #[link_section = ".text"]
 pub unsafe extern "C" fn sbi_supd_handler(
