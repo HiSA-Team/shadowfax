@@ -1,3 +1,14 @@
+/*
+ * This file contains all public types used by both TSM and the VMM.
+ *
+ * Author: Giuseppe Capasso <capassog97@gmail.com>
+ */
+
+/*
+ * TsmInfo is a data structure that holds information about the Trusted Software Module (TSM).
+ * It includes the current state of the TSM, its implementation identifier, version, supported
+ * capabilities, and memory requirements for managing Trusted Virtual Machines (TVMs).
+ */
 #[repr(C)]
 #[derive(Clone)]
 pub struct TsmInfo {
@@ -43,12 +54,22 @@ pub struct TsmInfo {
     pub tvm_vcpu_state_pages: usize,
 }
 
+/*
+ * Sbiret is a structure used to return the result of an SBI (Supervisor Binary Interface) call.
+ * It contains an error code and a value, which provide information about the success or failure
+ * of the call and any resulting data.
+ */
 #[repr(C)]
 pub struct Sbiret {
     pub error: usize,
     pub value: usize,
 }
 
+/*
+ * TsmPageType is an enumeration that defines the types of memory pages supported by the TSM.
+ * It includes options for 4 KiB, 2 MiB, 1 GiB, and 512 GiB pages, allowing for flexible memory
+ * management and allocation.
+ */
 pub enum TsmPageType {
     /* 4 KiB */
     Page4k = 0,
@@ -60,6 +81,10 @@ pub enum TsmPageType {
     Page512gb = 3,
 }
 
+/*
+ * TvmState is an enumeration that represents the state of a Trusted Virtual Machine (TVM).
+ * It indicates whether the TVM is in the process of initialization or is ready to run.
+ */
 #[derive(Clone)]
 pub enum TvmState {
     /* The TVM has been created, but isn't yet ready to run */
@@ -68,6 +93,11 @@ pub enum TvmState {
     TvmRunnable = 1,
 }
 
+/*
+ * TsmState is an enumeration that describes the current state of the Trusted Software Module (TSM).
+ * It provides information on whether the TSM is not loaded, loaded but not initialized, or fully
+ * initialized and ready to accept ECALLs (environment calls).
+ */
 #[derive(Clone)]
 pub enum TsmState {
     /* TSM has not been loaded on this platform. */
