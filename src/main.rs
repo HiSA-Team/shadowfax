@@ -402,7 +402,7 @@ fn init_scratch_space() {
         fw_start = sym _fw_start,
         fw_end = sym _fw_end,
         fw_rw_start = sym _fw_rw_start,
-        payload = sym kernel,
+        payload = sym kernel_udom,
         next_priv = const 1,
         platform = sym opensbi::platform,
         hartid_to_scratch = sym hartid_to_scratch,
@@ -542,7 +542,7 @@ fn _start_warm() -> ! {
     }
 }
 
-/* The `kernel` function is the entry point for the kernel payload. It performs
+/* The `oernel` function is the entry point for the kernel payload. It performs
  * two system calls (ecalls) to demonstrate interaction with the system's
  * supervisor binary interface (SBI). The function sends a message to the console
  * and then enters an infinite loop to halt further execution.
@@ -554,8 +554,8 @@ fn _start_warm() -> ! {
  * should only be called in a controlled environment where these assumptions hold true.
  */
 #[no_mangle]
-#[link_section = ".payload_dom0"]
-fn kernel() {
+#[link_section = ".payload_udom"]
+fn kernel_udom() {
     static TSM_INFO: cove::TsmInfo = cove::TsmInfo {
         tsm_state: cove::TsmState::TsmNotLoaded,
         tsm_impl_id: 0,
@@ -584,8 +584,8 @@ fn kernel() {
 }
 
 #[no_mangle]
-#[link_section = ".payload_dom1"]
-fn kernel_dom1() {
+#[link_section = ".payload_tdom"]
+fn kernel_tdom() {
     static MSG: [u8; 32] = *b"Hello world shadowfax from dom1\n";
     unsafe {
         asm!(
