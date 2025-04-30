@@ -97,4 +97,8 @@ fn main() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
+
+    // Rerun build.rs if one of these files changes.
+    println!("cargo::rerun-if-changed=wrapper.h");
+    println!("cargo::rerun-if-changed=linker.ld");
 }
