@@ -18,9 +18,9 @@ SECTIONS {
 
   . = ALIGN (0x1000);
   .text : {
-    KEEP(*(.text._start));                  /* Ensure _start is placed first */
-    KEEP(*(.text._trap_handler));
-    *(.text*);                              /* Program code here */
+    *(.text.entry);
+    *(.text._trap_handler);
+    *(.text*);
   }
 
   /* PMP mandates R/W sections aligned in power of 2 */
@@ -67,4 +67,12 @@ SECTIONS {
     . = ALIGN(8);
     PROVIDE(_payload_tdom_end = .);
   }
+
+  . = ALIGN(0x1000);
+
+  /* This is for temporary stack at boot */
+  . += 8192;
+
+  PROVIDE(_stack_top = .);
+
 }
