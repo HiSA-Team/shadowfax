@@ -25,7 +25,7 @@
 #![no_std]
 #![no_main]
 #![feature(fn_align)]
-use core::{arch::asm, ffi, mem, panic::PanicInfo, ptr::addr_of};
+use core::{arch::asm, ffi, panic::PanicInfo};
 
 use riscv::asm::wfi;
 
