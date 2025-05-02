@@ -36,7 +36,7 @@ fn main() {
     let platform = PLATFORMS
         .iter()
         .find(|v| v.name == platform.as_str())
-        .unwrap_or_else(|| panic!("Unsupported platform: {}", platform));
+        .unwrap_or_else(|| panic!("Unsupported platform: {platform}"));
 
     // Disable compiler optimization for now.
     println!("cargo:rustc=opt-level=0");
