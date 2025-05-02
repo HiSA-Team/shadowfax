@@ -24,7 +24,7 @@
 #![doc = include_str!("../README.md")]
 #![no_std]
 #![no_main]
-use core::{arch::asm, mem, panic::PanicInfo, ptr::addr_of};
+use core::{arch::asm, mem, panic::PanicInfo};
 
 use cove::{SbiRet, TsmInfo};
 
@@ -604,18 +604,32 @@ fn kernel_udom() {
         }
         SbiRet { error, value }
     }
-    let fid = cove_pack_fid!(1, cove::SBI_EXT_COVE_HOST_GET_TSM_INFO);
-    let res = sbi_call(
-        cove::COVEH_EXT_ID as usize,
-        fid as usize,
-        &[
-            &raw const TSM_INFO as u64,
-            size_of::<TsmInfo>() as u64,
-            0,
-            0,
-            0,
-        ],
+
+    let active_domains = sbi_call(
+        cove::SUPD_EXT_ID as usize,
+        cove::SBI_EXT_SUPD_GET_ACTIVE_DOMAINS as usize,
+        &[0, 0, 0, 0, 0],
     );
+
+    if active_domains.error != 0 {
+        loop {}
+    }
+    // If Domain 0 is available, call sbi_ext_cove_host_get_tsm_info ()
+    // to get domain 0 capabilities
+    if (active_domains.value & 0x01) == 1 {
+        let fid = cove_pack_fid!(0, cove::SBI_EXT_COVE_HOST_GET_TSM_INFO);
+        sbi_call(
+            cove::COVEH_EXT_ID as usize,
+            fid as usize,
+            &[
+                &raw const TSM_INFO as u64,
+                size_of::<TsmInfo>() as u64,
+                0,
+                0,
+                0,
+            ],
+        );
+    }
 
     loop {}
 }

@@ -60,8 +60,8 @@ pub struct TsmInfo {
  */
 #[repr(C)]
 pub struct SbiRet {
-    pub error: usize,
-    pub value: usize,
+    pub error: isize,
+    pub value: isize,
 }
 
 /*

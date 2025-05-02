@@ -12,6 +12,7 @@ use crate::opensbi;
 
 use super::{
     SbiRet, TsmInfo, TsmState, COVEH_EXT_ID, COVEH_EXT_NAME, SBI_EXT_COVE_HOST_GET_TSM_INFO,
+    SHADOWFAX_IMPL_ID,
 };
 
 macro_rules! cove_unpack_fid {
@@ -39,9 +40,11 @@ static mut SBI_COVE_HOST_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_
  * The TsmInfo struct holds various state information about the TSM, such as its current state,
  * implementation ID, version, capabilities, and other info.
  *
+ * TODO: make this heap allocated with a static vector
+ *
  */
 #[link_section = ".data"]
-static TSM_INFO: SpinMutex<[TsmInfo; 2]> = SpinMutex::new([
+pub static TSM_INFO: SpinMutex<[TsmInfo; 2]> = SpinMutex::new([
     TsmInfo {
         tsm_state: TsmState::TsmNotLoaded,
         tsm_impl_id: 0,
@@ -101,7 +104,16 @@ pub unsafe extern "C" fn sbi_coveh_handler(
  */
 #[link_section = ".text"]
 pub fn init() -> i32 {
-    // First we need to register the cove host extension using the OpenSBI API.
+    // init at least domain 0
+    // TODO: get supervisor domain from device tree
+    let mut tsm_info = TSM_INFO.lock();
+    let mut root_domain = tsm_info[0].clone();
+    // update the root_domain
+    root_domain.tsm_impl_id = SHADOWFAX_IMPL_ID;
+    root_domain.tsm_state = TsmState::TsmReady;
+    tsm_info[0] = root_domain;
+
+    // We need to register the cove host extension using the OpenSBI API.
     // The goal is to register an handler (sbi_coveh_handler) when our extension
     // is called with an ecall.
     unsafe { opensbi::sbi_ecall_register_extension(&raw mut SBI_COVE_HOST_EXTENSION) }
@@ -125,14 +137,14 @@ fn sbi_covh_get_tsm_info(sdid: usize, tsm_info_address: usize, tsm_info_len: usi
     // TODO: check if the address is valid
     if tsm_info_len < needed {
         return SbiRet {
-            error: opensbi::SBI_ERR_INVALID_PARAM as usize,
+            error: opensbi::SBI_ERR_INVALID_PARAM as isize,
             value: 0,
         };
     }
 
     if sdid > info.len() {
         return SbiRet {
-            error: opensbi::SBI_ERR_INVALID_PARAM as usize,
+            error: opensbi::SBI_ERR_INVALID_PARAM as isize,
             value: 0,
         };
     }
@@ -142,6 +154,6 @@ fn sbi_covh_get_tsm_info(sdid: usize, tsm_info_address: usize, tsm_info_len: usi
     unsafe { tsm_info_ptr.write(state) }
     SbiRet {
         error: 0,
-        value: needed as usize,
+        value: needed as isize,
     }
 }
