@@ -52,7 +52,7 @@ SECTIONS {
   . = ALIGN(0x1000);
   .payload_udom : {
     PROVIDE(_payload_udom_start = .);
-    *(.payload_udom)
+    *(.payload_udom);
     . = ALIGN(8);
     PROVIDE(_payload_udom_end = .);
   }
@@ -63,7 +63,7 @@ SECTIONS {
   . = ALIGN(0x1000);
   .payload_tdom : {
     PROVIDE(_payload_tdom_start = .);
-    KEEP(*(.payload_tdom))
+    KEEP(*(.payload_tdom));
     . = ALIGN(8);
     PROVIDE(_payload_tdom_end = .);
   }
