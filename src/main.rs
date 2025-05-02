@@ -103,8 +103,10 @@ extern "C" fn start() -> ! {
             "0:",
             // Store zero to the address pointed
             "sd zero, 0(s4)",
-            "addi s4, s4, {pointer_size}",     // Increment s4 by the size of a double word (8 bytes)
-            "blt s4, s5, 0b",     // Loop if s4 is less than s5
+            // Increment s4 by the size of a double word (8 bytes)
+            "addi s4, s4, {pointer_size}",
+            // Loop if s4 is less than s5
+            "blt s4, s5, 0b",
             // call fw_platform_init
             // save registers a0-a4
             "add s0, a0, zero",
@@ -366,7 +368,12 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         // set the stack pointer to the scratch.
         // First thing they will need to do is to setup the stack pointer
         // to a valid location
-        asm!("csrr a0, mscratch", "add tp, a0, zero", "add sp, tp, zero",);
+        asm!(
+            "csrr a0, mscratch",
+            "add tp, a0, zero",
+            "add sp, tp, zero",
+            options(nomem)
+        );
 
         let scratch_addr = riscv::register::mscratch::read();
 
@@ -409,7 +416,6 @@ extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
 
 // Needed for opensbi
 #[no_mangle]
-#[link_section = ".text_start_warm"]
 fn _start_warm() {}
 
 /* The `kernel_udom` function is the entry point for the untrusted kernel payload.
@@ -442,7 +448,6 @@ fn kernel_udom() {
             "li a6, 0",
             "lla a0, {tsm_info_addr}",
             "li a1, {tsm_info_size}",
-            "ecall",
             "ecall",
 
             coveh_ext_id = const cove::COVEH_EXT_ID,
