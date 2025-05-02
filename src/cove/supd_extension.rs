@@ -9,8 +9,22 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
-use super::{Sbiret, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SUPD_EXT_ID, SUPD_EXT_NAME};
+use super::{SbiRet, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SUPD_EXT_ID, SUPD_EXT_NAME};
 use crate::opensbi;
+
+static mut SBI_SUPD_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
+    experimental: true,
+    probe: None,
+    name: SUPD_EXT_NAME,
+    extid_start: SUPD_EXT_ID,
+    extid_end: SUPD_EXT_ID,
+    handle: Some(sbi_supd_handler),
+    register_extensions: None,
+    head: opensbi::sbi_dlist {
+        next: core::ptr::null_mut(),
+        prev: core::ptr::null_mut(),
+    },
+};
 
 /*
  * SBI ecall handler for the SUPD extension.
@@ -28,7 +42,7 @@ use crate::opensbi;
  * - SBI_SUCCESS (0) on success, setting `ret.value` appropriately.
  * - SBI_ENOTSUPP if the `fid` is not recognized.
  */
-#[link_section = ".text.sbi_supd_handler"]
+#[link_section = ".text"]
 pub unsafe extern "C" fn sbi_supd_handler(
     _extid: u64,
     fid: u64,
@@ -63,23 +77,10 @@ pub unsafe extern "C" fn sbi_supd_handler(
  * This must be called during SBI bring‐up to make the SUPD ecall available.
  * It constructs an `sbi_ecall_extension` record and registers it.
  */
-pub fn init() {
-    let mut extension = opensbi::sbi_ecall_extension {
-        experimental: true,
-        probe: None,
-        name: SUPD_EXT_NAME,
-        extid_start: SUPD_EXT_ID,
-        extid_end: SUPD_EXT_ID,
-        handle: Some(sbi_supd_handler),
-        register_extensions: None,
-        head: opensbi::sbi_dlist {
-            next: core::ptr::null_mut(),
-            prev: core::ptr::null_mut(),
-        },
-    };
-
+#[link_section = ".text"]
+pub fn init() -> i32 {
     // SAFETY: we trust OpenSBI to correctly link this extension into its ecall handlers
-    unsafe { opensbi::sbi_ecall_register_extension(&mut extension) };
+    unsafe { opensbi::sbi_ecall_register_extension(&raw mut SBI_SUPD_EXTENSION) }
 }
 
 /*
@@ -93,7 +94,10 @@ pub fn init() {
  * - Sbiret.error = 0 on success (always 0 in this stub).
  * - Sbiret.value = number of domains written (0 in this stub).
  */
-fn sbi_supd_get_active_domains(active_domains: u64) -> Sbiret {
+fn sbi_supd_get_active_domains(active_domains: u64) -> SbiRet {
     // TODO: implement domain enumeration and writing to `active_domains` address
-    Sbiret { error: 0, value: 0 }
+    SbiRet {
+        error: 0,
+        value: 0x3,
+    }
 }
