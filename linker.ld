@@ -52,8 +52,11 @@ SECTIONS {
   . = ALIGN(0x1000);
   .payload_udom : {
     PROVIDE(_payload_udom_start = .);
-    *(.payload_udom);
+    KEEP(*(.payload_udom.kernel_udom));
+    *(.payload_udom*);
     . = ALIGN(8);
+    /* This space is reserved for the stack of the payload */
+    . += 8192;
     PROVIDE(_payload_udom_end = .);
   }
   . = ALIGN(0x1000);
