@@ -6,6 +6,8 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
+use fdt_rs::{base::DevTree, prelude::FallibleIterator};
+use heapless::Vec;
 use spin::mutex::SpinMutex;
 
 use crate::opensbi;
@@ -45,26 +47,7 @@ static mut SBI_COVE_HOST_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_
  *
  */
 #[link_section = ".data"]
-pub static TSM_INFO: SpinMutex<[TsmInfo; 2]> = SpinMutex::new([
-    TsmInfo {
-        tsm_state: TsmState::TsmNotLoaded,
-        tsm_impl_id: 0,
-        tsm_version: 0,
-        tsm_capabilities: 0,
-        tvm_state_pages: 0,
-        tvm_max_vcpus: 0,
-        tvm_vcpu_state_pages: 0,
-    },
-    TsmInfo {
-        tsm_state: TsmState::TsmNotLoaded,
-        tsm_impl_id: 0,
-        tsm_version: 0,
-        tsm_capabilities: 0,
-        tvm_state_pages: 0,
-        tvm_max_vcpus: 0,
-        tvm_vcpu_state_pages: 0,
-    },
-]);
+pub static TSM_INFO: SpinMutex<Vec<TsmInfo, 64>> = SpinMutex::new(Vec::new());
 
 /*
  * The coveh handler as mandated by Opensbi. Each ecall targeting this extension is
@@ -109,15 +92,39 @@ pub unsafe extern "C" fn sbi_coveh_handler(
  *
  */
 #[link_section = ".text"]
-pub fn init() -> i32 {
+pub fn init(fdt_address: usize) -> i32 {
     // init at least domain 0
-    // TODO: get supervisor domain from device tree
     let mut tsm_info = TSM_INFO.lock();
-    let mut root_domain = tsm_info[0].clone();
-    // update the root_domain
-    root_domain.tsm_impl_id = SHADOWFAX_IMPL_ID;
-    root_domain.tsm_state = TsmState::TsmReady;
-    tsm_info[0] = root_domain;
+
+    unsafe {
+        tsm_info.push_unchecked(TsmInfo {
+            tsm_state: TsmState::TsmReady,
+            tsm_impl_id: SHADOWFAX_IMPL_ID,
+            tsm_version: 0,
+            tsm_capabilities: 0,
+            tvm_state_pages: 0,
+            tvm_max_vcpus: 0,
+            tvm_vcpu_state_pages: 0,
+        });
+    }
+    // get extra domains from device tree
+    let devtree = unsafe {
+        let address = fdt_address as *const u8;
+        DevTree::from_raw_pointer(address).unwrap()
+    };
+
+    let mut node_iter = devtree.compatible_nodes("opensbi,domain,instance");
+    while let Some(node) = node_iter.next().unwrap() {
+        let ret = tsm_info.push(TsmInfo {
+            tsm_state: TsmState::TsmReady,
+            tsm_impl_id: 0,
+            tsm_version: 0,
+            tsm_capabilities: 0,
+            tvm_state_pages: 0,
+            tvm_max_vcpus: 0,
+            tvm_vcpu_state_pages: 0,
+        });
+    }
 
     // We need to register the cove host extension using the OpenSBI API.
     // The goal is to register an handler (sbi_coveh_handler) when our extension

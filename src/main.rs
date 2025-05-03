@@ -27,9 +27,11 @@
 #![feature(fn_align)]
 use core::{arch::asm, ffi, panic::PanicInfo};
 
+use heapless::Vec;
 use riscv::asm::wfi;
 
 use cove::{SbiRet, TsmInfo};
+use spin::mutex::SpinMutex;
 
 mod cove;
 
@@ -163,7 +165,7 @@ enum PrivMode {
  * controlled environment where these assumptions hold true.
  */
 #[link_section = ".text"]
-extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
+extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
     unsafe {
         // Ensure all previous instructions have been completed
         riscv::asm::fence_i();
@@ -309,7 +311,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
             // fw_heap_size: heap size specified by the platform
             fw_heap_size: heap_size as ffi::c_ulong,
             // next_arg1: the fdt_address passed to the next stage
-            next_arg1: fdt_addr as ffi::c_ulong,
+            next_arg1: fdt_address as ffi::c_ulong,
             // next_addr: address of the next stage
             next_addr: kernel_udom as ffi::c_ulong,
             // next_mode: mode used to launch next_addr
@@ -354,7 +356,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     }
 
     // initialize cove extension
-    cove::init();
+    cove::init(fdt_address);
 
     // Prepare and jump to sbi_init. We need to:
     //  - disable interrupts
@@ -383,6 +385,9 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         // set the trap handler
         let a = Mtvec::from_bits(trap::_trap_handler as usize);
         riscv::register::mtvec::write(a);
+
+        riscv::register::mstatus::clear_tsr();
+        riscv::register::mstatus::clear_tvm();
 
         // call sbi_init for the current hart
         let sbi_scratch_addr = scratch_addr as *mut opensbi::sbi_scratch;
@@ -421,10 +426,37 @@ extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
 #[no_mangle]
 fn _start_warm() {}
 
+#[link_section = ".payload_udom"]
+static DOMAINS: SpinMutex<Vec<cove::TsmInfo, 64>> = SpinMutex::new(Vec::new());
+
+#[link_section = ".payload_udom"]
+fn sbi_call(extid: usize, fid: usize, args: &[u64; 5]) -> SbiRet {
+    let (error, value);
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") extid,
+            in("a6") fid,
+            inlateout("a0") args[0] => error,
+            inlateout("a1") args[1] => value,
+            in("a2") args[2],
+            in("a3") args[3],
+            in("a4") args[4],
+        );
+    }
+    SbiRet { error, value }
+}
+
+#[link_section = ".payload_udom"]
+static mut SBI_ARGS: [u64; 5] = [0, 0, 0, 0, 0];
+
 /* The `kernel_udom` function is the entry point for the untrusted kernel payload.
  * It performs ecalls to demonstrate interaction with the system's
  * supervisor binary interface (SBI). The function sends a message to the console
  * and then enters an infinite loop to halt further execution.
+ *
+ * For now, it uses SUPD extension to get active domains (sbi_supd_get_active_domains) and
+ * for each one retrieves the state using sbi_ext_cove_host_get_tsm_info()
  *
  * # Safety
  *
@@ -432,7 +464,7 @@ fn _start_warm() {}
  * machine-level registers and relies on specific memory layout assumptions. It
  * should only be called in a controlled environment where these assumptions hold true.
  */
-#[link_section = ".payload_udom"]
+#[link_section = ".payload_udom.text"]
 fn kernel_udom() {
     // set stack pointer
     unsafe {
@@ -447,63 +479,45 @@ fn kernel_udom() {
             stack_size = const 4096 * 2,
         )
     }
-    #[link_section = ".payload_udom"]
-    static TSM_INFO: cove::TsmInfo = cove::TsmInfo {
-        tsm_state: cove::TsmState::TsmNotLoaded,
-        tsm_impl_id: 0,
-        tvm_vcpu_state_pages: 0,
-        tvm_max_vcpus: 0,
-        tvm_state_pages: 0,
-        tsm_capabilities: 0,
-        tsm_version: 0,
-    };
+
     macro_rules! cove_pack_fid {
         ($sdid:expr, $fid:expr) => {
             (($sdid & 0x3F) << 26) | ($fid & 0xFFFF)
         };
     }
-    #[link_section = ".payload_udom"]
-    fn sbi_call(extid: usize, fid: usize, args: &[u64; 5]) -> SbiRet {
-        let (error, value);
-        unsafe {
-            core::arch::asm!(
-                "ecall",
-                in("a7") extid,
-                in("a6") fid,
-                inlateout("a0") args[0] => error,
-                inlateout("a1") args[1] => value,
-                in("a2") args[2],
-                in("a3") args[3],
-                in("a4") args[4],
-            );
-        }
-        SbiRet { error, value }
-    }
 
+    // get all active_domains
     let active_domains = sbi_call(
         cove::SUPD_EXT_ID as usize,
         cove::SBI_EXT_SUPD_GET_ACTIVE_DOMAINS as usize,
-        &[0, 0, 0, 0, 0],
+        unsafe { &SBI_ARGS },
     );
 
-    if active_domains.error != 0 {
-        loop {}
+    // register active domains in our structure
+    let domain_mask = active_domains.value;
+    for i in 0..64 {
+        if ((domain_mask >> i) & 0x01) == 1 {
+            DOMAINS
+                .lock()
+                .push(TsmInfo {
+                    tsm_state: cove::TsmState::TsmNotLoaded,
+                    tsm_impl_id: 0,
+                    tsm_version: 0,
+                    tsm_capabilities: 0,
+                    tvm_state_pages: 0,
+                    tvm_max_vcpus: 0,
+                    tvm_vcpu_state_pages: 0,
+                })
+                .unwrap()
+        }
     }
-    // If Domain 0 is available, call sbi_ext_cove_host_get_tsm_info ()
-    // to get domain 0 capabilities
-    if (active_domains.value & 0x01) == 1 {
-        let fid = cove_pack_fid!(0, cove::SBI_EXT_COVE_HOST_GET_TSM_INFO);
-        sbi_call(
-            cove::COVEH_EXT_ID as usize,
-            fid as usize,
-            &[
-                &raw const TSM_INFO as u64,
-                size_of::<TsmInfo>() as u64,
-                0,
-                0,
-                0,
-            ],
-        );
+
+    for (i, domain) in DOMAINS.lock().iter_mut().enumerate() {
+        let sbi_args = unsafe { &mut SBI_ARGS };
+        let fid = cove_pack_fid!(i, cove::SBI_EXT_COVE_HOST_GET_TSM_INFO as usize);
+        sbi_args[0] = &raw const domain as u64;
+        sbi_args[1] = size_of::<TsmInfo>() as u64;
+        sbi_call(cove::COVEH_EXT_ID as usize, fid as usize, &sbi_args);
     }
 
     loop {}

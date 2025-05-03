@@ -10,7 +10,7 @@
  * capabilities, and memory requirements for managing Trusted Virtual Machines (TVMs).
  */
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct TsmInfo {
     /*
      * The current state of the TSM (see `tsm_state` enum above).
@@ -97,7 +97,7 @@ pub enum TvmState {
  * It provides information on whether the TSM is not loaded, loaded but not initialized, or fully
  * initialized and ready to accept ECALLs (environment calls).
  */
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum TsmState {
     /* TSM has not been loaded on this platform. */
     TsmNotLoaded = 0,
