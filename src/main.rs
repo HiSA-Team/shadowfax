@@ -464,7 +464,7 @@ static SBI_ARGS: SpinMutex<[u64; 5]> = SpinMutex::new([0, 0, 0, 0, 0]);
  * machine-level registers and relies on specific memory layout assumptions. It
  * should only be called in a controlled environment where these assumptions hold true.
  */
-#[link_section = ".payload_udom.text"]
+#[link_section = ".payload_udom"]
 fn kernel_udom() {
     // set stack pointer
     unsafe {
@@ -500,15 +500,18 @@ fn kernel_udom() {
         if ((domain_mask >> i) & 0x01) == 1 {
             DOMAINS
                 .lock()
-                .push(TsmInfo {
-                    tsm_state: cove::TsmState::TsmNotLoaded,
-                    tsm_impl_id: 0,
-                    tsm_version: 0,
-                    tsm_capabilities: 0,
-                    tvm_state_pages: 0,
-                    tvm_max_vcpus: 0,
-                    tvm_vcpu_state_pages: 0,
-                })
+                .insert(
+                    i,
+                    TsmInfo {
+                        tsm_state: cove::TsmState::TsmLoaded,
+                        tsm_impl_id: 0,
+                        tsm_version: 0,
+                        tsm_capabilities: 0,
+                        tvm_state_pages: 0,
+                        tvm_max_vcpus: 0,
+                        tvm_vcpu_state_pages: 0,
+                    },
+                )
                 .unwrap()
         }
     }
