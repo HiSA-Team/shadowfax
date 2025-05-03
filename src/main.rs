@@ -147,7 +147,7 @@ extern "C" fn start() -> ! {
 }
 
 enum PrivMode {
-    PrivM = 3 as isize,
+    PrivM = 3_isize,
     PrivS = 1,
     PrivU = 0,
 }
@@ -291,7 +291,7 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
     let fw_end_tot = fw_end + (hart_count * hart_stack_size) + heap_size;
     let heap_start = fw_end + (hart_count * hart_stack_size) - fw_start;
 
-    for i in 0..(hart_count as usize) {
+    for i in 0..hart_count {
         /*
          * Populate the sbi_scratch struct with the correct values
          * We want to use ffi:c_ulong to avoid hardcoding pointer size.
@@ -419,7 +419,7 @@ extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
     let stack_offset = target_hart * hart_stack_size as usize;
     let scratch_end = fw_end + stack_offset;
 
-    return scratch_end - opensbi::SBI_SCRATCH_SIZE as usize;
+    scratch_end - opensbi::SBI_SCRATCH_SIZE as usize
 }
 
 // Needed for opensbi
@@ -448,7 +448,7 @@ fn sbi_call(extid: usize, fid: usize, args: &[u64; 5]) -> SbiRet {
 }
 
 #[link_section = ".payload_udom"]
-static mut SBI_ARGS: [u64; 5] = [0, 0, 0, 0, 0];
+static SBI_ARGS: SpinMutex<[u64; 5]> = SpinMutex::new([0, 0, 0, 0, 0]);
 
 /* The `kernel_udom` function is the entry point for the untrusted kernel payload.
  * It performs ecalls to demonstrate interaction with the system's
@@ -487,10 +487,11 @@ fn kernel_udom() {
     }
 
     // get all active_domains
+    let args = SBI_ARGS.lock();
     let active_domains = sbi_call(
         cove::SUPD_EXT_ID as usize,
         cove::SBI_EXT_SUPD_GET_ACTIVE_DOMAINS as usize,
-        unsafe { &SBI_ARGS },
+        &args,
     );
 
     // register active domains in our structure
@@ -513,11 +514,11 @@ fn kernel_udom() {
     }
 
     for (i, domain) in DOMAINS.lock().iter_mut().enumerate() {
-        let sbi_args = unsafe { &mut SBI_ARGS };
+        let mut sbi_args = SBI_ARGS.lock();
         let fid = cove_pack_fid!(i, cove::SBI_EXT_COVE_HOST_GET_TSM_INFO as usize);
         sbi_args[0] = &raw const domain as u64;
         sbi_args[1] = size_of::<TsmInfo>() as u64;
-        sbi_call(cove::COVEH_EXT_ID as usize, fid as usize, &sbi_args);
+        sbi_call(cove::COVEH_EXT_ID as usize, fid, &sbi_args);
     }
 
     loop {}
