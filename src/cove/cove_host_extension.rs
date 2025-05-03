@@ -11,8 +11,28 @@ use spin::mutex::SpinMutex;
 use crate::opensbi;
 
 use super::{
-    Sbiret, TsmInfo, TsmState, COVEH_EXT_ID, COVEH_EXT_NAME, SBI_EXT_COVE_HOST_CONVERT_PAGES,
-    SBI_EXT_COVE_HOST_CREATE_TVM, SBI_EXT_COVE_HOST_GET_TSM_INFO, SHADOWFAX_IMPL_ID,
+    SbiRet, TsmInfo, TsmState, COVEH_EXT_ID, COVEH_EXT_NAME, SBI_EXT_COVE_HOST_GET_TSM_INFO,
+    SHADOWFAX_IMPL_ID,
+};
+
+macro_rules! cove_unpack_fid {
+    ($fid:expr) => {
+        (($fid >> 26) & 0x3F, $fid & 0xFFFF)
+    };
+}
+#[link_section = ".data"]
+static mut SBI_COVE_HOST_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
+    experimental: true,
+    probe: None,
+    name: COVEH_EXT_NAME,
+    extid_start: COVEH_EXT_ID,
+    extid_end: COVEH_EXT_ID,
+    handle: Some(sbi_coveh_handler),
+    register_extensions: None,
+    head: opensbi::sbi_dlist {
+        next: core::ptr::null_mut(),
+        prev: core::ptr::null_mut(),
+    },
 };
 
 /*
@@ -21,17 +41,30 @@ use super::{
  * The TsmInfo struct holds various state information about the TSM, such as its current state,
  * implementation ID, version, capabilities, and other info.
  *
+ * TODO: make this heap allocated with a static vector
+ *
  */
 #[link_section = ".data"]
-static SHADOWFAX_INFO: SpinMutex<TsmInfo> = SpinMutex::new(TsmInfo {
-    tsm_state: TsmState::TsmNotLoaded,
-    tsm_impl_id: SHADOWFAX_IMPL_ID,
-    tsm_version: 0,
-    tsm_capabilities: 0,
-    tvm_state_pages: 0,
-    tvm_max_vcpus: 0,
-    tvm_vcpu_state_pages: 0,
-});
+pub static TSM_INFO: SpinMutex<[TsmInfo; 2]> = SpinMutex::new([
+    TsmInfo {
+        tsm_state: TsmState::TsmNotLoaded,
+        tsm_impl_id: 0,
+        tsm_version: 0,
+        tsm_capabilities: 0,
+        tvm_state_pages: 0,
+        tvm_max_vcpus: 0,
+        tvm_vcpu_state_pages: 0,
+    },
+    TsmInfo {
+        tsm_state: TsmState::TsmNotLoaded,
+        tsm_impl_id: 0,
+        tsm_version: 0,
+        tsm_capabilities: 0,
+        tvm_state_pages: 0,
+        tvm_max_vcpus: 0,
+        tvm_vcpu_state_pages: 0,
+    },
+]);
 
 /*
  * The coveh handler as mandated by Opensbi. Each ecall targeting this extension is
@@ -48,18 +81,19 @@ pub unsafe extern "C" fn sbi_coveh_handler(
 ) -> i32 {
     let regs = *regs;
     let mut ret = *ret;
+    let (sdid, fid) = cove_unpack_fid!(fid);
     match fid {
         SBI_EXT_COVE_HOST_GET_TSM_INFO => {
-            let result = sbi_covh_get_tsm_info(regs.a0, regs.a1);
+            opensbi::sbi_printf(
+                "sbi_covh_get_tsm_info(sdid=%d, addr=0x%lx, size=%d)\n\0".as_ptr(),
+                sdid,
+                regs.a0,
+                regs.a1,
+            );
+            let result = sbi_covh_get_tsm_info(sdid as usize, regs.a0 as usize, regs.a1 as usize);
             ret.value = result.value as u64;
 
-            opensbi::SBI_SUCCESS as i32
-        }
-        SBI_EXT_COVE_HOST_CONVERT_PAGES => {
-            todo!()
-        }
-        SBI_EXT_COVE_HOST_CREATE_TVM => {
-            todo!()
+            result.error as i32
         }
         // Default case for unsupported function IDs, logs a message and returns an error.
         _ => {
@@ -75,70 +109,57 @@ pub unsafe extern "C" fn sbi_coveh_handler(
  *
  */
 #[link_section = ".text"]
-pub fn init() {
-    // First we need to register the cove host extension using the OpenSBI API.
+pub fn init() -> i32 {
+    // init at least domain 0
+    // TODO: get supervisor domain from device tree
+    let mut tsm_info = TSM_INFO.lock();
+    let mut root_domain = tsm_info[0].clone();
+    // update the root_domain
+    root_domain.tsm_impl_id = SHADOWFAX_IMPL_ID;
+    root_domain.tsm_state = TsmState::TsmReady;
+    tsm_info[0] = root_domain;
+
+    // We need to register the cove host extension using the OpenSBI API.
     // The goal is to register an handler (sbi_coveh_handler) when our extension
     // is called with an ecall.
-    let mut extension = opensbi::sbi_ecall_extension {
-        experimental: true,
-        probe: None,
-        name: COVEH_EXT_NAME,
-        extid_start: COVEH_EXT_ID,
-        extid_end: COVEH_EXT_ID,
-        handle: Some(sbi_coveh_handler),
-        register_extensions: None,
-        head: opensbi::sbi_dlist {
-            next: core::ptr::null_mut(),
-            prev: core::ptr::null_mut(),
-        },
-    };
-
-    unsafe { opensbi::sbi_ecall_register_extension(&mut extension) };
-
-    // This section should make validation checks for the TSM-driver and
-    // init the global state.
-    let mut info = SHADOWFAX_INFO.lock();
-    info.tsm_state = TsmState::TsmLoaded;
-    // TODO: make the actual check to understand what platform do we have
-    // what capabilities do we have, perform integrity check and validate the
-    // TCB.
-
-    info.tsm_capabilities = 0;
-    info.tsm_state = TsmState::TsmReady;
+    unsafe { opensbi::sbi_ecall_register_extension(&raw mut SBI_COVE_HOST_EXTENSION) }
 }
 
 /*
  * Retrieves the current TSM state, configuration, and supported features.
  *
  * Parameters:
+ * - sdid:
  * - tsm_info_address: A 4-byte aligned physical memory address where the TSM will write the TsmInfo struct.
  * - tsm_info_len: The size of the TsmInfo struct.
  *
  * Returns:
  * - The number of bytes written to tsm_info_address on success.
  */
-fn sbi_covh_get_tsm_info(tsm_info_address: u64, tsm_info_len: u64) -> Sbiret {
-    let needed = core::mem::size_of::<TsmInfo>() as u64;
+fn sbi_covh_get_tsm_info(sdid: usize, tsm_info_address: usize, tsm_info_len: usize) -> SbiRet {
+    let needed = core::mem::size_of::<TsmInfo>();
+    let info = TSM_INFO.lock();
 
     // TODO: check if the address is valid
     if tsm_info_len < needed {
-        return Sbiret {
-            error: opensbi::SBI_ERR_INVALID_PARAM as usize,
+        return SbiRet {
+            error: opensbi::SBI_ERR_INVALID_PARAM as isize,
             value: 0,
         };
     }
 
-    unsafe {
-        let info = SHADOWFAX_INFO.lock();
-        let tsm_info_ptr = tsm_info_address as *mut TsmInfo;
-        tsm_info_ptr.write(info.clone())
+    if sdid > info.len() {
+        return SbiRet {
+            error: opensbi::SBI_ERR_INVALID_PARAM as isize,
+            value: 0,
+        };
     }
-    Sbiret {
-        error: 0,
-        value: needed as usize,
-    }
-}
 
-fn sbi_covh_convert_pages(base_page_address: u64, num_pages: u64) -> Sbiret {
-    todo!()
+    let state = info[sdid].clone();
+    let tsm_info_ptr = tsm_info_address as *mut TsmInfo;
+    unsafe { tsm_info_ptr.write(state) }
+    SbiRet {
+        error: 0,
+        value: needed as isize,
+    }
 }

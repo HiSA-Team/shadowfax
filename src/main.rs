@@ -29,6 +29,8 @@ use core::{arch::asm, ffi, panic::PanicInfo};
 
 use riscv::asm::wfi;
 
+use cove::{SbiRet, TsmInfo};
+
 mod cove;
 
 /*
@@ -60,6 +62,7 @@ unsafe extern "C" {
     static _bss_start: u8;
     static _bss_end: u8;
     static _stack_top: u8;
+    static _payload_udom_end: u8;
 }
 
 /*
@@ -431,6 +434,20 @@ fn _start_warm() {}
  */
 #[link_section = ".payload_udom"]
 fn kernel_udom() {
+    // set stack pointer
+    unsafe {
+        asm!(
+            // Load the address of the stack variable into t0.
+            "la   t0, {stack}",
+            // Load the stack size (8K) into t1.
+            "li   t1, {stack_size}",
+            // Set the stack pointer: sp = t0 + t1.
+            "add  sp, t0, t1",
+            stack = sym _payload_udom_end,
+            stack_size = const 4096 * 2,
+        )
+    }
+    #[link_section = ".payload_udom"]
     static TSM_INFO: cove::TsmInfo = cove::TsmInfo {
         tsm_state: cove::TsmState::TsmNotLoaded,
         tsm_impl_id: 0,
@@ -440,53 +457,55 @@ fn kernel_udom() {
         tsm_capabilities: 0,
         tsm_version: 0,
     };
-    unsafe {
-        asm!(
+    macro_rules! cove_pack_fid {
+        ($sdid:expr, $fid:expr) => {
+            (($sdid & 0x3F) << 26) | ($fid & 0xFFFF)
+        };
+    }
+    #[link_section = ".payload_udom"]
+    fn sbi_call(extid: usize, fid: usize, args: &[u64; 5]) -> SbiRet {
+        let (error, value);
+        unsafe {
+            core::arch::asm!(
+                "ecall",
+                in("a7") extid,
+                in("a6") fid,
+                inlateout("a0") args[0] => error,
+                inlateout("a1") args[1] => value,
+                in("a2") args[2],
+                in("a3") args[3],
+                in("a4") args[4],
+            );
+        }
+        SbiRet { error, value }
+    }
 
-            // struct sbiret sbi_covh_get_tsm_info(unsigned long tsm_info_address, unsigned long tsm_info_len)
-            "li a7, {coveh_ext_id}",
-            "li a6, 0",
-            "lla a0, {tsm_info_addr}",
-            "li a1, {tsm_info_size}",
-            "ecall",
+    let active_domains = sbi_call(
+        cove::SUPD_EXT_ID as usize,
+        cove::SBI_EXT_SUPD_GET_ACTIVE_DOMAINS as usize,
+        &[0, 0, 0, 0, 0],
+    );
 
-            coveh_ext_id = const cove::COVEH_EXT_ID,
-            tsm_info_addr = sym TSM_INFO,
-            tsm_info_size = const core::mem::size_of::<cove::TsmInfo>(),
+    if active_domains.error != 0 {
+        loop {}
+    }
+    // If Domain 0 is available, call sbi_ext_cove_host_get_tsm_info ()
+    // to get domain 0 capabilities
+    if (active_domains.value & 0x01) == 1 {
+        let fid = cove_pack_fid!(0, cove::SBI_EXT_COVE_HOST_GET_TSM_INFO);
+        sbi_call(
+            cove::COVEH_EXT_ID as usize,
+            fid as usize,
+            &[
+                &raw const TSM_INFO as u64,
+                size_of::<TsmInfo>() as u64,
+                0,
+                0,
+                0,
+            ],
         );
     }
-    loop {}
-}
 
-#[no_mangle]
-#[link_section = ".payload_tdom"]
-fn kernel_tdom() {
-    static MSG: [u8; 32] = *b"Hello world shadowfax from dom1\n";
-    unsafe {
-        asm!(
-            // First ecall: Send a message to the console
-            "li a7, {extid1}",
-            "li a6, {fid1}",
-            "li a0, {len}",
-            "lla a1, {msg}",
-            "li a2, 0",
-            "ecall",
-
-            // Second ecall: Perform a custom operation defined by the COVH extension
-            "li a7, {extid2}",
-            "li a2, 0",
-            "ecall",
-
-
-            // Parameters for the ecalls
-            extid1 = const 0x4442434E,
-            fid1 = const 0x00,
-            len = const MSG.len(),
-            msg = sym MSG,
-
-            extid2 = const cove::COVEH_EXT_ID,
-        );
-    }
     loop {}
 }
 

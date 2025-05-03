@@ -13,16 +13,16 @@ authors = ["Giuseppe Capasso"]
 # So, users on standard systems should comment the following two dependencies and use
 # the standard bindgen version below.
 
-# [build-dependencies]
-# bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
-#
-# [build-dependencies.clang-sys]
-# version = "1.8.1"
-# features = ["static"]
+[build-dependencies]
+bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
+
+[build-dependencies.clang-sys]
+version = "1.8.1"
+features = ["static"]
 
 # comment previous build-dependencies bindgen and clang and use the following for glibc systems.
-[build-dependencies]
-bindgen = "0.71.1"
+# [build-dependencies]
+# bindgen = "0.71.1"
 
 [dependencies]
 riscv = "0.13.0"

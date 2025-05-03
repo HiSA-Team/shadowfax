@@ -53,16 +53,15 @@ pub struct TsmInfo {
      */
     pub tvm_vcpu_state_pages: usize,
 }
-
 /*
  * Sbiret is a structure used to return the result of an SBI (Supervisor Binary Interface) call.
  * It contains an error code and a value, which provide information about the success or failure
  * of the call and any resulting data.
  */
 #[repr(C)]
-pub struct Sbiret {
-    pub error: usize,
-    pub value: usize,
+pub struct SbiRet {
+    pub error: isize,
+    pub value: isize,
 }
 
 /*
