@@ -20,11 +20,10 @@ authors = ["Giuseppe Capasso"]
 # version = "1.8.1"
 # features = ["static"]
 
-[build-dependencies]
-bindgen = "0.71.1"
-
 # comment previous build-dependencies bindgen and clang and use the following for glibc systems.
 [build-dependencies]
 bindgen = "0.71.1"
 
 [dependencies]
+riscv = "0.13.0"
+spin = { version = "0.10.0", features = ["spin_mutex"] }

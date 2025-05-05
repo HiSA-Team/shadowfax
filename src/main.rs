@@ -1,4 +1,5 @@
-/* Shadowfax entry point. This codes initializes the platform and jumps to main function using **opensbi** as a
+/*
+ * Shadowfax entry point. This codes initializes the platform and jumps to main function using **opensbi** as a
  * static library (https://github.com/riscv-software-src/opensbi/blob/master/docs/library_usage.md).
  * According to opensbi static library, there are two constraints required before calling init functions:
  * - The RISC-V MSCRATCH CSR must point to a valid OpenSBI scratch space (i.e. a struct sbi_scratch instance);
@@ -20,11 +21,17 @@
  *
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
+#![doc = include_str!("../README.md")]
 #![no_std]
 #![no_main]
 use core::{arch::asm, mem, panic::PanicInfo};
 
-/* This module includes the `bindings.rs` generated
+use cove::{SbiRet, TsmInfo};
+
+mod cove;
+
+/*
+ * This module includes the `bindings.rs` generated
  * using `build.rs` which translates opensbi C definitions
  * in Rust. This could be also be included without the module,
  * but doing in this way mandates that every opensbi symbol
@@ -40,32 +47,43 @@ mod opensbi {
 
 mod trap;
 
-// This "object" is just to hold symbols declared in the linkerscript
-// In `linker.ld`, we define this values and this is a way to access them
-// from Rust.
+/*
+ * This "object" is just to hold symbols declared in the linkerscript
+ * In `linker.ld`, we define this values and this is a way to access them
+ * from Rust.
+ */
 unsafe extern "C" {
     static _fw_start: u8;
     static _fw_end: u8;
     static _fw_rw_start: u8;
     static _bss_start: u8;
     static _bss_end: u8;
+    static _payload_udom_end: u8;
 }
 
-/// This is needed for rust bare metal programs
+/*
+ * This is needed for rust bare metal programs
+ */
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-/// The _start function is the first function
-/// loaded at the starting address of the linkerscript
-/// Here we setup a temporary stack at the end of the firmware
-/// and jump to main
+/*
+ * The _start function is the first functionloaded at the
+ * starting address of the linkerscript. Here we setup a
+ * temporary stack at the end of the firmware and jump to
+ * main function
+ */
 #[no_mangle]
 #[link_section = ".text._start"]
 fn _start() -> ! {
     unsafe {
         asm!(
+            // If there are multiple hart, init only hartid 0
+            "csrr s6, {csr_mhartid}",
+            // If not zero, go to wait loop
+            "bnez s6, {wait_for_boot_hart}",
             // Load the address of the stack variable into t0.
             "la   t0, {stack}",
             // Jump to the main function// Load the stack size (8K) into t1.
@@ -74,6 +92,8 @@ fn _start() -> ! {
             "add  sp, t0, t1",
             // Jump to main
             "j    {main}",
+            csr_mhartid = const opensbi::CSR_MHARTID,
+            wait_for_boot_hart = sym start_hang,
             stack = sym _fw_end,
             // Use the same size as the allocation (8KB)
             stack_size = const opensbi::SBI_SCRATCH_SIZE * 2,
@@ -83,21 +103,23 @@ fn _start() -> ! {
     }
 }
 
-/// The main function serves as the entry point for the firmware execution. It performs
-/// several critical initialization tasks to prepare the system for operation. These tasks
-/// include zeroing out the BSS section, setting up a temporary trap handler, initializing
-/// the platform, configuring the scratch space, and starting the warm boot process.
-///
-/// # Safety
-///
-/// This function is marked as unsafe because it involves direct manipulation of machine-level
-/// registers and relies on specific memory layout assumptions. It should only be called in a
-/// controlled environment where these assumptions hold true.
+/*
+ * The main function serves as the entry point for the firmware execution. It performs
+ * several critical initialization tasks to prepare the system for operation. These tasks
+ * include zeroing out the BSS section, setting up a temporary trap handler, initializing
+ * the platform, configuring the scratch space, and starting the warm boot process.
+ *
+ * # Safety
+ *
+ * This function is marked as unsafe because it involves direct manipulation of machine-level
+ * registers and relies on specific memory layout assumptions. It should only be called in a
+ * controlled environment where these assumptions hold true.
+ */
 fn main() -> ! {
     // zero out bss
     zero_bss();
 
-    // setup a temporary trap handler
+    // setup a temporary trap handler (just a busy loop)
     // so we can debug if there are errors
     unsafe {
         asm!(
@@ -154,9 +176,10 @@ fn main() -> ! {
     _start_warm()
 }
 
+/*
+ * This functions simply loops over the bss section and puts everything to zero.
+ */
 #[inline(always)]
-// This functions simply loops over the bss section
-// and puts everything to zero.
 fn zero_bss() {
     unsafe {
         asm!(
@@ -173,9 +196,11 @@ fn zero_bss() {
     }
 }
 
+/*
+ * This function resets all general-purpose registers to zero and clears the machine scratch register.
+ * It ensures that all previous instructions have been completed before performing the reset.
+ */
 #[inline(always)]
-// This function resets all general-purpose registers to zero and clears the machine scratch register.
-// It ensures that all previous instructions have been completed before performing the reset.
 fn reset_registers() {
     unsafe {
         asm!(
@@ -213,77 +238,77 @@ fn reset_registers() {
     }
 }
 
-/// Setup scratch space for HART 0
-///
-/// This function initializes the scratch space for HART 0, which is a per-HART data structure
-/// defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
-/// parameters and configurations necessary for the operation of the RISC-V system.
-///
-/// The `sbi_scratch` structure includes the following fields:
-/// - `fw_start`: The start address of the firmware.
-/// - `fw_size`: The size of the firmware.
-/// - `fw_rw_offset`: The offset to the read/write section of the firmware.
-/// - `fw_heap_offset`: The offset to the heap section.
-/// - `fw_heap_size`: The size of the heap section.
-/// - `next_arg1`: The argument to be passed to the next stage.
-/// - `next_addr`: The address of the next stage to jump to.
-/// - `next_mode`: The mode in which the next stage should be executed.
-/// - `warmboot_addr`: The address for warm booting.
-/// - `platform_addr`: The address of the platform-specific data.
-/// - `hartid_to_scratch`: The function address to calculate the scratch space for a given HART.
-/// - `trap_context`: The context for handling traps.
-/// - `tmp0`: A temporary storage field.
-/// - `options`: Firmware options.
-/// - `hartindex`: The index of the HART.
-///
-/// The memory layout of the firmware is as follows:
-/// - Firmware Region: Contains the firmware code and data, including the R/W section.
-/// - HART Stacks: Contains the stack space for all HARTs, with each stack having a scratch area.
-/// - Heap Region: A contiguous block of memory for heap usage.
-///
-/// This function performs the following steps:
-/// 1. Retrieves platform details such as HART count, stack size, and heap size.
-/// 2. Sets up the scratch space for all HARTs by calculating the appropriate memory addresses.
-/// 3. Initializes the heap base address.
-/// 4. Configures the scratch space for HART 0 by storing various firmware parameters.
-/// 5. Clears the trap context and temporary storage fields.
-/// 6. Stores the firmware options and HART index in the scratch space.
-///
-/// * This structure describes the memory layout of the firmware:
-// - *                 Memory Layout
-// -                -------------
-// -+---------------------------------------------------------+
-// -| Firmware Region                                         |
-// -|                                                         |
-// -|  _fw_start                                              |
-// -|    +-----------------------------------------------+    |
-// -|    |   Firmware Code & Data                        |    |
-// -|    |                                               |    |
-// -|    |   (Includes the read/write (R/W) section,     |    |
-// -|    |    beginning at _fw_rw_start)                   |    |
-// -|    +-----------------------------------------------+    |
-// -|  _fw_end                                                |
-// -+---------------------------------------------------------+
-// -| HART Stacks (for all HARTs, total size = s7 * s8)        |
-// -|                                                         |
-// -|  Hart 0 Stack:                                          |
-// -|    +---------------------------+                        |
-// -|    |  (Stack space)            |                        |
-// -|    |                           |                        |
-// -|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE    |
-// -|    |    (holds various fields: |    (e.g., fw_start,     |
-// -|    |     fw_start, fw_size,     |     fw_size, RW offset,  |
-// -|    |     fw_rw_offset,         |     heap offset/size,    |
-// -|    |     heap offset/size,     |     boot parameters,     |
-// -|    |     boot addresses, etc.) |     etc.)                |
-// -|    +---------------------------+                        |
-// -+---------------------------------------------------------+
-// -| Heap Region                                             |
-// -|  (Contiguous block of size s9)                          |
-// -|                                                         |
-// -+---------------------------------------------------------+
-// -
-#[no_mangle]
+/* Setup scratch space for HART 0
+ *
+ * This function initializes the scratch space for HART 0, which is a per-HART data structure
+ * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
+ * parameters and configurations necessary for the operation of the RISC-V system.
+ *
+ * The `sbi_scratch` structure includes the following fields:
+ * - `fw_start`: The start address of the firmware.
+ * - `fw_size`: The size of the firmware.
+ * - `fw_rw_offset`: The offset to the read/write section of the firmware.
+ * - `fw_heap_offset`: The offset to the heap section.
+ * - `fw_heap_size`: The size of the heap section.
+ * - `next_arg1`: The argument to be passed to the next stage.
+ * - `next_addr`: The address of the next stage to jump to.
+ * - `next_mode`: The mode in which the next stage should be executed.
+ * - `warmboot_addr`: The address for warm booting.
+ * - `platform_addr`: The address of the platform-specific data.
+ * - `hartid_to_scratch`: The function address to calculate the scratch space for a given HART.
+ * - `trap_context`: The context for handling traps.
+ * - `tmp0`: A temporary storage field.
+ * - `options`: Firmware options.
+ * - `hartindex`: The index of the HART.
+ *
+ * The memory layout of the firmware is as follows:
+ * - Firmware Region: Contains the firmware code and data, including the R/W section.
+ * - HART Stacks: Contains the stack space for all HARTs, with each stack having a scratch area.
+ * - Heap Region: A contiguous block of memory for heap usage.
+ *
+ * This function performs the following steps:
+ * 1. Retrieves platform details such as HART count, stack size, and heap size.
+ * 2. Sets up the scratch space for all HARTs by calculating the appropriate memory addresses.
+ * 3. Initializes the heap base address.
+ * 4. Configures the scratch space for HART 0 by storing various firmware parameters.
+ * 5. Clears the trap context and temporary storage fields.
+ * 6. Stores the firmware options and HART index in the scratch space.
+ *
+ * * This structure describes the memory layout of the firmware:
+ * - *                 Memory Layout
+ * -                -------------
+ * -+---------------------------------------------------------+
+ * -| Firmware Region                                         |
+ * -|                                                         |
+ * -|  _fw_start                                              |
+ * -|    +-----------------------------------------------+    |
+ * -|    |   Firmware Code & Data                        |    |
+ * -|    |                                               |    |
+ * -|    |   (Includes the read/write (R/W) section,     |    |
+ * -|    |    beginning at _fw_rw_start)                   |    |
+ * -|    +-----------------------------------------------+    |
+ * -|  _fw_end                                                |
+ * -+---------------------------------------------------------+
+ * -| HART Stacks (for all HARTs, total size = s7 * s8)        |
+ * -|                                                         |
+ * -|  Hart 0 Stack:                                          |
+ * -|    +---------------------------+                        |
+ * -|    |  (Stack space)            |                        |
+ * -|    |                           |                        |
+ * -|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE    |
+ * -|    |    (holds various fields: |    (e.g., fw_start,     |
+ * -|    |     fw_start, fw_size,     |     fw_size, RW offset,  |
+ * -|    |     fw_rw_offset,         |     heap offset/size,    |
+ * -|    |     heap offset/size,     |     boot parameters,     |
+ * -|    |     boot addresses, etc.) |     etc.)                |
+ * -|    +---------------------------+                        |
+ * -+---------------------------------------------------------+
+ * -| Heap Region                                             |
+ * -|  (Contiguous block of size s9)                          |
+ * -|                                                         |
+ * -+---------------------------------------------------------+
+ * -
+ */
 fn init_scratch_space() {
     trap::clear_mdt_t0();
     unsafe {
@@ -381,7 +406,7 @@ fn init_scratch_space() {
         fw_start = sym _fw_start,
         fw_end = sym _fw_end,
         fw_rw_start = sym _fw_rw_start,
-        payload = sym kernel,
+        payload = sym kernel_udom,
         next_priv = const 1,
         platform = sym opensbi::platform,
         hartid_to_scratch = sym hartid_to_scratch,
@@ -406,19 +431,21 @@ fn init_scratch_space() {
     }
 }
 
+/*
+ * Calculates the starting address of the scratch space for a given HART (Hardware Thread).
+ *
+ * This function uses the HART ID and HART Index to determine the appropriate scratch space
+ * starting address. It retrieves platform details such as the HART stack size and count,
+ * and performs calculations to find the correct address.
+ *
+ * # Safety
+ *
+ * This function is unsafe because it directly manipulates machine-level registers and
+ * relies on specific memory layout assumptions. It should only be called in a controlled
+ * environment where these assumptions hold true.
+ */
 #[no_mangle]
 #[link_section = ".text._hartid_to_scratch"]
-/// Calculates the starting address of the scratch space for a given HART (Hardware Thread).
-///
-/// This function uses the HART ID and HART Index to determine the appropriate scratch space
-/// starting address. It retrieves platform details such as the HART stack size and count,
-/// and performs calculations to find the correct address.
-///
-/// # Safety
-///
-/// This function is unsafe because it directly manipulates machine-level registers and
-/// relies on specific memory layout assumptions. It should only be called in a controlled
-/// environment where these assumptions hold true.
 fn hartid_to_scratch() {
     /*
      * a0 -> HART ID (passed by caller)
@@ -451,21 +478,22 @@ fn hartid_to_scratch() {
     }
 }
 
+/*
+ * Initializes the warm start process for the system. This function sets up the stack,
+ * updates the machine scratch register, configures the trap handler, and initializes
+ * the SBI (Supervisor Binary Interface) for the scratch space. It is responsible for
+ * preparing the system to handle interrupts and manage the execution environment for
+ * each hardware thread (HART).
+ *
+ * # Safety
+ *
+ * This function is unsafe because it directly manipulates machine-level registers and
+ * relies on specific memory layout assumptions. It should only be called in a controlled
+ * environment where these assumptions hold true.
+ */
 #[no_mangle]
 #[link_section = ".text_start_warm"]
-/// Initializes the warm start process for the system. This function sets up the stack,
-/// updates the machine scratch register, configures the trap handler, and initializes
-/// the SBI (Supervisor Binary Interface) for the scratch space. It is responsible for
-/// preparing the system to handle interrupts and manage the execution environment for
-/// each hardware thread (HART).
-///
-/// # Safety
-///
-/// This function is unsafe because it directly manipulates machine-level registers and
-/// relies on specific memory layout assumptions. It should only be called in a controlled
-/// environment where these assumptions hold true.
 fn _start_warm() -> ! {
-    unsafe { asm!("li ra, 0") }
     reset_registers();
 
     disable_interrupts();
@@ -518,20 +546,98 @@ fn _start_warm() -> ! {
     }
 }
 
+/* The `kernel` function is the entry point for the kernel payload. It performs
+ * two calls (ecalls) to demonstrate interaction with the system's
+ * supervisor binary interface (SBI).
+ *
+ * # Safety
+ *
+ * This function is marked as unsafe because it involves direct interaction with
+ * machine-level registers and relies on specific memory layout assumptions. It
+ * should only be called in a controlled environment where these assumptions hold true.
+ */
 #[no_mangle]
-#[link_section = ".payload.kernel"]
-/// The `kernel` function is the entry point for the kernel payload. It performs
-/// two system calls (ecalls) to demonstrate interaction with the system's
-/// supervisor binary interface (SBI). The function sends a message to the console
-/// and then enters an infinite loop to halt further execution.
-///
-/// # Safety
-///
-/// This function is marked as unsafe because it involves direct interaction with
-/// machine-level registers and relies on specific memory layout assumptions. It
-/// should only be called in a controlled environment where these assumptions hold true.
-fn kernel() {
-    static MSG: [u8; 22] = *b"Hello world shadowfax\n";
+#[link_section = ".payload_udom"]
+fn kernel_udom() {
+    // set stack pointer
+    unsafe {
+        asm!(
+            // Load the address of the stack variable into t0.
+            "la   t0, {stack}",
+            // Load the stack size (8K) into t1.
+            "li   t1, {stack_size}",
+            // Set the stack pointer: sp = t0 + t1.
+            "add  sp, t0, t1",
+            stack = sym _payload_udom_end,
+            stack_size = const 4096 * 2,
+        )
+    }
+    #[link_section = ".payload_udom"]
+    static TSM_INFO: cove::TsmInfo = cove::TsmInfo {
+        tsm_state: cove::TsmState::TsmNotLoaded,
+        tsm_impl_id: 0,
+        tvm_vcpu_state_pages: 0,
+        tvm_max_vcpus: 0,
+        tvm_state_pages: 0,
+        tsm_capabilities: 0,
+        tsm_version: 0,
+    };
+    macro_rules! cove_pack_fid {
+        ($sdid:expr, $fid:expr) => {
+            (($sdid & 0x3F) << 26) | ($fid & 0xFFFF)
+        };
+    }
+    #[link_section = ".payload_udom"]
+    fn sbi_call(extid: usize, fid: usize, args: &[u64; 5]) -> SbiRet {
+        let (error, value);
+        unsafe {
+            core::arch::asm!(
+                "ecall",
+                in("a7") extid,
+                in("a6") fid,
+                inlateout("a0") args[0] => error,
+                inlateout("a1") args[1] => value,
+                in("a2") args[2],
+                in("a3") args[3],
+                in("a4") args[4],
+            );
+        }
+        SbiRet { error, value }
+    }
+
+    let active_domains = sbi_call(
+        cove::SUPD_EXT_ID as usize,
+        cove::SBI_EXT_SUPD_GET_ACTIVE_DOMAINS as usize,
+        &[0, 0, 0, 0, 0],
+    );
+
+    if active_domains.error != 0 {
+        loop {}
+    }
+    // If Domain 0 is available, call sbi_ext_cove_host_get_tsm_info ()
+    // to get domain 0 capabilities
+    if (active_domains.value & 0x01) == 1 {
+        let fid = cove_pack_fid!(0, cove::SBI_EXT_COVE_HOST_GET_TSM_INFO);
+        sbi_call(
+            cove::COVEH_EXT_ID as usize,
+            fid as usize,
+            &[
+                &raw const TSM_INFO as u64,
+                size_of::<TsmInfo>() as u64,
+                0,
+                0,
+                0,
+            ],
+        );
+    }
+
+    loop {}
+}
+
+#[no_mangle]
+#[link_section = ".payload_tdom"]
+fn kernel_tdom() {
+    static MSG: [u8; 32] = *b"Hello world shadowfax from dom1\n";
     unsafe {
         asm!(
             // First ecall: Send a message to the console
@@ -547,80 +653,39 @@ fn kernel() {
             "li a2, 0",
             "ecall",
 
+
             // Parameters for the ecalls
             extid1 = const 0x4442434E,
             fid1 = const 0x00,
-            len = const 22,
+            len = const MSG.len(),
             msg = sym MSG,
 
-            extid2 = const cove::COVH_EXT_ID
+            extid2 = const cove::COVEH_EXT_ID,
         );
     }
     loop {}
 }
 
+/*
+ * This function causes the processor to enter an infinite loop, effectively halting execution.
+ * It is typically used as a placeholder or to indicate a state where further execution should not proceed.
+ */
 #[inline(always)]
-/// This function causes the processor to enter an infinite loop, effectively halting execution.
-/// It is typically used as a placeholder or to indicate a state where further execution should not proceed.
 fn start_hang() {
-    loop {}
+    loop {
+        unsafe { asm!("wfi") }
+    }
 }
 
+/*
+ * Disables all interrupts by setting the machine interrupt-enable register (MIE) to zero.
+ *
+ * # Safety
+ *
+ * This function is unsafe because it directly manipulates the machine-level interrupt-enable register.
+ * It should be used with caution as it affects the global interrupt state.
+ */
 #[inline(always)]
-/// Disables all interrupts by setting the machine interrupt-enable register (MIE) to zero.
-///
-/// # Safety
-///
-/// This function is unsafe because it directly manipulates the machine-level interrupt-enable register.
-/// It should be used with caution as it affects the global interrupt state.
 fn disable_interrupts() {
     unsafe { asm!("csrw {csr_mie}, zero", csr_mie = const opensbi::CSR_MIE ) }
-}
-
-mod cove {
-    use crate::opensbi;
-
-    const COVH_EXT_NAME: [u8; 8] = *b"covh\0\0\0\0";
-    pub const COVH_EXT_ID: u64 = 0x434F5648;
-
-    #[link_section = ".text"]
-    unsafe extern "C" fn sbi_covh_handler(
-        _extid: u64,
-        _fid: u64,
-        _regs: *mut opensbi::sbi_trap_regs,
-        _ret: *mut opensbi::sbi_ecall_return,
-    ) -> i32 {
-        const UART: *mut u8 = 0x10000000 as *mut u8;
-
-        for c in "Hello from coveh\n".chars() {
-            unsafe {
-                core::ptr::write_volatile(UART, c as u8);
-            }
-        }
-        0
-    }
-
-    pub fn init() {
-        register_extensions();
-    }
-
-    fn register_extensions() {
-        let mut extensions: [opensbi::sbi_ecall_extension; 1] = [opensbi::sbi_ecall_extension {
-            experimental: true,
-            probe: None,
-            name: COVH_EXT_NAME,
-            extid_start: COVH_EXT_ID,
-            extid_end: COVH_EXT_ID,
-            handle: Some(sbi_covh_handler),
-            register_extensions: None,
-            head: opensbi::sbi_dlist {
-                next: core::ptr::null_mut(),
-                prev: core::ptr::null_mut(),
-            },
-        }];
-
-        for extension in &mut extensions {
-            unsafe { opensbi::sbi_ecall_register_extension(extension) };
-        }
-    }
 }
