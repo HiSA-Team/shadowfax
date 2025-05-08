@@ -58,6 +58,7 @@ SECTIONS {
     /* This space is reserved for the stack of the payload */
     . += 8192;
     PROVIDE(_payload_udom_end = .);
+
   }
   . = ALIGN(0x1000);
 

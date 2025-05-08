@@ -6,6 +6,7 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
+
 use fdt_rs::{base::DevTree, prelude::FallibleIterator};
 use heapless::Vec;
 use spin::mutex::SpinMutex;
@@ -22,6 +23,7 @@ macro_rules! cove_unpack_fid {
         (($fid >> 26) & 0x3F, $fid & 0xFFFF)
     };
 }
+
 #[link_section = ".data"]
 static mut SBI_COVE_HOST_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
     experimental: true,
@@ -125,6 +127,7 @@ pub fn init(fdt_address: usize) -> i32 {
             tvm_vcpu_state_pages: 0,
         });
     }
+
 
     // We need to register the cove host extension using the OpenSBI API.
     // The goal is to register an handler (sbi_coveh_handler) when our extension

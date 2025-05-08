@@ -72,6 +72,7 @@ unsafe extern "C" {
  */
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+
     loop {
         wfi();
     }
@@ -79,6 +80,7 @@ fn panic(_info: &PanicInfo) -> ! {
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
+
 
 /*
  * The _start function is the first functionloaded at the
@@ -421,6 +423,7 @@ extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
 
     scratch_end - opensbi::SBI_SCRATCH_SIZE as usize
 }
+
 
 // Needed for opensbi
 #[no_mangle]
