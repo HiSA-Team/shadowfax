@@ -85,8 +85,8 @@ fn panic(_info: &PanicInfo) -> ! {
  * TODO: make the payload name variable
  * NB: include_bytes! macro happens at build time.
  */
-#[link_section = ".rodata"]
-static PAYLOAD: [u8; include_bytes!("../kernel.elf").len()] = *include_bytes!("../kernel.elf");
+#[link_section = ".payload"]
+static PAYLOAD: [u8; include_bytes!("../test.elf").len()] = *include_bytes!("../test.elf");
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;

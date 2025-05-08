@@ -1,0 +1,19 @@
+# This configures the riscv64 toolchain. The builder sections specifes the target
+# architecture. By default it is `riscv64imac-unknown-none-elf`. It can be overridden
+# from cargo cli. For example: cargo run --target <different-target>.
+# Rustflags can be ovveridden with the environment variable RUSTFLAGS.
+# This settings apply to all rust code in this repository as Cargo automatically reads
+# this file.
+#
+# Author: Giuseppe Capasso <capassog97@gmail.com>
+
+[build]
+target = "riscv64imac-unknown-none-elf"
+rustflags = [
+    "-C", "link-arg=-Tmemory.x",   # Add linker script "{projectdir}/res/memory.ld"
+    "-C", "link-arg=-Tlink.x",
+    "-C", "opt-level=0",                # Don't optimize
+]
+
+[target.riscv64imac-unknown-none-elf]
+linker = "riscv64-linux-musl-ld"

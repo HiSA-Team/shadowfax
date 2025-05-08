@@ -101,4 +101,5 @@ fn main() {
     // Rerun build.rs if one of these files changes.
     println!("cargo::rerun-if-changed=wrapper.h");
     println!("cargo::rerun-if-changed=linker.ld");
+    println!("cargo::rerun-if-changed=build.rs");
 }

@@ -21,7 +21,7 @@ SECTIONS {
     *(.text*);
   }
   .rodata : ALIGN(4K) {
-    *(.rodata .rodata.*);
+    *(.rodata.*);
     . = ALIGN(4K);
   }
 
@@ -30,7 +30,7 @@ SECTIONS {
 
   PROVIDE(_fw_rw_start = .);
   .data : ALIGN(4K) {
-    *(.data .data.*);
+    *(.data.*);
     . = ALIGN(4K);
   }
 
@@ -49,6 +49,10 @@ SECTIONS {
 
   /* Give the stack some space */
   . = FW_TDOM_PAYLOAD_START;
+  .payload : ALIGN(16K) {
+    *(.payload);
+    . = ALIGN(4K);
+  }
 
   /* This is for temporary stack at boot */
   . += 8192;

@@ -15,7 +15,7 @@ use super::{
 };
 use crate::opensbi;
 
-#[link_section = ".data"]
+#[link_section = ".data.supd_ext"]
 static mut SBI_SUPD_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
     experimental: true,
     probe: None,

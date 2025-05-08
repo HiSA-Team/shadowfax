@@ -22,7 +22,7 @@ macro_rules! cove_unpack_fid {
         (($fid >> 26) & 0x3F, $fid & 0xFFFF)
     };
 }
-#[link_section = ".data"]
+#[link_section = ".data.cove_ext"]
 static mut SBI_COVE_HOST_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
     experimental: true,
     probe: None,
