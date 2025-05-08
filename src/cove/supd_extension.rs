@@ -90,6 +90,7 @@ pub fn init() -> i32 {
  * Returns:
  * - Sbiret.error =
  * - Sbiret.value = a bitmask of active‐domain identifiers.
+
  */
 fn sbi_supd_get_active_domains() -> SbiRet {
     let mut ret: isize = 0;

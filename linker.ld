@@ -47,7 +47,6 @@ SECTIONS {
   /* End of the read-write data sections */
   PROVIDE(_fw_end = .);
 
-  /* Give the stack some space */
   . = FW_TDOM_PAYLOAD_START;
   .payload : ALIGN(16K) {
     *(.payload);
