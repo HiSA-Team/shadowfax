@@ -33,13 +33,11 @@ use riscv::asm::wfi;
 
 mod cove;
 
-/*
- * This module includes the `bindings.rs` generated
- * using `build.rs` which translates opensbi C definitions
- * in Rust. This could be also be included without the module,
- * but doing in this way mandates that every opensbi symbol
- * is used with `opensbi::<symbol>`.
- */
+/// This module includes the `bindings.rs` generated
+/// using `build.rs` which translates opensbi C definitions
+/// in Rust. This could be also be included without the module,
+/// but doing in this way mandates that every opensbi symbol
+/// is used with `opensbi::<symbol>`.
 mod opensbi {
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
@@ -50,11 +48,9 @@ mod opensbi {
 
 mod trap;
 
-/*
- * This "object" is just to hold symbols declared in the linkerscript
- * In `linker.ld`, we define this values and this is a way to access them
- * from Rust.
- */
+/// This "object" is just to hold symbols declared in the linkerscript
+/// In `linker.ld`, we define this values and this is a way to access them
+/// from Rust.
 unsafe extern "C" {
     static _fw_start: u8;
     static _fw_end: u8;
@@ -74,29 +70,25 @@ fn panic(_info: &PanicInfo) -> ! {
     }
 }
 
-/*
- * We include the `next-stage` .elf in the firmware as read-only data.
- * We cannot execute directly from here since we will have problems with non-executable
- * sections. The `load_elf` function will load this .elf in memory.
- * This technique "mocks" what happens when we pass the `-kernel` flag to QEMU.
- * However this will be more flexible since we will likely need to load more
- * payloads to support different domain.
- *
- * TODO: make the payload name variable
- * NB: include_bytes! macro happens at build time.
- */
+/// We include the `next-stage` .elf in the firmware as read-only data.
+/// We cannot execute directly from here since we will have problems with non-executable
+/// sections. The `load_elf` function will load this .elf in memory.
+/// This technique "mocks" what happens when we pass the `-kernel` flag to QEMU.
+/// However this will be more flexible since we will likely need to load more
+/// payloads to support different domain.
+///
+/// TODO: make the payload name variable
+/// NB: include_bytes! macro happens at build time.
 #[link_section = ".payload"]
 static PAYLOAD: [u8; include_bytes!("../test.elf").len()] = *include_bytes!("../test.elf");
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
 
-/*
- * The _start function is the first functionloaded at the
- * starting address of the linkerscript. Here we setup a
- * temporary stack at the end of the firmware and jump to
- * main function
- */
+/// The _start function is the first functionloaded at the
+/// starting address of the linkerscript. Here we setup a
+/// temporary stack at the end of the firmware and jump to
+/// main function
 #[link_section = ".text.entry"]
 #[no_mangle]
 extern "C" fn start() -> ! {
@@ -165,18 +157,16 @@ enum PrivMode {
     PrivU = 0,
 }
 
-/*
- * The main function serves as the entry point for the firmware execution. It performs
- * several critical initialization tasks to prepare the system for operation. These tasks
- * include zeroing out the BSS section, setting up a temporary trap handler, initializing
- * the platform, configuring the scratch space, and starting the warm boot process.
- *
- * # Safety
- *
- * This function is marked as unsafe because it involves direct manipulation of machine-level
- * registers and relies on specific memory layout assumptions. It should only be called in a
- * controlled environment where these assumptions hold true.
- */
+/// The main function serves as the entry point for the firmware execution. It performs
+/// several critical initialization tasks to prepare the system for operation. These tasks
+/// include zeroing out the BSS section, setting up a temporary trap handler, initializing
+/// the platform, configuring the scratch space, and starting the warm boot process.
+///
+/// # Safety
+///
+/// This function is marked as unsafe because it involves direct manipulation of machine-level
+/// registers and relies on specific memory layout assumptions. It should only be called in a
+/// controlled environment where these assumptions hold true.
 #[link_section = ".text"]
 extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
     unsafe {
@@ -230,7 +220,8 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
 
     // Load the elf. The function gives back the entry point
     let entry = load_elf(&PAYLOAD);
-    /* This code initializes the scratch space, which is a per-HART data structure
+    /*
+     * This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
      * parameters and configurations necessary for the operation of the RISC-V system.
      *
@@ -247,8 +238,8 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
      * 5. Clears the trap context and temporary storage fields.
      * 6. Stores the firmware options and HART index in the scratch space.
      *
-     * * This structure describes the memory layout of the firmware:
-     * - *                 Memory Layout
+     * This structure describes the memory layout of the firmware:
+     * -                 Memory Layout
      * -                -------------
      * -+---------------------------------------------------------+
      * -| Firmware Region                                         |
@@ -280,7 +271,6 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
      * -|  (Contiguous block of size s9)                          |
      * -|                                                         |
      * -+---------------------------------------------------------+
-     * -
      */
     // Setup scratch space for all harts
     let hart_count = unsafe { opensbi::platform.hart_count } as usize;
@@ -414,19 +404,17 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
     }
 }
 
-/*
- * Calculates the starting address of the scratch space for a given HART (Hardware Thread).
- *
- * This function uses the HART ID and HART Index to determine the appropriate scratch space
- * starting address. It retrieves platform details such as the HART stack size and count,
- * and performs calculations to find the correct address.
- *
- * # Safety
- *
- * This function is unsafe because it directly manipulates machine-level registers and
- * relies on specific memory layout assumptions. It should only be called in a controlled
- * environment where these assumptions hold true.
- */
+/// Calculates the starting address of the scratch space for a given HART (Hardware Thread).
+///
+/// This function uses the HART ID and HART Index to determine the appropriate scratch space
+/// starting address. It retrieves platform details such as the HART stack size and count,
+/// and performs calculations to find the correct address.
+///
+/// # Safety
+///
+/// This function is unsafe because it directly manipulates machine-level registers and
+/// relies on specific memory layout assumptions. It should only be called in a controlled
+/// environment where these assumptions hold true.
 #[link_section = ".text"]
 extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
     // Number of harts, stack size & heap size from the OpenSBI platform struct:
@@ -452,16 +440,14 @@ extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
     scratch_addr
 }
 
-/*
- * This functions loads an elf in memory and returns the entry address.
- * Loading an elf in memory means to load the LOAD segments.
- *
- * Params:
- *  - data: the slice of the included elf
- *
- *  Returns:
- *  - the entry point address
- */
+/// This functions loads an elf in memory and returns the entry address.
+/// Loading an elf in memory means to load the LOAD segments.
+///
+/// Params:
+///  - data: the slice of the included elf
+///
+///  Returns:
+///  - the entry point address
 #[link_section = ".text"]
 fn load_elf(data: &[u8]) -> usize {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(data).unwrap();
@@ -505,10 +491,8 @@ fn load_elf(data: &[u8]) -> usize {
 #[no_mangle]
 fn _start_warm() {}
 
-/*
- * This function causes the processor to enter an infinite loop, effectively halting execution.
- * It is typically used as a placeholder or to indicate a state where further execution should not proceed.
- */
+/// This function causes the processor to enter an infinite loop, effectively halting execution.
+/// It is typically used as a placeholder or to indicate a state where further execution should not proceed.
 #[repr(align(4))]
 fn hang() {
     loop {

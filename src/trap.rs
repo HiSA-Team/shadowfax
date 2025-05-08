@@ -11,10 +11,8 @@
 use crate::opensbi;
 use core::{arch::asm, mem::offset_of};
 
-/*
- * The main trap handler function that orchestrates the saving and restoring of registers
- * and calls the C routine to handle the trap.
- */
+/// The main trap handler function that orchestrates the saving and restoring of registers
+/// and calls the C routine to handle the trap.
 #[no_mangle]
 #[link_section = ".text._trap_handler"]
 #[repr(align(4))]
@@ -28,6 +26,7 @@ pub unsafe extern "C" fn _trap_handler() {
         "csrrw tp, mscratch, tp",
         "sd t0, {sbi_scratch_tmp0_offset}(tp)",
         /*
+         * From fw_base.S
          * Set T0 to appropriate exception stack
          *
          * Came_From_M_Mode = ((MSTATUS.MPP < PRV_M) ? 1 : 0) - 1;
@@ -238,8 +237,8 @@ pub unsafe extern "C" fn _trap_handler() {
         "csrw mstatus, t0",
         "ld t0, {sbi_trap_regs_offset_mepc}(a0)",
         "csrw mepc, t0",
-        sbi_trap_regs_offset_mstatus= const opensbi::SBI_TRAP_REGS_mstatus * 8,
-        sbi_trap_regs_offset_mepc = const opensbi::SBI_TRAP_REGS_mepc * 8,
+        sbi_trap_regs_offset_mstatus= const offset_of!(opensbi::sbi_trap_regs, mstatus),
+        sbi_trap_regs_offset_mepc = const offset_of!(opensbi::sbi_trap_regs, mepc),
     );
     /*
      * Restores the A0 and T0 registers from the trap context stack.

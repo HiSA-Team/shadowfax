@@ -37,24 +37,18 @@ static mut SBI_COVE_HOST_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_
     },
 };
 
-/*
- * This static variable represents the global state of the TSM (Trusted Software Module).
- * It is protected by a SpinMutex to ensure safe concurrent access across different threads.
- * The TsmInfo struct holds various state information about the TSM, such as its current state,
- * implementation ID, version, capabilities, and other info.
- *
- * TODO: make this heap allocated with a static vector
- *
- */
+/// This static variable represents the global state of the TSM (Trusted Software Module).
+/// It is protected by a SpinMutex to ensure safe concurrent access across different threads.
+/// The TsmInfo struct holds various state information about the TSM, such as its current state,
+/// implementation ID, version, capabilities, and other info.
+///
+/// TODO: make this heap allocated with a static vector
 #[link_section = ".data"]
 pub static TSM_INFO: SpinMutex<Vec<TsmInfo, 64>> = SpinMutex::new(Vec::new());
 
-/*
- * The coveh handler as mandated by Opensbi. Each ecall targeting this extension is
- * routed to this function. Based on fid (function id) and according to the CoVE
- * specification all required function will be implmented here.
- *
- */
+/// The coveh handler as mandated by Opensbi. Each ecall targeting this extension is
+/// routed to this function. Based on fid (function id) and according to the CoVE
+/// specification all required function will be implmented here.
 #[link_section = ".text"]
 pub unsafe extern "C" fn sbi_coveh_handler(
     _extid: u64,
@@ -86,11 +80,11 @@ pub unsafe extern "C" fn sbi_coveh_handler(
     }
 }
 
-/*
- * This function initialize the coveh extension by registering an opensbi extension
- * and set the SHADOWFAX_INFO.TsmState to TsmState::TsmReady.
- *
- */
+/// This function initialize the coveh extension by registering an opensbi extension
+/// and init the TSMs in the platform. TSMs are currenty parsed from the device tree.
+///
+/// Input:
+///  - fdt_address: address of FDT (Flattened Device Tree)
 #[link_section = ".text"]
 pub fn init(fdt_address: usize) -> i32 {
     // init at least domain 0
@@ -132,17 +126,15 @@ pub fn init(fdt_address: usize) -> i32 {
     unsafe { opensbi::sbi_ecall_register_extension(&raw mut SBI_COVE_HOST_EXTENSION) }
 }
 
-/*
- * Retrieves the current TSM state, configuration, and supported features.
- *
- * Parameters:
- * - sdid:
- * - tsm_info_address: A 4-byte aligned physical memory address where the TSM will write the TsmInfo struct.
- * - tsm_info_len: The size of the TsmInfo struct.
- *
- * Returns:
- * - The number of bytes written to tsm_info_address on success.
- */
+/// Retrieves the current TSM state, configuration, and supported features.
+///
+/// Parameters:
+/// - sdid:
+/// - tsm_info_address: A 4-byte aligned physical memory address where the TSM will write the TsmInfo struct.
+/// - tsm_info_len: The size of the TsmInfo struct.
+///
+/// Returns:
+/// - The number of bytes written to tsm_info_address on success.
 fn sbi_covh_get_tsm_info(sdid: usize, tsm_info_address: usize, tsm_info_len: usize) -> SbiRet {
     let needed = core::mem::size_of::<TsmInfo>();
     let info = TSM_INFO.lock();
