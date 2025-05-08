@@ -48,9 +48,11 @@ mod opensbi {
 
 mod trap;
 
-/// This "object" is just to hold symbols declared in the linkerscript
-/// In `linker.ld`, we define this values and this is a way to access them
-/// from Rust.
+/*
+ * This "object" is just to hold symbols declared in the linkerscript
+ * In `linker.ld`, we define this values and this is a way to access them
+ * from Rust.
+ */
 unsafe extern "C" {
     static _fw_start: u8;
     static _fw_end: u8;
@@ -63,11 +65,10 @@ unsafe extern "C" {
 /*
  * This is needed for rust bare metal programs
  */
+#[inline(never)]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        wfi();
-    }
+    loop {}
 }
 
 /// We include the `next-stage` .elf in the firmware as read-only data.
