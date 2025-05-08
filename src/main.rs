@@ -27,11 +27,9 @@
 #![feature(fn_align)]
 use core::{arch::asm, ffi, panic::PanicInfo};
 
+use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
 use heapless::Vec;
 use riscv::asm::wfi;
-
-use cove::{SbiRet, TsmInfo};
-use spin::mutex::SpinMutex;
 
 mod cove;
 
@@ -61,10 +59,9 @@ unsafe extern "C" {
     static _fw_start: u8;
     static _fw_end: u8;
     static _fw_rw_start: u8;
-    static _bss_start: u8;
-    static _bss_end: u8;
-    static _stack_top: u8;
-    static _payload_udom_end: u8;
+    static _start_bss: u8;
+    static _end_bss: u8;
+    static _top_b_stack: u8;
 }
 
 /*
@@ -76,6 +73,20 @@ fn panic(_info: &PanicInfo) -> ! {
         wfi();
     }
 }
+
+/*
+ * We include the `next-stage` .elf in the firmware as read-only data.
+ * We cannot execute directly from here since we will have problems with non-executable
+ * sections. The `load_elf` function will load this .elf in memory.
+ * This technique "mocks" what happens when we pass the `-kernel` flag to QEMU.
+ * However this will be more flexible since we will likely need to load more
+ * payloads to support different domain.
+ *
+ * TODO: make the payload name variable
+ * NB: include_bytes! macro happens at build time.
+ */
+#[link_section = ".rodata"]
+static PAYLOAD: [u8; include_bytes!("../kernel.elf").len()] = *include_bytes!("../kernel.elf");
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
@@ -95,11 +106,13 @@ extern "C" fn start() -> ! {
             "csrr s6, mhartid",
             // If not zero, go to wait loop
             "bnez s6, {hang}",
-            // setup a temporary stack pointer at the end of the firmware
+
+            // setup a temporary stack pointer
             "li t0, {stack_size_per_hart}",
+            "mul t1, a0, t0",
             "la sp, {stack_top}",
-            // In RISCV stacks goes downward
-            "add sp, sp, t0",
+            "sub sp, sp, t1",
+
             // zero out bss
             // Load the address of _bss_start into s4
             "la s4, {bss_start}",
@@ -134,12 +147,12 @@ extern "C" fn start() -> ! {
             // Jump to our main function
             "call {main}",
             stack_size_per_hart = const STACK_SIZE_PER_HART,
-            stack_top = sym _stack_top,
+            stack_top = sym _top_b_stack,
             hang = sym hang,
             fw_platform_init = sym opensbi::fw_platform_init,
             main = sym main,
-            bss_start = sym _bss_start,
-            bss_end = sym _bss_end,
+            bss_start = sym _start_bss,
+            bss_end = sym _end_bss,
             pointer_size = const size_of::<usize>(),
             options(noreturn)
         )
@@ -212,6 +225,11 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
+    // initialize cove extension
+    cove::init(fdt_address);
+
+    // Load the elf. The function gives back the entry point
+    let entry = load_elf(&PAYLOAD);
     /* This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
      * parameters and configurations necessary for the operation of the RISC-V system.
@@ -313,7 +331,7 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
             // next_arg1: the fdt_address passed to the next stage
             next_arg1: fdt_address as ffi::c_ulong,
             // next_addr: address of the next stage
-            next_addr: kernel_udom as ffi::c_ulong,
+            next_addr: entry as ffi::c_ulong,
             // next_mode: mode used to launch next_addr
             next_mode: PrivMode::PrivS as ffi::c_ulong,
             // warmboot_addr: address of the warmboot function.
@@ -351,12 +369,11 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
 
         unsafe {
             // write the structure to the calculated address
-            p.write(sbi_scratch);
+            p.write_volatile(sbi_scratch);
         }
+        let check: opensbi::sbi_scratch = unsafe { p.read() };
+        assert_eq!(check.warmboot_addr, 0);
     }
-
-    // initialize cove extension
-    cove::init(fdt_address);
 
     // Prepare and jump to sbi_init. We need to:
     //  - disable interrupts
@@ -376,8 +393,7 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         asm!(
             "csrr a0, mscratch",
             "add tp, a0, zero",
-            "add sp, tp, zero",
-            options(nomem)
+            options(nomem, nostack)
         );
 
         let scratch_addr = riscv::register::mscratch::read();
@@ -391,6 +407,9 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
 
         // call sbi_init for the current hart
         let sbi_scratch_addr = scratch_addr as *mut opensbi::sbi_scratch;
+        asm!(
+        "add sp, tp, {}", in(reg) opensbi::SBI_SCRATCH_SIZE
+        );
         opensbi::sbi_init(sbi_scratch_addr)
     }
 }
@@ -410,122 +429,81 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
  */
 #[link_section = ".text"]
 extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
-    // temp variables
-    let hart_count = unsafe { opensbi::platform.hart_count };
-    let hart_stack_size = unsafe { opensbi::platform.hart_stack_size };
+    // Number of harts, stack size & heap size from the OpenSBI platform struct:
+    let hart_count = unsafe { opensbi::platform.hart_count as usize };
+    let hart_stack_sz = unsafe { opensbi::platform.hart_stack_size as usize };
+    let heap_sz = unsafe { opensbi::platform.heap_size as usize };
+
+    // End of firmware code/data section:
     let fw_end = unsafe { &_fw_end as *const u8 as usize };
 
-    let target_hart = hart_count as usize - hartindex;
-    let stack_offset = target_hart * hart_stack_size as usize;
-    let scratch_end = fw_end + stack_offset;
+    // Total top-of-memory after firmware + all stacks + heap:
+    let fw_end_tot = fw_end + hart_count * hart_stack_sz + heap_sz;
 
-    scratch_end - opensbi::SBI_SCRATCH_SIZE as usize
+    // Compute exactly where you wrote the i-th hart’s scratch:
+    let scratch_addr = fw_end_tot
+        // back off the heap
+        .saturating_sub(heap_sz)
+        // back off earlier hart stacks
+        .saturating_sub(hart_stack_sz * hartindex)
+        // back off the scratch size itself
+        .saturating_sub(opensbi::SBI_SCRATCH_SIZE as usize);
+
+    scratch_addr
+}
+
+/*
+ * This functions loads an elf in memory and returns the entry address.
+ * Loading an elf in memory means to load the LOAD segments.
+ *
+ * Params:
+ *  - data: the slice of the included elf
+ *
+ *  Returns:
+ *  - the entry point address
+ */
+#[link_section = ".text"]
+fn load_elf(data: &[u8]) -> usize {
+    let elf = ElfBytes::<AnyEndian>::minimal_parse(data).unwrap();
+    let all_load_phdrs = elf
+        .segments()
+        .unwrap()
+        .iter()
+        .filter(|phdr| phdr.p_type == PT_LOAD)
+        .collect::<Vec<ProgramHeader, 128>>();
+
+    for segment in all_load_phdrs {
+        // Get segment details
+        let p_offset = segment.p_offset as usize;
+        let p_filesz = segment.p_filesz as usize;
+        let p_paddr = segment.p_paddr as *mut u8;
+        let p_memsz = segment.p_memsz as usize;
+        // Check if the segment data is within bounds
+        assert!(
+            p_offset + p_filesz <= data.len(),
+            "Segment data out of bounds"
+        );
+
+        // Copy the segment data to RAM
+        let segment_data = &data[p_offset..p_offset + p_filesz];
+        unsafe {
+            core::ptr::copy_nonoverlapping(segment_data.as_ptr(), p_paddr, p_filesz);
+        }
+        // zero any .bss past the end of file
+        if p_memsz > p_filesz {
+            let bss_start = unsafe { p_paddr.add(p_filesz) };
+            let bss_len = p_memsz - p_filesz;
+            unsafe { core::ptr::write_bytes(bss_start, 0, bss_len) }
+        }
+    }
+
+    // Return the entry point address of the ELF
+    elf.ehdr.e_entry as usize
 }
 
 // Needed for opensbi
 #[no_mangle]
 fn _start_warm() {}
-
-#[link_section = ".payload_udom"]
-static DOMAINS: SpinMutex<Vec<cove::TsmInfo, 64>> = SpinMutex::new(Vec::new());
-
-#[link_section = ".payload_udom"]
-fn sbi_call(extid: usize, fid: usize, args: &[u64; 5]) -> SbiRet {
-    let (error, value);
-    unsafe {
-        core::arch::asm!(
-            "ecall",
-            in("a7") extid,
-            in("a6") fid,
-            inlateout("a0") args[0] => error,
-            inlateout("a1") args[1] => value,
-            in("a2") args[2],
-            in("a3") args[3],
-            in("a4") args[4],
-        );
-    }
-    SbiRet { error, value }
-}
-
-#[link_section = ".payload_udom"]
-static SBI_ARGS: SpinMutex<[u64; 5]> = SpinMutex::new([0, 0, 0, 0, 0]);
-
-/* The `kernel_udom` function is the entry point for the untrusted kernel payload.
- * It performs ecalls to demonstrate interaction with the system's
- * supervisor binary interface (SBI). The function sends a message to the console
- * and then enters an infinite loop to halt further execution.
- *
- * For now, it uses SUPD extension to get active domains (sbi_supd_get_active_domains) and
- * for each one retrieves the state using sbi_ext_cove_host_get_tsm_info()
- *
- * # Safety
- *
- * This function is marked as unsafe because it involves direct interaction with
- * machine-level registers and relies on specific memory layout assumptions. It
- * should only be called in a controlled environment where these assumptions hold true.
- */
-#[link_section = ".payload_udom"]
-fn kernel_udom() {
-    // set stack pointer
-    unsafe {
-        asm!(
-            // Load the address of the stack variable into t0.
-            "la   t0, {stack}",
-            // Load the stack size (8K) into t1.
-            "li   t1, {stack_size}",
-            // Set the stack pointer: sp = t0 + t1.
-            "add  sp, t0, t1",
-            stack = sym _payload_udom_end,
-            stack_size = const 4096 * 2,
-        )
-    }
-
-    macro_rules! cove_pack_fid {
-        ($sdid:expr, $fid:expr) => {
-            (($sdid & 0x3F) << 26) | ($fid & 0xFFFF)
-        };
-    }
-
-    // get all active_domains
-    let args = SBI_ARGS.lock();
-    let active_domains = sbi_call(
-        cove::SUPD_EXT_ID as usize,
-        cove::SBI_EXT_SUPD_GET_ACTIVE_DOMAINS as usize,
-        &args,
-    );
-
-    // register active domains in our structure
-    let domain_mask = active_domains.value;
-    for i in 0..64 {
-        if ((domain_mask >> i) & 0x01) == 1 {
-            DOMAINS
-                .lock()
-                .insert(
-                    i,
-                    TsmInfo {
-                        tsm_state: cove::TsmState::TsmLoaded,
-                        tsm_impl_id: 0,
-                        tsm_version: 0,
-                        tsm_capabilities: 0,
-                        tvm_state_pages: 0,
-                        tvm_max_vcpus: 0,
-                        tvm_vcpu_state_pages: 0,
-                    },
-                )
-                .unwrap()
-        }
-    }
-
-    for (i, domain) in DOMAINS.lock().iter_mut().enumerate() {
-        let mut sbi_args = SBI_ARGS.lock();
-        let fid = cove_pack_fid!(i, cove::SBI_EXT_COVE_HOST_GET_TSM_INFO as usize);
-        sbi_args[0] = &raw const domain as u64;
-        sbi_args[1] = size_of::<TsmInfo>() as u64;
-        sbi_call(cove::COVEH_EXT_ID as usize, fid, &sbi_args);
-    }
-
-    loop {}
-}
 
 /*
  * This function causes the processor to enter an infinite loop, effectively halting execution.

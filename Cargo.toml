@@ -25,6 +25,7 @@ authors = ["Giuseppe Capasso"]
 bindgen = "0.71.1"
 
 [dependencies]
+elf = { version = "0.7.2", default-features = false }
 fdt-rs = {version = "0.4", default-features = false}
 heapless = "0.8.0"
 riscv = "0.13.0"
