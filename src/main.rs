@@ -79,7 +79,7 @@ fn panic(_info: &PanicInfo) -> ! {
 /// payloads to support different domain.
 ///
 /// TODO: make the payload name variable
-#[link_section = ".payload.udom"]
+#[link_section = ".payload"]
 static PAYLOAD: &[u8] = include_bytes!("../test.elf");
 
 /// Custom device tree supporting opensbi domains.
