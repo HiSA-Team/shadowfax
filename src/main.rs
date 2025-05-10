@@ -79,17 +79,32 @@ fn panic(_info: &PanicInfo) -> ! {
 /// payloads to support different domain.
 ///
 /// TODO: make the payload name variable
-/// NB: include_bytes! macro happens at build time.
-#[link_section = ".payload"]
-static PAYLOAD: [u8; include_bytes!("../test.elf").len()] = *include_bytes!("../test.elf");
+#[link_section = ".payload.udom"]
+static PAYLOAD: &[u8] = include_bytes!("../test.elf");
+
+/// Custom device tree supporting opensbi domains.
+#[link_section = ".dtb"]
+static DTB: [u8; include_bytes!("../device-tree.dtb").len()] =
+    *include_bytes!("../device-tree.dtb");
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
 
-/// The _start function is the first functionloaded at the
-/// starting address of the linkerscript. Here we setup a
+/// The _start function is the first functio loaded at the starting address of
+/// the linkerscript. This function:
+///
+/// - setup a the stack pointer
+/// - loads the custom device tree in `a1` register overwritng the default one
+/// provided by qemu
+/// - zero bss section
+/// - call `fw_platform_init` provided by opensbi
+/// - jump to main
 /// temporary stack at the end of the firmware and jump to
-/// main function
+/// main function.
+/// Since qemu does not support creating opensbi domains
+/// from the cli, we need to provide a custom linkerscript.
+/// The linkerscript will be loaded in the firmware elf
+/// using the
 #[link_section = ".text.entry"]
 #[no_mangle]
 extern "C" fn start() -> ! {
@@ -100,6 +115,9 @@ extern "C" fn start() -> ! {
             // If not zero, go to wait loop
             "bnez s6, {hang}",
 
+            // write in `a1` the new device tree
+            "lla a1, {dtb_address}",
+
             // setup a temporary stack pointer
             "li t0, {stack_size_per_hart}",
             "mul t1, a0, t0",
@@ -107,15 +125,12 @@ extern "C" fn start() -> ! {
             "sub sp, sp, t1",
 
             // zero out bss
-            // Load the address of _bss_start into s4
             "la s4, {bss_start}",
-            // Load the address of _bss_end into s5
             "la s5, {bss_end}",
             "0:",
-            // Store zero to the address pointed
             "sd zero, 0(s4)",
-            // Increment s4 by the size of a double word (8 bytes)
             "addi s4, s4, {pointer_size}",
+
             // Loop if s4 is less than s5
             "blt s4, s5, 0b",
             // call fw_platform_init
@@ -139,6 +154,7 @@ extern "C" fn start() -> ! {
             "add a1, t0, zero",
             // Jump to our main function
             "call {main}",
+            dtb_address = sym DTB,
             stack_size_per_hart = const STACK_SIZE_PER_HART,
             stack_top = sym _top_b_stack,
             hang = sym hang,
