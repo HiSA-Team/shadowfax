@@ -104,4 +104,5 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     #[rustfmt::skip]
     println!("cargo::rerun-if-changed={}", out_path.join("memory.x").display());
+    println!("cargo::rerun-if-changed={}", dts_file.display());
 }
