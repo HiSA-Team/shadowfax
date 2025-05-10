@@ -3,6 +3,7 @@
  *      - link opensbi static library;
  *      - generate rust bindings from opensbi include;
  *      - specify correct linkerscript and define symbols depending on the platform
+ *      - compile the device tree
  *
  *  The idea of a build script is well documented here
  *  "https://doc.rust-lang.org/cargo/reference/build-scripts.html".
@@ -10,56 +11,56 @@
  * The `build.rs` is executed on the build host and not on the target.
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
-use std::env;
 use std::path::PathBuf;
+use std::process::Command;
+use std::{env, fs};
 
-// Platform holds platform specific data needed at build time.
-struct Platform<'a> {
-    name: &'a str,
-    fw_text_start_address: usize,
-    fw_udom_payload_start_address: usize,
-    fw_tdom_payload_start_address: usize,
-}
-
-// PLATFORMS describe all supported platform by shadowafax
-const PLATFORMS: &[Platform] = &[Platform {
-    name: "generic",
-    fw_text_start_address: 0x80000000,
-    fw_udom_payload_start_address: 0x80060000,
-    fw_tdom_payload_start_address: 0x80100000,
-}];
+const PLATFORM_BASE: &str = "platform";
 
 fn main() {
+    // output directory
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+
     // Sourcing `scripts/environment.sh` allow users to specify a PLATFORM (defaults to 'generic').
     // Retrieve platform details if exists otherwise throw an error
-    let platform = env::var("PLATFORM").unwrap_or("generic".to_string());
-    let platform = PLATFORMS
-        .iter()
-        .find(|v| v.name == platform.as_str())
-        .unwrap_or_else(|| panic!("Unsupported platform: {platform}"));
+    let platform = env::var("PLATFORM").unwrap_or_else(|_| "generic".to_string());
+    let platform = if platform == "generic" {
+        "qemu-generic".to_string()
+    } else {
+        platform
+    };
+
+    // write the selected linkerscript where the rust can find it
+    let platform_dir = PathBuf::from(PLATFORM_BASE).join(platform);
+    let content = fs::read(platform_dir.join("memory.x")).unwrap();
+
+    // save linkerscript where we can find it.
+    fs::write(out_path.join("memory.x"), content).unwrap();
+
+    // compile the device tree
+    let dts_file = platform_dir.join("device-tree.dts");
+    let dtb_file = "device-tree.dtb";
+    let status = Command::new("dtc")
+        .args([
+            "-I",
+            "dts",
+            "-O",
+            "dtb",
+            "-o",
+            dtb_file,
+            dts_file.to_str().unwrap(),
+        ])
+        .status()
+        .expect("Failed to execute dtc");
+
+    assert!(status.success(), "dtc failed with exit status: {status}");
 
     // Disable compiler optimization for now.
     println!("cargo:rustc=opt-level=0");
 
-    // Define variables for linkerscript to make it parametric. The next instructions
-    // populate the FW_TEXT_START and FW_PAYLOAD_START symbols in `linker.ld`
-    println!(
-        "cargo:rustc-link-arg=--defsym=FW_TEXT_START={}",
-        platform.fw_text_start_address,
-    );
-
-    println!(
-        "cargo:rustc-link-arg=--defsym=FW_UDOM_PAYLOAD_START={}",
-        platform.fw_udom_payload_start_address,
-    );
-
-    println!(
-        "cargo:rustc-link-arg=--defsym=FW_TDOM_PAYLOAD_START={}",
-        platform.fw_tdom_payload_start_address,
-    );
-
     // Tell the linker to use our linkerscript "linker.ld" and pass `-static` and `-nostdlib` flags
-    println!("cargo:rustc-link-arg=-Tlinker.ld");
+    #[rustfmt::skip]
+    println!("cargo:rustc-link-arg=-T{}", out_path.join("memory.x").display());
     println!("cargo:rustc-link-arg=-static");
     println!("cargo:rustc-link-arg=-nostdlib");
 
@@ -100,6 +101,7 @@ fn main() {
 
     // Rerun build.rs if one of these files changes.
     println!("cargo::rerun-if-changed=wrapper.h");
-    println!("cargo::rerun-if-changed=linker.ld");
     println!("cargo::rerun-if-changed=build.rs");
+    #[rustfmt::skip]
+    println!("cargo::rerun-if-changed={}", out_path.join("memory.x").display());
 }
