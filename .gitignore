@@ -1,6 +1,7 @@
 /**/build
 /**/.venv
-*.elf *.bin
+*.elf
+*.bin
 *.o
 
 
