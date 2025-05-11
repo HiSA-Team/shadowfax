@@ -80,7 +80,7 @@ fn panic(_info: &PanicInfo) -> ! {
 ///
 /// TODO: make the payload name variable
 #[link_section = ".payload"]
-static PAYLOAD: &[u8] = include_bytes!("../test.elf");
+static PAYLOAD: &[u8] = include_bytes!("../hypervisor.elf");
 
 /// Custom device tree supporting opensbi domains.
 #[link_section = ".dtb"]
