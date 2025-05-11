@@ -1,19 +1,19 @@
 include ../common/config.mk
 
-CFLAGS += -O0 -g
-LDFLAGS += -nostdlib -T kernel.ld
+ASFLAGS += -O0 -g
+LDFLAGS += -static -nostdlib -T kernel.ld
 
 .PHONY: all clean
 
-all: kernel.elf kernel.bin
+all: ecall.elf empty.elf
 
-kernel.elf: ecall.S kernel.ld
-	$(CC)   $(CFLAGS) -c ecall.S -o payload.o
-	$(LD)   payload.o $(LDFLAGS) -o kernel.elf
+ecall.elf: ecall.S kernel.ld
+	$(CC) $(ASFLAGS) -c $< -o ecall.o
+	$(LD) ecall.o $(LDFLAGS) -o $@
 
-# (optional) produce a flat binary
-kernel.bin: kernel.elf
-	$(OBJCOPY) -O binary kernel.elf kernel.bin
+empty.elf: empty.S kernel.ld
+	$(CC) $(ASFLAGS) -c $< -o empty.o
+	$(LD) empty.o $(LDFLAGS) -o $@
 
 clean:
-	rm -f *.o *.bin *.elf
+	rm -f *.o *.elf
