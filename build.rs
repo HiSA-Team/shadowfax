@@ -24,11 +24,6 @@ fn main() {
     // Sourcing `scripts/environment.sh` allow users to specify a PLATFORM (defaults to 'generic').
     // Retrieve platform details if exists otherwise throw an error
     let platform = env::var("PLATFORM").unwrap_or_else(|_| "generic".to_string());
-    let platform = if platform == "generic" {
-        "qemu-generic".to_string()
-    } else {
-        platform
-    };
 
     // write the selected linkerscript where the rust can find it
     let platform_dir = PathBuf::from(PLATFORM_BASE).join(platform);
