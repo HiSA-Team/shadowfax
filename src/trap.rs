@@ -13,10 +13,8 @@ use core::{arch::asm, mem::offset_of};
 
 /// The main trap handler function that orchestrates the saving and restoring of registers
 /// and calls the C routine to handle the trap.
-#[no_mangle]
-#[link_section = ".text._trap_handler"]
 #[repr(align(4))]
-pub unsafe extern "C" fn _trap_handler() {
+pub unsafe extern "C" fn basic_handler() {
     /*
      * Saves the current stack pointer and sets up the stack pointer for the trap context.
      * It also swaps the TP and MSCRATCH registers.

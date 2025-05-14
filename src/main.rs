@@ -31,7 +31,7 @@ use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
 use heapless::Vec;
 use riscv::asm::wfi;
 
-mod cove;
+mod sbi;
 
 /// This module includes the `bindings.rs` generated
 /// using `build.rs` which translates opensbi C definitions
@@ -78,14 +78,10 @@ fn panic(_info: &PanicInfo) -> ! {
 /// However this will be more flexible since we will likely need to load more
 /// payloads to support different domain.
 ///
-/// TODO: make the payload name variable
+// TODO: make the payload name variable
 #[link_section = ".payload"]
-static PAYLOAD: &[u8] = include_bytes!("../hypervisor.elf");
-
-/// Custom device tree supporting opensbi domains.
-#[link_section = ".dtb"]
-static DTB: [u8; include_bytes!("../device-tree.dtb").len()] =
-    *include_bytes!("../device-tree.dtb");
+static _PAYLOAD: [u8; include_bytes!("../enum-supervisor-domains").len()] =
+    *include_bytes!("../enum-supervisor-domains");
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
@@ -114,9 +110,6 @@ extern "C" fn start() -> ! {
             "csrr s6, mhartid",
             // If not zero, go to wait loop
             "bnez s6, {hang}",
-
-            // write in `a1` the new device tree
-            "lla a1, {dtb_address}",
 
             // setup a temporary stack pointer
             "li t0, {stack_size_per_hart}",
@@ -154,7 +147,6 @@ extern "C" fn start() -> ! {
             "add a1, t0, zero",
             // Jump to our main function
             "call {main}",
-            dtb_address = sym DTB,
             stack_size_per_hart = const STACK_SIZE_PER_HART,
             stack_top = sym _top_b_stack,
             hang = sym hang,
@@ -232,11 +224,15 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
-    // initialize cove extension
-    cove::init(fdt_address);
 
-    // Load the elf. The function gives back the entry point
-    let entry = load_elf(&PAYLOAD);
+    // init nacl extension
+    // nacl_extension::init();
+
+    // initialize cove extension
+    sbi::cove::init(fdt_address);
+
+    // Load the hypervisor elf. The function gives back the entry point
+    // let entry = load_elf(&PAYLOAD);
     /*
      * This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
@@ -338,7 +334,7 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
             // next_arg1: the fdt_address passed to the next stage
             next_arg1: fdt_address as ffi::c_ulong,
             // next_addr: address of the next stage
-            next_addr: entry as ffi::c_ulong,
+            next_addr: 0x80A00000 as ffi::c_ulong,
             // next_mode: mode used to launch next_addr
             next_mode: PrivMode::PrivS as ffi::c_ulong,
             // warmboot_addr: address of the warmboot function.
@@ -378,8 +374,6 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
             // write the structure to the calculated address
             p.write_volatile(sbi_scratch);
         }
-        let check: opensbi::sbi_scratch = unsafe { p.read() };
-        assert_eq!(check.warmboot_addr, 0);
     }
 
     // Prepare and jump to sbi_init. We need to:
@@ -406,7 +400,7 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         let scratch_addr = riscv::register::mscratch::read();
 
         // set the trap handler
-        let a = Mtvec::from_bits(trap::_trap_handler as usize);
+        let a = Mtvec::from_bits(trap::basic_handler as usize);
         riscv::register::mtvec::write(a);
 
         riscv::register::mstatus::clear_tsr();
@@ -505,8 +499,13 @@ fn load_elf(data: &[u8]) -> usize {
 }
 
 // Needed for opensbi
+// For some reason the static lib needs these 2 symbols defined
+// TODO: investigate why these are needed.
+// Maybe we can leverage use just libsbi.a (without libplatsbi.a)
 #[no_mangle]
 fn _start_warm() {}
+#[no_mangle]
+fn _trap_handler() {}
 
 /// This function causes the processor to enter an infinite loop, effectively halting execution.
 /// It is typically used as a placeholder or to indicate a state where further execution should not proceed.

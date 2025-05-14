@@ -8,13 +8,13 @@
 
 use fdt_rs::{base::DevTree, prelude::FallibleIterator};
 use heapless::Vec;
-use spin::mutex::SpinMutex;
+use spin::mutex::Mutex;
 
 use crate::opensbi;
 
 use super::{
-    SbiRet, TsmInfo, TsmState, COVEH_EXT_ID, COVEH_EXT_NAME, SBI_EXT_COVE_HOST_GET_TSM_INFO,
-    SHADOWFAX_IMPL_ID,
+    types::{SbiRet, TsmInfo, TsmState},
+    COVEH_EXT_ID, COVEH_EXT_NAME,
 };
 
 macro_rules! cove_unpack_fid {
@@ -22,6 +22,7 @@ macro_rules! cove_unpack_fid {
         (($fid >> 26) & 0x3F, $fid & 0xFFFF)
     };
 }
+
 #[link_section = ".data.cove_ext"]
 static mut SBI_COVE_HOST_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
     experimental: true,
@@ -44,7 +45,7 @@ static mut SBI_COVE_HOST_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_
 ///
 /// TODO: make this heap allocated with a static vector
 #[link_section = ".data"]
-pub static TSM_INFO: SpinMutex<Vec<TsmInfo, 64>> = SpinMutex::new(Vec::new());
+pub static TSM_INFO: Mutex<Vec<TsmInfo, 64>> = Mutex::new(Vec::new());
 
 /// The coveh handler as mandated by Opensbi. Each ecall targeting this extension is
 /// routed to this function. Based on fid (function id) and according to the CoVE
@@ -72,6 +73,27 @@ pub unsafe extern "C" fn sbi_coveh_handler(
 
             result.error as i32
         }
+        SBI_EXT_COVE_HOST_PROMOTE_TO_TVM => {
+            opensbi::sbi_printf(
+                "sbi_covh_promote_to_tvm(sdid=%d, fdt_addr=0x%lx, tap_addr=0x%lx, entry_sepc=0x%lx, tvm_identity_addr=0x%lx)\n\0".as_ptr(),
+                sdid,
+                regs.a0,
+                regs.a1,
+                regs.a2,
+                regs.a3,
+            );
+
+            assert_eq!(sdid, 1, "Confidential domain must have id = 1");
+            let result = sbi_covh_promote_to_tvm(
+                regs.a0 as usize,
+                regs.a1 as usize,
+                regs.a2 as usize,
+                regs.a3 as usize,
+            );
+            ret.value = result.value as u64;
+
+            result.error as i32
+        }
         // Default case for unsupported function IDs, logs a message and returns an error.
         _ => {
             opensbi::sbi_printf("unsupported fid\n\0".as_ptr());
@@ -93,7 +115,7 @@ pub fn init(fdt_address: usize) -> i32 {
     unsafe {
         tsm_info.push_unchecked(TsmInfo {
             tsm_state: TsmState::TsmReady,
-            tsm_impl_id: SHADOWFAX_IMPL_ID,
+            tsm_impl_id: 69,
             tsm_version: 0,
             tsm_capabilities: 0,
             tvm_state_pages: 0,
@@ -161,4 +183,13 @@ fn sbi_covh_get_tsm_info(sdid: usize, tsm_info_address: usize, tsm_info_len: usi
         error: 0,
         value: needed as isize,
     }
+}
+
+fn sbi_covh_promote_to_tvm(
+    fdt_addr: usize,
+    tap_addr: usize,
+    entry_sepc: usize,
+    tvm_identity: usize,
+) -> SbiRet {
+    todo!()
 }
