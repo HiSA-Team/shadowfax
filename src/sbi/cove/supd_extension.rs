@@ -54,7 +54,7 @@ pub unsafe extern "C" fn sbi_supd_handler(
     match fid {
         SBI_EXT_SUPD_GET_ACTIVE_DOMAINS => {
             // SUPD_FID_GET_ACTIVE_DOMAINS
-            opensbi::sbi_printf("sbi_supd_get_active_domains()\n\0".as_ptr());
+            debug!("sbi_supd_get_active_domains()");
             let result = sbi_supd_get_active_domains();
             (*ret).value = result.value as u64;
 

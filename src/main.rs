@@ -8,7 +8,7 @@
  * The external firmware or bootloader must ensure that interrupts are disabled in the MSTATUS and MIE CSRs
  * when calling the functions sbi_init() and sbi_trap_handler().
  *
- * Part of this code is taken from https://github.com/riscv-software-src/opensbi/blob/master/firmware/fw_base.S
+ * Part of this code has been taken from https://github.com/riscv-software-src/opensbi/blob/master/firmware/fw_base.S
  *
  * This firmware starts from _start, sets up the stack pointer and jumps to a never returning main
  * function.
@@ -27,10 +27,13 @@
 #![feature(fn_align)]
 use core::{arch::asm, ffi, panic::PanicInfo};
 
+use alloc::vec::Vec;
 use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
-use heapless::Vec;
+use linked_list_allocator::LockedHeap;
 use riscv::asm::wfi;
 
+#[macro_use]
+mod debug;
 mod sbi;
 
 /// This module includes the `bindings.rs` generated
@@ -48,6 +51,12 @@ mod opensbi {
 
 mod trap;
 
+extern crate alloc;
+
+#[global_allocator]
+/// Global allocator.
+static ALLOCATOR: LockedHeap = LockedHeap::empty();
+
 /*
  * This "object" is just to hold symbols declared in the linkerscript
  * In `linker.ld`, we define this values and this is a way to access them
@@ -60,6 +69,8 @@ unsafe extern "C" {
     static _start_bss: u8;
     static _end_bss: u8;
     static _top_b_stack: u8;
+    static mut _shdfx_heap_start: u8;
+    static _heap_size: u8;
 }
 
 /*
@@ -67,7 +78,8 @@ unsafe extern "C" {
  */
 #[inline(never)]
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    debug!("{}", info);
     loop {}
 }
 
@@ -79,18 +91,18 @@ fn panic(_info: &PanicInfo) -> ! {
 /// payloads to support different domain.
 ///
 // TODO: make the payload name variable
+#[cfg(feature = "embed-elf")]
 #[link_section = ".payload"]
-static _PAYLOAD: [u8; include_bytes!("../enum-supervisor-domains").len()] =
-    *include_bytes!("../enum-supervisor-domains");
+static PAYLOAD: [u8; include_bytes!("../payload.elf").len()] = *include_bytes!("../payload.elf");
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
 
-/// The _start function is the first functio loaded at the starting address of
+/// The _start function is the first function loaded at the starting address of
 /// the linkerscript. This function:
 ///
 /// - setup a the stack pointer
-/// - loads the custom device tree in `a1` register overwritng the default one
+/// - loads the custom device tree in `a1` register overwriting the default one
 /// provided by qemu
 /// - zero bss section
 /// - call `fw_platform_init` provided by opensbi
@@ -99,8 +111,6 @@ const STACK_SIZE_PER_HART: usize = 4096 * 2;
 /// main function.
 /// Since qemu does not support creating opensbi domains
 /// from the cli, we need to provide a custom linkerscript.
-/// The linkerscript will be loaded in the firmware elf
-/// using the
 #[link_section = ".text.entry"]
 #[no_mangle]
 extern "C" fn start() -> ! {
@@ -224,15 +234,24 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
+    unsafe {
+        // Initialize global allocator
+        ALLOCATOR.lock().init(
+            core::ptr::addr_of_mut!(_shdfx_heap_start),
+            core::ptr::addr_of!(_heap_size) as usize,
+        );
+    }
 
     // init nacl extension
-    // nacl_extension::init();
+    sbi::nacl_extension::init(fdt_address);
 
     // initialize cove extension
     sbi::cove::init(fdt_address);
 
-    // Load the hypervisor elf. The function gives back the entry point
-    // let entry = load_elf(&PAYLOAD);
+    // prepare the next stage. Depending on the configuration,
+    // we can include an elf and jump to the first section or
+    // jump to a prefixed address.
+    let entry = make_entry();
     /*
      * This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
@@ -334,7 +353,7 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
             // next_arg1: the fdt_address passed to the next stage
             next_arg1: fdt_address as ffi::c_ulong,
             // next_addr: address of the next stage
-            next_addr: 0x80A00000 as ffi::c_ulong,
+            next_addr: entry as ffi::c_ulong,
             // next_mode: mode used to launch next_addr
             next_mode: PrivMode::PrivS as ffi::c_ulong,
             // warmboot_addr: address of the warmboot function.
@@ -467,7 +486,7 @@ fn load_elf(data: &[u8]) -> usize {
         .unwrap()
         .iter()
         .filter(|phdr| phdr.p_type == PT_LOAD)
-        .collect::<Vec<ProgramHeader, 128>>();
+        .collect::<Vec<ProgramHeader>>();
 
     for segment in all_load_phdrs {
         // Get segment details
@@ -498,10 +517,26 @@ fn load_elf(data: &[u8]) -> usize {
     elf.ehdr.e_entry as usize
 }
 
+#[cfg(feature = "embed-elf")]
+fn make_entry() -> usize {
+    load_elf(PAYLOAD)
+}
+
+#[cfg(not(feature = "embed-elf"))]
+fn make_entry() -> usize {
+    let address = option_env!("SHADOWFAX_JUMP_ADDRESS")
+        .unwrap_or("0x80A00000")
+        .strip_prefix("0x")
+        .unwrap();
+    usize::from_str_radix(address, 16)
+        .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
+}
+
 // Needed for opensbi
 // For some reason the static lib needs these 2 symbols defined
 // TODO: investigate why these are needed.
-// Maybe we can leverage use just libsbi.a (without libplatsbi.a)
+// Maybe we can just use libsbi.a (without libplatsbi.a) and provide the `fw_platform_init`
+// externally.
 #[no_mangle]
 fn _start_warm() {}
 #[no_mangle]

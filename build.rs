@@ -84,7 +84,8 @@ fn main() {
         // this is the include directory installed from opensbi using the
         // command `make PLATFORM=generic install I=<path-to-shadowfax>`
         .clang_arg("-Iinclude/")
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .derive_debug(true)
+        .derive_default(true)
         .generate()
         .expect("Unable to generate bindings");
 

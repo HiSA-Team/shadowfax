@@ -14,7 +14,7 @@ use crate::opensbi;
 
 use super::{
     types::{SbiRet, TsmInfo, TsmState},
-    COVEH_EXT_ID, COVEH_EXT_NAME,
+    COVEH_EXT_ID, COVEH_EXT_NAME, SBI_EXT_COVE_HOST_GET_TSM_INFO, SBI_EXT_COVE_HOST_PROMOTE_TO_TVM,
 };
 
 macro_rules! cove_unpack_fid {
@@ -62,11 +62,9 @@ pub unsafe extern "C" fn sbi_coveh_handler(
     let (sdid, fid) = cove_unpack_fid!(fid);
     match fid {
         SBI_EXT_COVE_HOST_GET_TSM_INFO => {
-            opensbi::sbi_printf(
-                "sbi_covh_get_tsm_info(sdid=%d, addr=0x%lx, size=%d)\n\0".as_ptr(),
-                sdid,
-                regs.a0,
-                regs.a1,
+            debug!(
+                "sbi_covh_get_tsm_info(sdid={}, addr=0x{:x}, size={})",
+                sdid, regs.a0, regs.a1,
             );
             let result = sbi_covh_get_tsm_info(sdid as usize, regs.a0 as usize, regs.a1 as usize);
             ret.value = result.value as u64;
@@ -74,8 +72,8 @@ pub unsafe extern "C" fn sbi_coveh_handler(
             result.error as i32
         }
         SBI_EXT_COVE_HOST_PROMOTE_TO_TVM => {
-            opensbi::sbi_printf(
-                "sbi_covh_promote_to_tvm(sdid=%d, fdt_addr=0x%lx, tap_addr=0x%lx, entry_sepc=0x%lx, tvm_identity_addr=0x%lx)\n\0".as_ptr(),
+            debug!(
+                "sbi_covh_promote_to_tvm(sdid={}, fdt_addr={:x}, tap_addr={:x}, entry_sepc=0x{:x}, tvm_identity_addr={:x})",
                 sdid,
                 regs.a0,
                 regs.a1,
@@ -96,7 +94,7 @@ pub unsafe extern "C" fn sbi_coveh_handler(
         }
         // Default case for unsupported function IDs, logs a message and returns an error.
         _ => {
-            opensbi::sbi_printf("unsupported fid\n\0".as_ptr());
+            debug!("unsupported fid: {}", fid);
             opensbi::SBI_ENOTSUPP
         }
     }
