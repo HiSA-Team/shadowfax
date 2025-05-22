@@ -248,5 +248,5 @@ pub unsafe extern "C" fn basic_handler() {
         sbi_trap_regs_offset_a0 = const offset_of!(opensbi::sbi_trap_regs, a0),
     );
 
-    asm!("mret")
+    asm!("mret", options(noreturn))
 }

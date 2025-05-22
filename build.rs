@@ -2,8 +2,8 @@
  *  which are:
  *      - link opensbi static library;
  *      - generate rust bindings from opensbi include;
- *      - specify correct linkerscript and define symbols depending on the platform
- *      - compile the device tree
+ *      - specify correct linkerscript;
+ *      - compile the device tree;
  *
  *  The idea of a build script is well documented here
  *  "https://doc.rust-lang.org/cargo/reference/build-scripts.html".
@@ -86,6 +86,7 @@ fn main() {
         .clang_arg("-Iinclude/")
         .derive_debug(true)
         .derive_default(true)
+        .ctypes_prefix("::core::ffi")
         .generate()
         .expect("Unable to generate bindings");
 

@@ -6,13 +6,20 @@
  */
 mod constants;
 mod cove_host_extension;
+mod nacl_extension;
 mod supd_extension;
-mod types;
 
 pub use constants::*;
-pub use types::*;
+use cove_host_extension::SBI_COVE_HOST_EXTENSION;
+use nacl_extension::SBI_NACL_EXTENSION;
+use supd_extension::SBI_SUPD_EXTENSION;
 
-pub fn init(fdt_address: usize) {
-    supd_extension::init();
-    cove_host_extension::init(fdt_address);
+use crate::opensbi;
+
+pub fn init() {
+    unsafe {
+        opensbi::sbi_ecall_register_extension(&raw mut SBI_COVE_HOST_EXTENSION);
+        opensbi::sbi_ecall_register_extension(&raw mut SBI_SUPD_EXTENSION);
+        opensbi::sbi_ecall_register_extension(&raw mut SBI_NACL_EXTENSION);
+    }
 }

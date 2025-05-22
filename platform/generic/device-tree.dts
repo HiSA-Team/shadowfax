@@ -38,7 +38,7 @@
 		#size-cells = <0x00>;
 		timebase-frequency = <0x989680>;
 
-		cpu@0 {
+		cpu0: cpu@0 {
 			phandle = <0x01>;
 			device_type = "cpu";
 			reg = <0x00>;
@@ -94,6 +94,20 @@
 		bootargs = "console=ttyS0,115200 root=/dev/sda earlyprintk=serial net.ifnames=0 nokaslr loglevel=8";
 		linux,initrd-start = <0x80820000>;
 		linux,initrd-end = <0x8093f7c0>;
+
+		shadowfax-domains {
+			compatible = "shadowfax,domain,config";
+
+			trusted-domain {
+				compatible = "shadowfax,domain,instance";
+				id = <0x1>;
+				next-arg1 = <0x0 0x0>;
+				next-addr = <0x0 0x81000000>;
+				memory = <0x0 0x81000000 0x0 0x81FFFFFF>;
+				tsm-type = "default";
+			};
+
+		};
 	};
 
 	soc {

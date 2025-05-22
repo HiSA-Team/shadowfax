@@ -25,10 +25,9 @@
 #![no_std]
 #![no_main]
 #![feature(fn_align)]
-use core::{arch::asm, ffi, panic::PanicInfo};
+#![feature(once_cell_get_mut)]
+use core::{ffi, panic::PanicInfo};
 
-use alloc::vec::Vec;
-use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
 use linked_list_allocator::LockedHeap;
 use riscv::asm::wfi;
 
@@ -49,6 +48,7 @@ mod opensbi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+mod shadowfax_core;
 mod trap;
 
 extern crate alloc;
@@ -115,7 +115,7 @@ const STACK_SIZE_PER_HART: usize = 4096 * 2;
 #[no_mangle]
 extern "C" fn start() -> ! {
     unsafe {
-        asm!(
+        core::arch::asm!(
             // If there are multiple hart, init only hartid 0
             "csrr s6, mhartid",
             // If not zero, go to wait loop
@@ -170,6 +170,7 @@ extern "C" fn start() -> ! {
     }
 }
 
+#[allow(unused)]
 enum PrivMode {
     PrivM = 3_isize,
     PrivS = 1,
@@ -187,11 +188,11 @@ enum PrivMode {
 /// registers and relies on specific memory layout assumptions. It should only be called in a
 /// controlled environment where these assumptions hold true.
 #[link_section = ".text"]
-extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
+extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     unsafe {
         // Ensure all previous instructions have been completed
         riscv::asm::fence_i();
-        asm!(
+        core::arch::asm!(
             // remove ra
             "li ra, 0",
             // Set general-purpose registers to zero
@@ -234,6 +235,7 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
+    // this enables heap allocdations
     unsafe {
         // Initialize global allocator
         ALLOCATOR.lock().init(
@@ -241,17 +243,35 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
             core::ptr::addr_of!(_heap_size) as usize,
         );
     }
-
-    // init nacl extension
-    sbi::nacl_extension::init(fdt_address);
-
-    // initialize cove extension
-    sbi::cove::init(fdt_address);
-
     // prepare the next stage. Depending on the configuration,
     // we can include an elf and jump to the first section or
     // jump to a prefixed address.
-    let entry = make_entry();
+    let next_stage_address = {
+        #[cfg(feature = "embed-elf")]
+        let next_stage_address = load_elf(&PAYLOAD);
+
+        #[cfg(not(feature = "embed-elf"))]
+        let next_stage_address = {
+            let address = option_env!("SHADOWFAX_JUMP_ADDRESS")
+                .unwrap_or("0x80A00000")
+                .strip_prefix("0x")
+                .unwrap();
+            usize::from_str_radix(address, 16)
+                .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
+        };
+
+        next_stage_address
+    };
+
+    // initialize shadowfax internal data structure
+    shadowfax_core::init(fdt_addr, next_stage_address, PrivMode::PrivS as usize);
+
+    // initialize cove extensions. This initializes:
+    // - supd extension
+    // - coveh extension
+    // - nacl extension
+    sbi::cove::init();
+
     /*
      * This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
@@ -351,9 +371,9 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
             // fw_heap_size: heap size specified by the platform
             fw_heap_size: heap_size as ffi::c_ulong,
             // next_arg1: the fdt_address passed to the next stage
-            next_arg1: fdt_address as ffi::c_ulong,
+            next_arg1: fdt_addr as ffi::c_ulong,
             // next_addr: address of the next stage
-            next_addr: entry as ffi::c_ulong,
+            next_addr: next_stage_address as ffi::c_ulong,
             // next_mode: mode used to launch next_addr
             next_mode: PrivMode::PrivS as ffi::c_ulong,
             // warmboot_addr: address of the warmboot function.
@@ -410,13 +430,11 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         // set the stack pointer to the scratch.
         // First thing they will need to do is to setup the stack pointer
         // to a valid location
-        asm!(
+        core::arch::asm!(
             "csrr a0, mscratch",
             "add tp, a0, zero",
             options(nomem, nostack)
         );
-
-        let scratch_addr = riscv::register::mscratch::read();
 
         // set the trap handler
         let a = Mtvec::from_bits(trap::basic_handler as usize);
@@ -427,7 +445,7 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
 
         // call sbi_init for the current hart
         let sbi_scratch_addr = scratch_addr as *mut opensbi::sbi_scratch;
-        asm!(
+        core::arch::asm!(
         "add sp, tp, {}", in(reg) opensbi::SBI_SCRATCH_SIZE
         );
         opensbi::sbi_init(sbi_scratch_addr)
@@ -478,8 +496,12 @@ extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
 ///
 ///  Returns:
 ///  - the entry point address
+#[cfg(feature = "embed-elf")]
 #[link_section = ".text"]
 fn load_elf(data: &[u8]) -> usize {
+    use alloc::vec::Vec;
+    use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
+
     let elf = ElfBytes::<AnyEndian>::minimal_parse(data).unwrap();
     let all_load_phdrs = elf
         .segments()
@@ -515,21 +537,6 @@ fn load_elf(data: &[u8]) -> usize {
 
     // Return the entry point address of the ELF
     elf.ehdr.e_entry as usize
-}
-
-#[cfg(feature = "embed-elf")]
-fn make_entry() -> usize {
-    load_elf(PAYLOAD)
-}
-
-#[cfg(not(feature = "embed-elf"))]
-fn make_entry() -> usize {
-    let address = option_env!("SHADOWFAX_JUMP_ADDRESS")
-        .unwrap_or("0x80A00000")
-        .strip_prefix("0x")
-        .unwrap();
-    usize::from_str_radix(address, 16)
-        .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
 }
 
 // Needed for opensbi
