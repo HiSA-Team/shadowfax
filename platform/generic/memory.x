@@ -2,20 +2,21 @@
  * Linkerscript used by shadowfax. Memory is partitioned in 4 parts:
  *  - FLASH: where all code and read-only data (including payload and fdt) are stored
  *  - RAM_FW: where rw_data lives and firwmare are stored;
- *  - BOOT_RAM: a section to store the stack of the boot code pre sbi_init.
+ *  - RAM_TEE: tsm-driver context
  *
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
-/* FLASH    0x80000000 - 0x803FFFFF
+/*
+ * FLASH    0x80000000 - 0x803FFFFF
  * RAM_FW   0x80400000 - 0x807FFFFF
- * SHDFX_RAM 0x80800000 - 0x8083FFFF
+ * RAM_TEE  0x80800000 - 0x8083FFFF
  */
 MEMORY
 {
   FLASH (rx) : ORIGIN = 0x80000000, LENGTH = 4M
   RAM_FW (rwx) : ORIGIN = 0x80400000, LENGTH = 4M
-  SHDFX_RAM (rw) : ORIGIN = 0x80800000, LENGTH = 1M
+  RAM_TEE (rw) : ORIGIN = 0x80800000, LENGTH = 2M
 }
 
 /*
@@ -24,12 +25,13 @@ MEMORY
 REGION_ALIAS("REGION_TEXT", FLASH);
 REGION_ALIAS("REGION_RODATA", FLASH);
 REGION_ALIAS("REGION_DATA", RAM_FW);
-REGION_ALIAS("REGION_BOOT_STACK", SHDFX_RAM);
-REGION_ALIAS("REGION_SHDFX_HEAP", SHDFX_RAM);
+REGION_ALIAS("REGION_BOOT_STACK", RAM_TEE);
+REGION_ALIAS("REGION_TEE_MEM", RAM_TEE);
 
 /* variables */
-_stack_size = 0x1000; /*1k*/
+_stack_size = 0x1000; /* 1k */
 _heap_size = 0x80000; /* 512K */
+_tee_stack_size = 0x100000; /* 1M */
 
 _fw_start = ORIGIN(FLASH);
 
@@ -84,9 +86,14 @@ SECTIONS {
     _top_b_stack = .;
   } > REGION_BOOT_STACK
 
-  /* Heap used by shadowfax */
-  .shdfx_heap (NOLOAD): ALIGN(4K) {
-    _shdfx_heap_start = .;
+  .tee_ctx (NOLOAD): ALIGN(4K) {
+    /* Heap used by tsm-driver */
+    _tee_heap_start = .;
     . += _heap_size;
-  } > REGION_SHDFX_HEAP
+    . = ALIGN(4K);
+    /* Scratch memory for CoVE interrupt handling and interrupt handling*/
+    . = ALIGN(4K);
+    . += _tee_stack_size;
+    _tee_scratch_start = .;
+    } > REGION_TEE_MEM
 }

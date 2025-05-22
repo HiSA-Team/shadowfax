@@ -8,3 +8,4 @@
 # Added by cargo
 
 /target
+payload/tsm/target/

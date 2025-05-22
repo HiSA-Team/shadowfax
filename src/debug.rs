@@ -28,9 +28,6 @@ macro_rules! ensure_not {
     };
 }
 
-#[macro_export]
-pub fn __print_pmp_configuration() {}
-
 fn read_memory(address: usize) -> u64 {
     let ptr = (address) as *mut u64;
     unsafe { ptr.read_volatile() }

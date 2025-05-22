@@ -182,6 +182,7 @@ fn guest_entry() -> ! {
     let state = H_STATE.lock();
     let guest = state.get().unwrap().guests.first().unwrap();
     let stack_pointer = guest.stack_pointer;
+    let context_address = guest.context_addr as *const GuestContext;
     println!(
         "Starting guest: addr: entry_point={:#x}; stack_pointer={:#x}",
         guest.entry_point, stack_pointer
@@ -191,16 +192,81 @@ fn guest_entry() -> ! {
     drop(state);
 
     unsafe {
-        // enter VS-mode
         asm!(
             ".align 4
             fence.i
+
+            // Restore guest general-purpose registers (GPRs) from context
+            mv x0, {x0}
+            mv x1, {x1}
+            mv x2, {x2}
+            mv x3, {x3}
+            mv x4, {x4}
+            mv x5, {x5}
+            mv x6, {x6}
+            mv x7, {x7}
+            mv x8, {x8}
+            mv x9, {x9}
+            mv x10, {x10}
+            mv x11, {x11}
+            mv x12, {x12}
+            mv x13, {x13}
+            mv x14, {x14}
+            mv x15, {x15}
+            mv x16, {x16}
+            mv x17, {x17}
+            mv x18, {x18}
+            mv x19, {x19}
+            mv x20, {x20}
+            mv x21, {x21}
+            mv x22, {x22}
+            mv x23, {x23}
+            mv x24, {x24}
+            mv x25, {x25}
+            mv x26, {x26}
+            mv x27, {x27}
+            mv x28, {x28}
+            mv x29, {x29}
+            mv x30, {x30}
+            mv x31, {x31}
 
             // set sp to scratch stack top
             mv sp, {stack_top}
 
             sret
             ",
+            x0 = in(reg) (*context_address).regs[0],
+            x1 = in(reg) (*context_address).regs[1],
+            x2 = in(reg) (*context_address).regs[2],
+            x3 = in(reg) (*context_address).regs[3],
+            x4 = in(reg) (*context_address).regs[4],
+            x5 = in(reg) (*context_address).regs[5],
+            x6 = in(reg) (*context_address).regs[6],
+            x7 = in(reg) (*context_address).regs[7],
+            x8 = in(reg) (*context_address).regs[8],
+            x9 = in(reg) (*context_address).regs[9],
+            x10 = in(reg) (*context_address).regs[10],
+            x11 = in(reg) (*context_address).regs[11],
+            x12 = in(reg) (*context_address).regs[12],
+            x13 = in(reg) (*context_address).regs[13],
+            x14 = in(reg) (*context_address).regs[14],
+            x15 = in(reg) (*context_address).regs[15],
+            x16 = in(reg) (*context_address).regs[16],
+            x17 = in(reg) (*context_address).regs[17],
+            x18 = in(reg) (*context_address).regs[18],
+            x19 = in(reg) (*context_address).regs[19],
+            x20 = in(reg) (*context_address).regs[20],
+            x21 = in(reg) (*context_address).regs[21],
+            x22 = in(reg) (*context_address).regs[22],
+            x23 = in(reg) (*context_address).regs[23],
+            x24 = in(reg) (*context_address).regs[24],
+            x25 = in(reg) (*context_address).regs[25],
+            x26 = in(reg) (*context_address).regs[26],
+            x27 = in(reg) (*context_address).regs[27],
+            x28 = in(reg) (*context_address).regs[28],
+            x29 = in(reg) (*context_address).regs[29],
+            x30 = in(reg) (*context_address).regs[30],
+            x31 = in(reg) (*context_address).regs[31],
             stack_top = in(reg) stack_pointer,
             options(noreturn)
         );

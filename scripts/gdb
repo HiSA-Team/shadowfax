@@ -16,10 +16,10 @@ add-symbol-file bin/enum-supervisor-domains.elf 0x80A00000
 
 file target/riscv64imac-unknown-none-elf/debug/shadowfax
 
-#------------------------------------------------------------------------------  
+#------------------------------------------------------------------------------
 # Print a shadowfax Context at a given address:
 #   Usage: p_context 0xADDRESS
-#------------------------------------------------------------------------------  
+#------------------------------------------------------------------------------
 define p_context
   if $argc != 1
     printf "Usage: p_context ADDRESS\n"

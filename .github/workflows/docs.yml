@@ -6,11 +6,6 @@ on:
       - main
     tags-ignore:
       - '*'
-  pull_request:
-    branches:
-      - main
-    tags-ignore:
-      - '*'
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
