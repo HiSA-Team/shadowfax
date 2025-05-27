@@ -8,18 +8,70 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
-use crate::opensbi;
-use core::{arch::asm, mem::offset_of};
+use riscv::{
+    interrupt::supervisor::Exception,
+    register::mstatus::{self, MPP},
+};
 
-/// The main trap handler function that orchestrates the saving and restoring of registers
-/// and calls the C routine to handle the trap.
+use crate::{
+    opensbi,
+    shadowfax_core::state::{HartSupervisorStateArea, TsmSupervisorStateArea, STATE},
+};
+use core::mem::offset_of;
+
+macro_rules! cove_unpack_fid {
+    ($fid:expr) => {
+        (($fid >> 26) & 0x3F, $fid & 0xFFFF)
+    };
+}
+
+/// The main trap handler function that orchestrates the saving and restoring of registers.
+/// The handler verifies if the trap is a TEECALL/TEERESUME or a TEERET and handles is with custom
+/// logic otherwise it applies opensbi logic.
 #[repr(align(4))]
-pub unsafe extern "C" fn basic_handler() {
+pub unsafe extern "C" fn handler() -> ! {
+    /*
+     * Check if the trap is a TEECALL/TEERESUME and perform the context switch to the tsm
+     */
+    core::arch::asm!(
+        // Save t0 and t1 on the stack
+        "addi sp, sp, -16",
+        "sd t0, 0*8(sp)",
+        "sd t1, 1*8(sp)",
+
+        // Check if the trap is an ecall
+        "csrr t0, mcause",
+        "li t1, {ecall_code}",
+        "bne t0, t1, 1f",
+
+        // Check if the covh extension is invoked
+        "add t0, a7, zero",
+        "li t1, {covh_ext_id}",
+        "bne t0, t1, 1f",
+
+        // Restore t0 and t1 and jump to custom logic for TEECALL
+        "ld t0, 0*8(sp)",
+        "ld t1, 1*8(sp)",
+        "addi sp, sp, 16",
+        "j {tee_call_handler}",
+
+        "1:",
+
+        // Restore t0 and t1 before proceeding to opensbi flow
+        "ld t0, 0*8(sp)",
+        "ld t1, 1*8(sp)",
+        "addi sp, sp, 16",
+
+        ecall_code = const Exception::SupervisorEnvCall as usize,
+        covh_ext_id = const 0x434F5648,
+        tee_call_handler = sym tee_call_entry,
+        options(preserves_flags),
+    );
     /*
      * Saves the current stack pointer and sets up the stack pointer for the trap context.
      * It also swaps the TP and MSCRATCH registers.
      */
-    asm!(
+    core::arch::asm!(
         // Swap TP and MSCRATCH
         "csrrw tp, mscratch, tp",
         "sd t0, {sbi_scratch_tmp0_offset}(tp)",
@@ -63,7 +115,7 @@ pub unsafe extern "C" fn basic_handler() {
      * Saves the machine exception program counter (MEPC) and machine status (MSTATUS) registers
      * to the trap context stack.
      */
-    asm!(
+    core::arch::asm!(
         "csrr t0, mepc",
         "sd t0, {sbi_trap_regs_offset_mepc}(sp)",
         "csrr t0, mstatus",
@@ -77,7 +129,7 @@ pub unsafe extern "C" fn basic_handler() {
      * Saves additional trap information such as cause and trap value to the trap context stack.
      * Clears the machine-dependent trap (MDT) register.
      */
-    asm!(
+    core::arch::asm!(
         "sd zero, {sbi_trap_regs_offset_zero}(sp)",
         "sd ra, {sbi_trap_regs_offset_ra}(sp)",
         "sd gp, {sbi_trap_regs_offset_gp}(sp)",
@@ -139,7 +191,7 @@ pub unsafe extern "C" fn basic_handler() {
         sbi_trap_regs_offset_t5 = const offset_of!(opensbi::sbi_trap_regs, t5),
         sbi_trap_regs_offset_t6 = const offset_of!(opensbi::sbi_trap_regs, t6),
     );
-    asm!(
+    core::arch::asm!(
         "csrr t0, mcause",
         "sd t0, ({sbi_trap_regs_size} + {sbi_trap_info_offset_cause})(sp)",
         "csrr t0, mtval",
@@ -156,17 +208,17 @@ pub unsafe extern "C" fn basic_handler() {
         sbi_trap_info_offset_gva = const offset_of!(opensbi::sbi_trap_info, gva),
     );
     // We can take another trap
-    asm!("li t0, 0x40000000000", "csrc mstatus, t0",);
+    core::arch::asm!("li t0, 0x40000000000", "csrc mstatus, t0", options(nostack));
 
     /*
-     * Calls the C routine to handle the trap, passing the stack pointer as an argument.
+     * Call out trap handler which wraps opensbi trap handler
      */
-    asm!("add a0, sp, zero", "call {sbi_trap_handler}", sbi_trap_handler = sym opensbi::sbi_trap_handler);
+    core::arch::asm!("add a0, sp, zero", "call {trap_handler}", trap_handler = sym opensbi::sbi_trap_handler);
 
     /*
      * Restores all general-purpose registers except A0 and T0 from the trap context stack.
      */
-    asm!(
+    core::arch::asm!(
         "ld ra, {sbi_trap_regs_offset_ra}(a0)",
         "ld sp, {sbi_trap_regs_offset_sp}(a0)",
         "ld gp, {sbi_trap_regs_offset_gp}(a0)",
@@ -230,7 +282,7 @@ pub unsafe extern "C" fn basic_handler() {
      * Restores the machine status (MSTATUS) and machine exception program counter (MEPC)
      * registers from the trap context stack.
      */
-    asm!(
+    core::arch::asm!(
         "ld t0, {sbi_trap_regs_offset_mstatus}(a0)",
         "csrw mstatus, t0",
         "ld t0, {sbi_trap_regs_offset_mepc}(a0)",
@@ -241,12 +293,198 @@ pub unsafe extern "C" fn basic_handler() {
     /*
      * Restores the A0 and T0 registers from the trap context stack.
      */
-    asm!(
+    core::arch::asm!(
         "ld t0, {sbi_trap_regs_offset_t0}(a0)",
         "ld a0, {sbi_trap_regs_offset_a0}(a0)",
         sbi_trap_regs_offset_t0 = const offset_of!(opensbi::sbi_trap_regs, t0),
         sbi_trap_regs_offset_a0 = const offset_of!(opensbi::sbi_trap_regs, a0),
     );
 
-    asm!("mret", options(noreturn))
+    core::arch::asm!("mret", options(noreturn))
+}
+
+fn tee_call_entry() -> ! {
+    unsafe {
+        core::arch::asm!(
+            "j {handler}",
+            handler = sym tee_call_handler,
+            options(noreturn)
+        )
+    }
+}
+
+/// The first part of this function is used to search the target supervisor domain.
+/// Before entering, tee_call_entry has saved some registers to give us the ability
+/// to use high-level code.
+/// Right before the context switch, we need to restore these registers.
+unsafe extern "C" fn tee_call_handler() -> ! {
+    // 1) retrieve the supervisor domain and mark it as active
+    let mut fid: usize;
+    unsafe {
+        core::arch::asm!("add {}, a6, zero", out(reg) fid, options(readonly, nostack));
+    }
+    let (sdid, _fid) = cove_unpack_fid!(fid);
+    let mut state_guard = STATE.lock();
+    let state = state_guard.get_mut().unwrap();
+    let domain = state.domains.get_mut(sdid).unwrap();
+
+    domain.active = true;
+
+    let tsm = domain.tsm.as_ref().unwrap();
+    let sp = tsm.stack_pointer;
+
+    // release the lock
+    drop(state_guard);
+
+    riscv::asm::fence_i();
+
+    // 2) save hssa context
+    unsafe {
+        core::arch::asm!(
+            // jump to the dedicated stack
+            "mv sp, {stack_top}",
+            // make room for the context and save all registers
+            "addi sp, sp, -{hssa_size}",
+
+            // save gprs registers
+            "
+            .align 4
+            sd zero, 0(sp)
+            sd ra, 1*8(sp)
+            sd gp, 3*8(sp)
+            sd tp, 4*8(sp)
+            sd t0, 5*8(sp)
+            sd t1, 6*8(sp)
+            sd t2, 7*8(sp)
+            sd s0, 8*8(sp)
+            sd s1, 9*8(sp)
+            sd a2, 12*8(sp)
+            sd a3, 13*8(sp)
+            sd a4, 14*8(sp)
+            sd a5, 15*8(sp)
+            sd a6, 16*8(sp)
+            sd a7, 17*8(sp)
+            sd s2, 18*8(sp)
+            sd s3, 19*8(sp)
+            sd s4, 20*8(sp)
+            sd s5, 21*8(sp)
+            sd s6, 22*8(sp)
+            sd s7, 23*8(sp)
+            sd s8, 24*8(sp)
+            sd s9, 25*8(sp)
+            sd s10, 26*8(sp)
+            sd s11, 27*8(sp)
+            sd t3, 28*8(sp)
+            sd t4, 29*8(sp)
+            sd t5, 30*8(sp)
+            sd t6, 31*8(sp)",
+
+            // save CSRs
+            "
+            csrr t0, sstatus
+            sd t0, 32*8(sp)
+            csrr t0, stvec
+            sd t0, 33*8(sp)
+            csrr t0, sip
+            sd t0, 34*8(sp)
+            csrr t0, scounteren
+            sd t0, 35*8(sp)
+            csrr t0, sscratch
+            sd t0, 36*8(sp)
+            csrr t0, satp
+            sd t0, 37*8(sp)
+            csrr t0, senvcfg
+            sd t0, 38*8(sp)
+            // csrr t0, scontext
+            // sd t0, 39*8(sp)
+            csrr t0, mepc
+            sd t0, 40*8(sp)",
+            stack_top = in(reg) sp,
+            hssa_size = const core::mem::size_of::<HartSupervisorStateArea>()
+        )
+    };
+
+    let mut mstatus = mstatus::read();
+    mstatus.set_mpp(MPP::Supervisor);
+    mstatus.set_sie(false);
+
+    // re-program pmp
+    let mut scratch: usize;
+    unsafe { core::arch::asm!("add {}, tp, zero", out(reg) scratch, options(nostack, nomem)) }
+    let n = opensbi::sbi_hart_pmp_count(scratch as *mut opensbi::sbi_scratch);
+
+    for i in 0..n {
+        opensbi::pmp_disable(i);
+    }
+
+    // 3) restore tssa context
+    unsafe {
+        core::arch::asm!(
+            // jump to the dedicated stack
+            "mv sp, {stack_top}",
+            // jump to the beginning of the context
+            "addi sp, sp, -({hssa_size} + {tssa_size})",
+
+            // restore gprs registers
+            "
+            .align 4
+            ld zero, 0(sp)
+            ld ra, 1*8(sp)
+            ld gp, 3*8(sp)
+            ld tp, 4*8(sp)
+            ld t0, 5*8(sp)
+            ld t1, 6*8(sp)
+            ld t2, 7*8(sp)
+            ld s0, 8*8(sp)
+            ld s1, 9*8(sp)
+            ld a2, 12*8(sp)
+            ld a3, 13*8(sp)
+            ld a4, 14*8(sp)
+            ld a5, 15*8(sp)
+            ld a6, 16*8(sp)
+            ld a7, 17*8(sp)
+            ld s2, 18*8(sp)
+            ld s3, 19*8(sp)
+            ld s4, 20*8(sp)
+            ld s5, 21*8(sp)
+            ld s6, 22*8(sp)
+            ld s7, 23*8(sp)
+            ld s8, 24*8(sp)
+            ld s9, 25*8(sp)
+            ld s10, 26*8(sp)
+            ld s11, 27*8(sp)
+            ld t3, 28*8(sp)
+            ld t4, 29*8(sp)
+            ld t5, 30*8(sp)
+            ld t6, 31*8(sp)
+            ",
+
+            // save CSRs
+            "
+            ld t0, 32*8(sp)
+            csrw sstatus, t0
+            ld t0, 33*8(sp)
+            csrw stvec, t0
+            ld t0, 34*8(sp)
+            csrw sip, t0
+            ld t0, 35*8(sp)
+            csrw scounteren, t0
+            ld t0, 36*8(sp)
+            csrw sscratch, t0
+            ld t0, 37*8(sp)
+            csrw satp, t0
+            ld t0, 38*8(sp)
+            csrw senvcfg, t0
+            // ld t0, 39*8(sp)
+            // csrw scontext, t0
+            ld t0, 40*8(sp)
+            csrw mepc, t0
+            ",
+            stack_top = in(reg) sp,
+            hssa_size = const core::mem::size_of::<HartSupervisorStateArea>(),
+            tssa_size = const core::mem::size_of::<TsmSupervisorStateArea>()
+        )
+    };
+
+    unsafe { core::arch::asm!("mret", options(noreturn)) }
 }

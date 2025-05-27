@@ -26,10 +26,12 @@ REGION_ALIAS("REGION_RODATA", FLASH);
 REGION_ALIAS("REGION_DATA", RAM_FW);
 REGION_ALIAS("REGION_BOOT_STACK", SHDFX_RAM);
 REGION_ALIAS("REGION_SHDFX_HEAP", SHDFX_RAM);
+REGION_ALIAS("REGION_TEE_STACK", SHDFX_RAM);
 
 /* variables */
-_stack_size = 0x1000; /*1k*/
+_stack_size = 0x1000; /* 1k */
 _heap_size = 0x80000; /* 512K */
+_tee_stack_size = 0x4000; /* 4k */
 
 _fw_start = ORIGIN(FLASH);
 
@@ -89,4 +91,10 @@ SECTIONS {
     _shdfx_heap_start = .;
     . += _heap_size;
   } > REGION_SHDFX_HEAP
+
+  /* Stack were to store TEE context */
+  .tee_stack (NOLOAD): ALIGN(4k) {
+    . += _tee_stack_size;
+    _tee_stack_start = .;
+  } > REGION_TEE_STACK
 }

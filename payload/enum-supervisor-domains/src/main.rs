@@ -51,7 +51,7 @@ fn main() -> ! {
 
     // register active domains in our structure
     let domain_mask = active_domains.value;
-    for i in 0..64 {
+    for i in 0..2 {
         if ((domain_mask >> i) & 0x01) == 1 {
             domains
                 .push(TsmInfo {
@@ -67,13 +67,15 @@ fn main() -> ! {
         }
     }
 
-    for (i, domain) in domains.iter().enumerate() {
-        let mut sbi_args = [0, 0, 0, 0, 0];
-        let fid = cove_pack_fid!(i, SBI_EXT_COVE_HOST_GET_TSM_INFO as usize);
-        sbi_args[0] = &raw const domain as u64;
-        sbi_args[1] = size_of::<TsmInfo>() as u64;
-        sbi_call(COVEH_EXT_ID as usize, fid, &sbi_args);
-    }
+    assert_eq!(domains.len(), 2);
+
+    let domain = &domains[1];
+    let fid = cove_pack_fid!(1, SBI_EXT_COVE_HOST_GET_TSM_INFO as usize);
+    let mut sbi_args = [0, 0, 0, 0, 0];
+    sbi_args[0] = &raw const domain as u64;
+    sbi_args[1] = size_of::<TsmInfo>() as u64;
+
+    sbi_call(COVEH_EXT_ID as usize, fid, &sbi_args);
 
     loop {
         riscv::asm::wfi();

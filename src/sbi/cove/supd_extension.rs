@@ -9,8 +9,16 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
-use super::{SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SUPD_EXT_ID, SUPD_EXT_NAME};
 use crate::{opensbi, sbi::SbiRet, shadowfax_core::state::STATE};
+
+/// This section relates to the Supervisor Domain Extension
+pub const SUPD_EXT_ID: u64 = 0x53555044;
+
+/// The SUPD_EXT_NAME is used to register the extension and debugging
+pub const SUPD_EXT_NAME: [u8; 8] = *b"supd\0\0\0\0";
+
+///Lists of FID for SUPD Extension
+pub const SBI_EXT_SUPD_GET_ACTIVE_DOMAINS: u64 = 0x00;
 
 #[link_section = ".data.supd_ext"]
 pub static mut SBI_SUPD_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
@@ -41,7 +49,7 @@ pub static mut SBI_SUPD_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_e
 /// Returns:
 /// - SBI_SUCCESS (0) on success, setting `ret.value` appropriately.
 /// - SBI_ENOTSUPP if the `fid` is not recognized.
-pub unsafe extern "C" fn sbi_supd_handler(
+unsafe extern "C" fn sbi_supd_handler(
     _extid: u64,
     fid: u64,
     _regs: *mut opensbi::sbi_trap_regs,

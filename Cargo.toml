@@ -27,6 +27,7 @@ embed-elf = []
 bindgen = "0.71.1"
 
 [dependencies]
+anyhow = { version = "1.0.98", default-features = false }
 digest = "0.10.7"
 elf = { version = "0.7.2", default-features = false }
 fdt-rs = {version = "0.4", default-features = false }

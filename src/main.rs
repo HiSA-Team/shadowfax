@@ -30,6 +30,7 @@ use core::{ffi, panic::PanicInfo};
 
 use linked_list_allocator::LockedHeap;
 use riscv::asm::wfi;
+use sbi::cove::supd_extension::SBI_SUPD_EXTENSION;
 
 #[macro_use]
 mod debug;
@@ -71,6 +72,7 @@ unsafe extern "C" {
     static _top_b_stack: u8;
     static mut _shdfx_heap_start: u8;
     static _heap_size: u8;
+    pub static _tee_stack_start: u8;
 }
 
 /*
@@ -263,14 +265,15 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         next_stage_address
     };
 
-    // initialize shadowfax internal data structure
-    shadowfax_core::init(fdt_addr, next_stage_address, PrivMode::PrivS as usize);
+    // initialize shadowfax state which will be used to handle the CoVE SBI
+    shadowfax_core::state::init(fdt_addr, next_stage_address, PrivMode::PrivS as usize).unwrap();
 
-    // initialize cove extensions. This initializes:
-    // - supd extension
-    // - coveh extension
-    // - nacl extension
-    sbi::cove::init();
+    // register the supd extension leveraging the existing opensbi extension ecosystem.
+    // we could make this independent from opensbi, but this is ok for now since it
+    // is trivial to implement.
+    unsafe {
+        opensbi::sbi_ecall_register_extension(&raw mut SBI_SUPD_EXTENSION);
+    }
 
     /*
      * This code initializes the scratch space, which is a per-HART data structure
@@ -437,7 +440,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         );
 
         // set the trap handler
-        let a = Mtvec::from_bits(trap::basic_handler as usize);
+        let a = Mtvec::from_bits(trap::handler as usize);
         riscv::register::mtvec::write(a);
 
         riscv::register::mstatus::clear_tsr();
