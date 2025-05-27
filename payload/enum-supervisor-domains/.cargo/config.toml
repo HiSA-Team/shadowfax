@@ -9,7 +9,11 @@
 
 [build]
 target = "riscv64imac-unknown-none-elf"
+rustflags = [
+    "-C", "link-arg=-Tmemory.x",   # Add linker script "{projectdir}/res/memory.ld"
+    "-C", "link-arg=-Tlink.x",
+    "-C", "opt-level=0",                # Don't optimize
+]
 
 [target.riscv64imac-unknown-none-elf]
-runner = "qemu-system-riscv64 -M virt -cpu rv64 -m 32M -smp 1 -nographic -bios"
-linker = "riscv64-linux-gnu-ld"
+linker = "riscv64-linux-musl-ld"

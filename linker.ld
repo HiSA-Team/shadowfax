@@ -16,55 +16,45 @@ SECTIONS {
   . = FW_TEXT_START;
   PROVIDE(_fw_start = .);
 
-  . = ALIGN (0x1000);
-  .text : {
-    KEEP(*(.text._start));                  /* Ensure _start is placed first */
-    KEEP(*(.text._trap_handler));
-    *(.text*);                              /* Program code here */
+  .text : ALIGN(4K) {
+    *(.text.entry);
+    *(.text*);
+  }
+  .rodata : ALIGN(4K) {
+    *(.rodata.*);
+    . = ALIGN(4K);
   }
 
   /* PMP mandates R/W sections aligned in power of 2 */
-  . = ALIGN(1 << LOG2CEIL(SIZEOF(.text)));
+  . = ALIGN(1 << LOG2CEIL(SIZEOF(.text) + SIZEOF(.rodata)));
 
   PROVIDE(_fw_rw_start = .);
-  .data : {
-    *(.data*);
+  .data : ALIGN(4K) {
+    *(.data.*);
+    . = ALIGN(4K);
   }
 
-  . = ALIGN(0x1000); /* Ensure next section is page aligned */
-
-  .bss : {
-    PROVIDE(_bss_start = .);
+  .bss : ALIGN(4K) {
+    PROVIDE(_start_bss = .);
     *(.sbss);
     *(.sbss.*);
     *(.bss);
     *(.bss.*);
-    . = ALIGN(8);
-    PROVIDE(_bss_end = .);
+    . = ALIGN(4K);
+    PROVIDE(_end_bss = .);
   }
 
   /* End of the read-write data sections */
-  . = ALIGN(0x1000); /* Need this to create proper sections */
   PROVIDE(_fw_end = .);
 
-  /* Payload Untrusted Domain*/
-  . = FW_UDOM_PAYLOAD_START;
-  . = ALIGN(0x1000);
-  .payload_udom : {
-    PROVIDE(_payload_udom_start = .);
-    *(.payload_udom);
-    . = ALIGN(8);
-    PROVIDE(_payload_udom_end = .);
-  }
-  . = ALIGN(0x1000);
-
-  /* Payload Trusted Domain*/
   . = FW_TDOM_PAYLOAD_START;
-  . = ALIGN(0x1000);
-  .payload_tdom : {
-    PROVIDE(_payload_tdom_start = .);
-    KEEP(*(.payload_tdom));
-    . = ALIGN(8);
-    PROVIDE(_payload_tdom_end = .);
+  .payload : ALIGN(16K) {
+    *(.payload);
+    . = ALIGN(4K);
   }
+
+  /* This is for temporary stack at boot */
+  . += 8192;
+
+  PROVIDE(_top_b_stack = .);
 }

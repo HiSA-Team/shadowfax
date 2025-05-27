@@ -16,17 +16,17 @@ use std::path::PathBuf;
 // Platform holds platform specific data needed at build time.
 struct Platform<'a> {
     name: &'a str,
-    fw_text_start_address: u32,
-    fw_udom_payload_start_address: u32,
-    fw_tdom_payload_start_address: u32,
+    fw_text_start_address: usize,
+    fw_udom_payload_start_address: usize,
+    fw_tdom_payload_start_address: usize,
 }
 
 // PLATFORMS describe all supported platform by shadowafax
 const PLATFORMS: &[Platform] = &[Platform {
     name: "generic",
-    fw_text_start_address: 0x80000000u32,
-    fw_udom_payload_start_address: 0x80060000u32,
-    fw_tdom_payload_start_address: 0x80100000u32,
+    fw_text_start_address: 0x80000000,
+    fw_udom_payload_start_address: 0x80060000,
+    fw_tdom_payload_start_address: 0x80100000,
 }];
 
 fn main() {
@@ -101,4 +101,5 @@ fn main() {
     // Rerun build.rs if one of these files changes.
     println!("cargo::rerun-if-changed=wrapper.h");
     println!("cargo::rerun-if-changed=linker.ld");
+    println!("cargo::rerun-if-changed=build.rs");
 }
