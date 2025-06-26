@@ -1,0 +1,8 @@
+[package]
+name = "mini-hypervisor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+elf = { version = "0.7.2", default-features = false }
+riscv = "0.13.0"

@@ -91,36 +91,6 @@
 	chosen {
 		stdout-path = "/soc/serial@10000000";
 		rng-seed = <0x423102ac 0x8130c11b 0x367c785c 0xa89ba4a 0xa5f26be 0x3e4026ae 0x8bd48538 0x426d5f5a>;
-
-		opensbi-domains {
-			compatible = "opensbi,domain,config";
-
-			tmem: tmem {
-				compatible = "opensbi,domain,memregion";
-				base = <0x0 0x80100000>;
-				order = <20>;
-			};
-
-			tuart: tuart {
-				compatible = "opensbi,domain,memregion";
-				base = <0x0 0x10011000>;
-				order = <12>;
-				mmio;
-				devices = <&uart1>;
-			};
-
-			tdomain: trusted-domain {
-				compatible = "opensbi,domain,instance";
-				possible-harts = <&cpu0>;
-				regions = <&tmem 0x3f>, <&tuart 0x3f>;
-				boot-hart = <&cpu0>;
-				next-arg1 = <0x0 0x0>;
-				next-addr = <0x0 0x80100000>;
-				next-mode = <0x1>;
-				system-reset-allowed;
-				system-suspend-allowed;
-			};
-		};
 	};
 
 	soc {
