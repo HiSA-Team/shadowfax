@@ -87,6 +87,7 @@ static PAYLOAD: &[u8] = include_bytes!("../test.elf");
 static DTB: [u8; include_bytes!("../device-tree.dtb").len()] =
     *include_bytes!("../device-tree.dtb");
 
+
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
 
