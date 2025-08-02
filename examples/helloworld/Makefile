@@ -1,13 +1,13 @@
 include ../../config.mk
 
 main: baremetal.ld main.o start.o
-	$(LD) $(LDFLAGS) -o $@ -T $^
+	$(LD) $(LDFLAGS) -static -o $@ -T $^
 
 main.o: main.c
-	$(CC) $(CFLAGS) -ffreestanding -c -march=$(ARCH) -o $@ $<
+	$(CC) $(CFLAGS) -nostdlib -ffreestanding -c -o $@ $<
 
 start.o: start.s
-	$(AS) -march=$(ARCH) -o $@ $<
+	$(AS) $(ASFLAGS) -o $@ $<
 
 run: main
 	@echo "Press (ctrl + a) and then x to quit"
@@ -15,6 +15,3 @@ run: main
 
 clean:
 	rm -f main *.o
-
-
-

@@ -1,11 +1,24 @@
-# TODO: maybe use pkgconfig to find the correct path
-PREFIX = riscv64-linux-musl
+# Author: Giuseppe Capasso
+# Email: capassog97@gmail.com
+# Centralized file to manage build variables. This will be included in example, tests and scripts.
+# Usage:
+# 	When compiling use CROSS_COMPILE to pass the start of your ie. toolchain
+# 	eg. make CROSS_COMPILE=riscv64-linux-musl-
 
-CC = $(PREFIX)-gcc
-LD = $(PREFIX)-ld
-AS = $(PREFIX)-as
+ifdef CROSS_COMPILE
+CC		=	$(CROSS_COMPILE)gcc
+AR		=	$(CROSS_COMPILE)ar
+LD		=	$(CROSS_COMPILE)ld
+AS 		= $(CROSS_COMPILE)as
+else
+CC		?=	gcc
+AR		?=	ar
+LD		?=	ld
+AS		?=	as
+endif
 
 ARCH = rv64gh
 
-CFLAGS = -Wall -Wextra
-LDFLAGS = 
+CFLAGS  = -Wall -Wextra -march=$(ARCH)
+LDFLAGS =
+ASFLAGS = -march=$(ARCH)

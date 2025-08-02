@@ -5,7 +5,7 @@
 
 Further details can be found in the documentation.
 
-## Goals
+### Goals
 The codename `shadowfax project` has the following goals:
 - Develop an open-source TSM-Driver that runs alongside OpenSBI.
 - Implement the core functionalities of the CoVE SBI specification.
