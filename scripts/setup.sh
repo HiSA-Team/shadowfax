@@ -42,9 +42,7 @@ install_dependencies() {
       ;;
     void)
       xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf elfutils-devel libdwarf-devel \
-        curl git file cpio git clang cmake ninja
-      if [ "$ARCHITECTURE" != "riscv64" ]; then
-        xbps-install -Sy cross-riscv64-linux-$LIBC_PREFIX
+        curl git file cpio git clang cmake ninja if [ "$ARCHITECTURE" != "riscv64" ]; then xbps-install -Sy cross-riscv64-linux-$LIBC_PREFIX
       fi
       ;;
     *)
