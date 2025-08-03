@@ -216,8 +216,8 @@ pub struct Context {
     scontext: usize,
     pub mepc: usize,
 
-    pmpcfg: usize,
-    pmpaddr: [usize; 16],
+    pub pmpcfg: usize,
+    pub pmpaddr: [usize; 8],
     interrupted: usize,
 }
 

@@ -12,15 +12,10 @@ use riscv::interrupt::supervisor::Exception;
 
 use crate::{
     _tee_scratch_start, opensbi,
+    sbi::SBI_COVH_GET_TSM_INFO,
     shadowfax_core::state::{Context, TsmType, STATE},
 };
 use core::mem::offset_of;
-
-macro_rules! cove_pack_fid {
-    ($sdid:expr, $fid:expr) => {
-        (($sdid & 0x3F) << 26) | ($fid & 0xFFFF)
-    };
-}
 
 macro_rules! cove_unpack_fid {
     ($fid:expr) => {
@@ -28,7 +23,7 @@ macro_rules! cove_unpack_fid {
     };
 }
 
-pub const TEE_SCRATCH_SIZE: usize = 0x8000;
+pub const TEE_SCRATCH_SIZE: usize = 0xF000;
 
 /// The main trap handler function that orchestrates the saving and restoring of registers.
 /// The handler verifies if the trap is a TEECALL/TEERESUME or a TEERET and handles it with custom
@@ -61,7 +56,7 @@ pub unsafe extern "C" fn handler() -> ! {
         sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
         ecall_code = const Exception::SupervisorEnvCall as usize,
         covh_ext_id = const 0x434F5648 as usize,
-        tee_handler = sym tee_handler,
+        tee_handler = sym tee_handler_entry,
     );
     /*
      * Saves the current stack pointer and sets up the stack pointer for the trap context.
@@ -218,7 +213,7 @@ pub unsafe extern "C" fn handler() -> ! {
         "ld t1, {sbi_trap_regs_offset_t1}(a0)",
         "ld t2, {sbi_trap_regs_offset_t2}(a0)",
         "ld s0, {sbi_trap_regs_offset_s0}(a0)",
-        "ld s1, {sbi_trap_regs_offset_s1}(a0)",
+    "ld s1, {sbi_trap_regs_offset_s1}(a0)",
         "ld a1, {sbi_trap_regs_offset_a1}(a0)",
         "ld a2, {sbi_trap_regs_offset_a2}(a0)",
         "ld a3, {sbi_trap_regs_offset_a3}(a0)",
@@ -295,9 +290,10 @@ pub unsafe extern "C" fn handler() -> ! {
     core::arch::asm!("mret", options(noreturn))
 }
 
-extern "C" fn tee_handler() -> ! {
+#[unsafe(naked)]
+extern "C" fn tee_handler_entry() -> ! {
     unsafe {
-        core::arch::asm!(
+        core::arch::naked_asm!(
         // calculate new stack pointer for tee handling. To do so, we use the mscratch and adapt to
         // the opensbi scartch memory layout.
         // This block needs:
@@ -407,26 +403,33 @@ extern "C" fn tee_handler() -> ! {
         sd t0, 56*8(sp)
         csrr t0, pmpaddr15
         sd t0, 57*8(sp)
+        la sp, {tee_stack}
+        j {tee_handler}
         ",
-        "la sp, {tee_stack}",
-        tee_stack = sym _tee_scratch_start,
-        covh_ext_id = const 0x434F5648 as usize,
-        context_size= const size_of::<Context>(),
-        scratch_size = const TEE_SCRATCH_SIZE,
-        sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
-        options(nostack)
+            tee_stack = sym _tee_scratch_start,
+            covh_ext_id = const 0x434F5648 as usize,
+            context_size= const size_of::<Context>(),
+            scratch_size = const TEE_SCRATCH_SIZE,
+            sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
+            tee_handler = sym tee_handler
         )
     }
-    // unlock the state
-    let mut state_guard = STATE.lock();
-    let state = state_guard.get_mut().unwrap();
+}
 
+#[no_mangle]
+#[inline(never)]
+extern "C" fn tee_handler() -> ! {
     // retrieve the target supervisor domain and the current active domain
     let mut fid: usize;
     unsafe {
         core::arch::asm!("add {}, a6, zero", out(reg) fid, options(readonly, nostack));
     }
-    let (dst_domain_id, _fid) = cove_unpack_fid!(fid);
+
+    // unlock the state
+    let mut state_guard = STATE.lock();
+    let state = state_guard.get_mut().unwrap();
+
+    let (dst_domain_id, fid) = cove_unpack_fid!(fid);
     let active_domain = state.domains.iter().find(|d| d.active != 0).unwrap();
     let active_domain_id = active_domain.id;
     let scratch_addr = &raw const _tee_scratch_start as *const u8 as usize;
@@ -454,6 +457,20 @@ extern "C" fn tee_handler() -> ! {
             // increment mepc to avoid loop
             (*dst_ctx).mepc += 4;
         }
+        match fid {
+            // Reset the PMP address to the shared memory
+            SBI_COVH_GET_TSM_INFO => {
+                let tsm_ctx = (scratch_addr
+                    - (TEE_SCRATCH_SIZE + size_of::<Context>())
+                    - (dst_domain_id + 1) * size_of::<Context>())
+                    as *mut Context;
+
+                unsafe {
+                    (*tsm_ctx).pmpaddr[7] = 0;
+                }
+            }
+            _ => {}
+        }
         state.domains[active_domain_id].active = 0;
         state.domains[src_id].active = 1;
         dst_addr
@@ -478,8 +495,39 @@ extern "C" fn tee_handler() -> ! {
                 (*dst_ctx).regs[i] = (*src_ctx).regs[i];
             }
             (*dst_ctx).regs[15] = 0;
+            (*dst_ctx).pmpcfg |= 0x00 << (7 * 8);
         }
 
+        match fid {
+            // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
+            // where he will write the tsm_info struct (a0) for the necessary size (a1)
+            SBI_COVH_GET_TSM_INFO => {
+                // calculate pmpaddre value
+                let addr;
+                let size;
+                unsafe {
+                    addr = (*dst_ctx).regs[10];
+                    size = (*dst_ctx).regs[11];
+                }
+                let napot_size = size.next_power_of_two();
+                let base = addr & !(napot_size - 1);
+                let k = napot_size.trailing_zeros() as usize;
+                let ones = (1 << (k - 3)) - 1;
+
+                // calculate the pmpcfg byte
+                let locked = false;
+                let range = riscv::register::Range::NAPOT as usize;
+                let perm = riscv::register::Permission::RW as usize;
+                let slot = 7;
+                let cfg_byte = ((locked as usize) << 7) | (range << 3) | perm;
+
+                unsafe {
+                    (*dst_ctx).pmpaddr[7] = ((base >> 2) as usize) | ones;
+                    (*dst_ctx).pmpcfg |= cfg_byte << (slot * 8);
+                }
+            }
+            _ => {}
+        }
         // deactivate the domain and mark the target supervisor domain active indicating the src
         // domain
         state.domains[active_domain_id].active = 0;
@@ -573,22 +621,6 @@ extern "C" fn tee_handler() -> ! {
             csrw pmpaddr6, t0
             ld t0, 49*8(sp)
             csrw pmpaddr7, t0
-            ld t0, 50*8(sp)
-            csrw pmpaddr8, t0
-            ld t0, 51*8(sp)
-            csrw pmpaddr9, t0
-            ld t0, 52*8(sp)
-            csrw pmpaddr10, t0
-            ld t0, 53*8(sp)
-            csrw pmpaddr11, t0
-            ld t0, 54*8(sp)
-            csrw pmpaddr12, t0
-            ld t0, 55*8(sp)
-            csrw pmpaddr13, t0
-            ld t0, 56*8(sp)
-            csrw pmpaddr14, t0
-            ld t0, 57*8(sp)
-            csrw pmpaddr15, t0
             ",
             // restore sp
             "ld sp, 2*8(sp)",
