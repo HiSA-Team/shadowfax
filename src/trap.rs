@@ -416,10 +416,11 @@ extern "C" fn tee_handler(fid: usize) -> ! {
     let (dst_domain_id, fid) = cove_unpack_fid!(fid);
     let active_domain = state.domains.iter().find(|d| d.active != 0).unwrap();
     let active_domain_id = active_domain.id;
+    let dst_domain_type = state.domains[dst_domain_id].tsm_type.clone();
     let scratch_addr = &raw const _tee_scratch_start as *const u8 as usize;
     let scratch_ctx = (scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>())) as *mut Context;
 
-    // understand if it we are in a TEECALL or a TEERET. To do so we need to check if the target
+    // understand if we are in a TEECALL or a TEERET. To do so we need to check the target
     // domain (which is assumed to be a confidential domain). If the target domain is the same as
     // the active one, it means that this call comes from a TSM and it is a TEERET, otherwise it is
     // a TEECALL.
@@ -441,6 +442,7 @@ extern "C" fn tee_handler(fid: usize) -> ! {
             // increment mepc to avoid loop
             (*dst_ctx).mepc += 4;
         }
+        // Perform operations to cleanup specific to the functionality
         match fid {
             // Reset the PMP address to the shared memory
             SBI_COVH_GET_TSM_INFO => {
@@ -457,79 +459,100 @@ extern "C" fn tee_handler(fid: usize) -> ! {
             _ => {}
         }
         state.domains[active_domain_id].active = 0;
-        state.domains[src_id].active = 1;
+        state.domains[src_id].active = 1 << src_id;
         dst_addr
     } else {
         // TEECALL
-        // We need to store the calling context into the right structure
-        let src_ctx = (scratch_addr
-            - (TEE_SCRATCH_SIZE + size_of::<Context>())
-            - (active_domain_id + 1) * size_of::<Context>()) as *mut Context;
-        unsafe {
-            core::ptr::copy_nonoverlapping(scratch_ctx, src_ctx, 1);
-        }
-        let dst_addr = scratch_addr
-            - (TEE_SCRATCH_SIZE + size_of::<Context>())
-            - (dst_domain_id + 1) * size_of::<Context>();
+        // If the target domain is not a TSM, we will just respond to the src domain
+        // with an error. In this case we don't do the context switch into the TSM since there is
+        // not one. A malicious supervisor domain could attempt to get into a non TEE-aware
+        // OS. So we change the dst_addr to the src domain.
+        match dst_domain_type {
+            TsmType::None => {
+                let dst_addr = scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>());
 
-        let dst_ctx = dst_addr as *mut Context;
-        unsafe {
-            // we need to preserve all a0-a7 registers without a5.
-            // Easier (maybe to help prefetch to store everything and to delete a5)
-            for i in 10..18 {
-                (*dst_ctx).regs[i] = (*src_ctx).regs[i];
-            }
-            (*dst_ctx).regs[15] = 0;
-        }
-
-        match fid {
-            // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
-            // where he will write the tsm_info struct (a0) for the necessary size (a1)
-            SBI_COVH_GET_TSM_INFO => {
-                // calculate pmpaddre value
-                let addr;
-                let size;
+                let dst_ctx = dst_addr as *mut Context;
                 unsafe {
-                    addr = (*dst_ctx).regs[10];
-                    size = (*dst_ctx).regs[11];
+                    (*dst_ctx).regs[10] = usize::MAX;
+                    (*dst_ctx).regs[11] = 0;
+                    // increment mepc to avoid loop
+                    (*dst_ctx).mepc += 4;
                 }
-                let napot_size = size.next_power_of_two();
-                let base = addr & !(napot_size - 1);
-                let k = napot_size.trailing_zeros() as usize;
-                let ones = (1 << (k - 3)) - 1;
-
-                // calculate the pmpcfg byte
-                let locked = false;
-                let range = riscv::register::Range::NAPOT as usize;
-                let perm = riscv::register::Permission::RW as usize;
-                let slot = 7;
-                let cfg_byte = ((locked as usize) << 7) | (range << 3) | perm;
-
-                unsafe {
-                    (*dst_ctx).pmpaddr[7] = ((base >> 2) as usize) | ones;
-                    (*dst_ctx).pmpcfg |= cfg_byte << (slot * 8);
-                }
+                dst_addr
             }
-            _ => {}
+            _ => {
+                // We need to store the calling context into the right structure
+                let src_ctx = (scratch_addr
+                    - (TEE_SCRATCH_SIZE + size_of::<Context>())
+                    - (active_domain_id + 1) * size_of::<Context>())
+                    as *mut Context;
+                unsafe {
+                    core::ptr::copy_nonoverlapping(scratch_ctx, src_ctx, 1);
+                }
+                let dst_addr = scratch_addr
+                    - (TEE_SCRATCH_SIZE + size_of::<Context>())
+                    - (dst_domain_id + 1) * size_of::<Context>();
+
+                let dst_ctx = dst_addr as *mut Context;
+                unsafe {
+                    // we need to preserve all a0-a7 registers without a5.
+                    // Easier (maybe to help prefetch to store everything and to delete a5)
+                    for i in 10..18 {
+                        (*dst_ctx).regs[i] = (*src_ctx).regs[i];
+                    }
+                    (*dst_ctx).regs[15] = 0;
+                }
+
+                state.domains[active_domain_id].active = 0;
+                state.domains[dst_domain_id].active =
+                    (1 << active_domain_id) | (1 << dst_domain_id);
+
+                // Perform operations to allow the specific functionality
+                match fid {
+                    // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
+                    // where he will write the tsm_info struct (a0) for the necessary size (a1).
+                    SBI_COVH_GET_TSM_INFO => {
+                        // TODO: this logic should be applied for every request, not only
+                        // sbi_covh_get_tsm_info.
+                        // calculate pmpaddr value
+                        let addr;
+                        let size;
+                        unsafe {
+                            addr = (*dst_ctx).regs[10];
+                            size = (*dst_ctx).regs[11];
+                        }
+                        let napot_size = size.next_power_of_two();
+                        let base = addr & !(napot_size - 1);
+                        let k = napot_size.trailing_zeros() as usize;
+                        let ones = (1 << (k - 3)) - 1;
+
+                        // calculate the pmpcfg byte
+                        let locked = false;
+                        let range = riscv::register::Range::NAPOT as usize;
+                        let perm = riscv::register::Permission::RW as usize;
+                        let slot = 7;
+                        let cfg_byte = ((locked as usize) << 7) | (range << 3) | perm;
+
+                        unsafe {
+                            (*dst_ctx).pmpaddr[7] = ((base >> 2) as usize) | ones;
+                            (*dst_ctx).pmpcfg |= cfg_byte << (slot * 8);
+                        }
+                    }
+                    _ => {}
+                }
+                dst_addr
+            }
         }
-        // deactivate the domain and mark the target supervisor domain active indicating the src
-        // domain
-        state.domains[active_domain_id].active = 0;
-        state.domains[dst_domain_id].active = (1 << active_domain_id) | (1 << dst_domain_id);
-        dst_addr
     };
 
     // release the lock
     drop(state_guard);
 
     // restore target domain context
-    riscv::asm::fence_i();
-    riscv::asm::fence();
-
     unsafe {
         core::arch::asm!(
         "
-        mv a0, {target_domain}
+        mv sp, {target_domain}
         j {tee_handler_exit}
 
         ",
@@ -544,84 +567,87 @@ extern "C" fn tee_handler(fid: usize) -> ! {
 fn tee_handler_exit() -> ! {
     core::arch::naked_asm!(
         "
-        add sp, a0, zero
-        ld zero, 0(sp)
-        ld ra, 1*8(sp)
-        ld gp, 3*8(sp)
-        ld tp, 4*8(sp)
-        ld t0, 5*8(sp)
-        ld t1, 6*8(sp)
-        ld t2, 7*8(sp)
-        ld s0, 8*8(sp)
-        ld s1, 9*8(sp)
-        ld a0, 10*8(sp)
-        ld a1, 11*8(sp)
-        ld a2, 12*8(sp)
-        ld a3, 13*8(sp)
-        ld a4, 14*8(sp)
-        ld a5, 15*8(sp)
-        ld a6, 16*8(sp)
-        ld a7, 17*8(sp)
-        ld s2, 18*8(sp)
-        ld s3, 19*8(sp)
-        ld s4, 20*8(sp)
-        ld s5, 21*8(sp)
-        ld s6, 22*8(sp)
-        ld s7, 23*8(sp)
-        ld s8, 24*8(sp)
-        ld s9, 25*8(sp)
-        ld s10, 26*8(sp)
-        ld s11, 27*8(sp)
-        ld t3, 28*8(sp)
-        ld t4, 29*8(sp)
-        ld t5, 30*8(sp)
-        ld t6, 31*8(sp)
-        ",
+            ld zero, 0(sp)
+            ld ra, 1*8(sp)
+            ld gp, 3*8(sp)
+            ld tp, 4*8(sp)
+            ld t0, 5*8(sp)
+            ld t1, 6*8(sp)
+            ld t2, 7*8(sp)
+            ld s0, 8*8(sp)
+            ld s1, 9*8(sp)
+            ld a0, 10*8(sp)
+            ld a1, 11*8(sp)
+            ld a2, 12*8(sp)
+            ld a3, 13*8(sp)
+            ld a4, 14*8(sp)
+            ld a5, 15*8(sp)
+            ld a6, 16*8(sp)
+            ld a7, 17*8(sp)
+            ld s2, 18*8(sp)
+            ld s3, 19*8(sp)
+            ld s4, 20*8(sp)
+            ld s5, 21*8(sp)
+            ld s6, 22*8(sp)
+            ld s7, 23*8(sp)
+            ld s8, 24*8(sp)
+            ld s9, 25*8(sp)
+            ld s10, 26*8(sp)
+            ld s11, 27*8(sp)
+            ld t3, 28*8(sp)
+            ld t4, 29*8(sp)
+            ld t5, 30*8(sp)
+            ld t6, 31*8(sp)
+            ",
         // restore CSRs
         "
-        ld t0, 32*8(sp)
-        csrw sstatus, t0
-        ld t0, 33*8(sp)
-        csrw stvec, t0
-        ld t0, 34*8(sp)
-        csrw sip, t0
-        ld t0, 35*8(sp)
-        csrw scounteren, t0
-        ld t0, 36*8(sp)
-        csrw sscratch, t0
-        ld t0, 37*8(sp)
-        csrw satp, t0
-        ld t0, 38*8(sp)
-        csrw senvcfg, t0
-        // ld t0, 39*8(sp)
-        // csrw scontext, t0
-        ld t0, 40*8(sp)
-        csrw mepc, t0
-        ",
+            ld t0, 32*8(sp)
+            csrw sstatus, t0
+            ld t0, 33*8(sp)
+            csrw stvec, t0
+            ld t0, 34*8(sp)
+            csrw sip, t0
+            ld t0, 35*8(sp)
+            csrw scounteren, t0
+            ld t0, 36*8(sp)
+            csrw sscratch, t0
+            ld t0, 37*8(sp)
+            csrw satp, t0
+            ld t0, 38*8(sp)
+            csrw senvcfg, t0
+            // ld t0, 39*8(sp)
+            // csrw scontext, t0
+            ld t0, 40*8(sp)
+            csrw mepc, t0
+            ",
         // restore pmp
         "
-        ld t0, 41*8(sp)
-        csrw pmpcfg0, t0
-        ld t0, 42*8(sp)
-        csrw pmpaddr0, t0
-        ld t0, 43*8(sp)
-        csrw pmpaddr1, t0
-        ld t0, 44*8(sp)
-        csrw pmpaddr2, t0
-        ld t0, 45*8(sp)
-        csrw pmpaddr3, t0
-        ld t0, 46*8(sp)
-        csrw pmpaddr4, t0
-        ld t0, 47*8(sp)
-        csrw pmpaddr5, t0
-        ld t0, 48*8(sp)
-        csrw pmpaddr6, t0
-        ld t0, 49*8(sp)
-        csrw pmpaddr7, t0
+            ld t0, 41*8(sp)
+            csrw pmpcfg0, t0
+            ld t0, 42*8(sp)
+            csrw pmpaddr0, t0
+            ld t0, 43*8(sp)
+            csrw pmpaddr1, t0
+            ld t0, 44*8(sp)
+            csrw pmpaddr2, t0
+            ld t0, 45*8(sp)
+            csrw pmpaddr3, t0
+            ld t0, 46*8(sp)
+            csrw pmpaddr4, t0
+            ld t0, 47*8(sp)
+            csrw pmpaddr5, t0
+            ld t0, 48*8(sp)
+            csrw pmpaddr6, t0
+            ld t0, 49*8(sp)
+            csrw pmpaddr7, t0
 
-        // restore sp
-        ld sp, 2*8(sp)
+            // restore sp
+            ld sp, 2*8(sp)
         ",
-        "mret",
+        "
+            fence
+            fence.i
+            mret
+            ",
     )
 }
