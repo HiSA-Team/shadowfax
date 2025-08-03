@@ -495,12 +495,11 @@ extern "C" fn tee_handler(fid: usize) -> ! {
 
                 let dst_ctx = dst_addr as *mut Context;
                 unsafe {
-                    // we need to preserve all a0-a7 registers without a5.
+                    // we need to preserve all a0-a7 registers.
                     // Easier (maybe to help prefetch to store everything and to delete a5)
                     for i in 10..18 {
                         (*dst_ctx).regs[i] = (*src_ctx).regs[i];
                     }
-                    (*dst_ctx).regs[15] = 0;
                 }
 
                 state.domains[active_domain_id].active = 0;
@@ -529,7 +528,7 @@ extern "C" fn tee_handler(fid: usize) -> ! {
                         // calculate the pmpcfg byte
                         let locked = false;
                         let range = riscv::register::Range::NAPOT as usize;
-                        let perm = riscv::register::Permission::RW as usize;
+                        let perm = riscv::register::Permission::W as usize;
                         let slot = 7;
                         let cfg_byte = ((locked as usize) << 7) | (range << 3) | perm;
 
@@ -648,6 +647,6 @@ fn tee_handler_exit() -> ! {
             fence
             fence.i
             mret
-            ",
+        ",
     )
 }
