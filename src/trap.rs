@@ -452,8 +452,9 @@ extern "C" fn tee_handler(fid: usize) -> ! {
                     as *mut Context;
 
                 unsafe {
-                    (*tsm_ctx).pmpaddr[7] = 0;
-                    (*dst_ctx).pmpcfg |= 0x00 << (7 * 8);
+                    (*tsm_ctx).pmpaddr[2] = 0;
+                    (*tsm_ctx).pmpaddr[1] = 0;
+                    (*dst_ctx).pmpcfg &= !0xFF << (2 * 8);
                 }
             }
             _ => {}
@@ -511,29 +512,25 @@ extern "C" fn tee_handler(fid: usize) -> ! {
                     // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
                     // where he will write the tsm_info struct (a0) for the necessary size (a1).
                     SBI_COVH_GET_TSM_INFO => {
-                        // TODO: this logic should be applied for every request, not only
-                        // sbi_covh_get_tsm_info.
-                        // calculate pmpaddr value
-                        let addr;
-                        let size;
-                        unsafe {
-                            addr = (*dst_ctx).regs[10];
-                            size = (*dst_ctx).regs[11];
-                        }
-                        let napot_size = size.next_power_of_two();
-                        let base = addr & !(napot_size - 1);
-                        let k = napot_size.trailing_zeros() as usize;
-                        let ones = (1 << (k - 3)) - 1;
+                        let addr = unsafe { (*dst_ctx).regs[10] };
+                        let size = unsafe { (*dst_ctx).regs[11] };
 
-                        // calculate the pmpcfg byte
-                        let locked = false;
-                        let range = riscv::register::Range::NAPOT as usize;
-                        let perm = riscv::register::Permission::W as usize;
-                        let slot = 7;
-                        let cfg_byte = ((locked as usize) << 7) | (range << 3) | perm;
+                        let slot = 2;
+
+                        // Build the CFG byte for TOR + RW (not locked)
+                        let range = riscv::register::Range::TOR as usize;
+                        let perm = riscv::register::Permission::RW as usize;
+                        let locked = false as usize;
+                        let cfg_byte = (locked << 7) | (range << 3) | (perm);
+
+                        // Mask out old byte for slot 1 in pmpcfg0
+                        let byte_mask = 0xff << (slot * 8);
 
                         unsafe {
-                            (*dst_ctx).pmpaddr[7] = ((base >> 2) as usize) | ones;
+                            (*dst_ctx).pmpaddr[slot - 1] = addr >> 2;
+                            (*dst_ctx).pmpaddr[slot] = (addr + size) >> 2;
+
+                            (*dst_ctx).pmpcfg &= !byte_mask;
                             (*dst_ctx).pmpcfg |= cfg_byte << (slot * 8);
                         }
                     }
@@ -621,8 +618,6 @@ fn tee_handler_exit() -> ! {
             ",
         // restore pmp
         "
-            ld t0, 41*8(sp)
-            csrw pmpcfg0, t0
             ld t0, 42*8(sp)
             csrw pmpaddr0, t0
             ld t0, 43*8(sp)
@@ -639,13 +634,15 @@ fn tee_handler_exit() -> ! {
             csrw pmpaddr6, t0
             ld t0, 49*8(sp)
             csrw pmpaddr7, t0
-
-            // restore sp
-            ld sp, 2*8(sp)
-        ",
-        "
             fence
             fence.i
+            ld t0, 41*8(sp)
+            csrw pmpcfg0, t0
+        ",
+        "
+            // restore t0 and sp
+            ld t0, 5*8(sp)
+            ld sp, 2*8(sp)
             mret
         ",
     )
