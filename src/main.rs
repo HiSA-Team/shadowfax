@@ -32,11 +32,10 @@ use core::{ffi, panic::PanicInfo};
 
 use linked_list_allocator::LockedHeap;
 use riscv::asm::wfi;
-use sbi::cove::supd_extension::SBI_SUPD_EXTENSION;
 
 #[macro_use]
 mod debug;
-mod sbi;
+mod cove;
 
 /// This module includes the `bindings.rs` generated
 /// using `build.rs` which translates opensbi C definitions
@@ -269,13 +268,6 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
     shadowfax_core::state::init(fdt_addr, next_stage_address).unwrap();
-
-    // register the supd extension leveraging the existing opensbi extension ecosystem.
-    // we could make this independent from opensbi, but this is ok for now since it
-    // is trivial to implement.
-    unsafe {
-        opensbi::sbi_ecall_register_extension(&raw mut SBI_SUPD_EXTENSION);
-    }
 
     /*
      * This code initializes the scratch space, which is a per-HART data structure
