@@ -27,9 +27,9 @@ pub const TEE_SCRATCH_SIZE: usize = 0xF000;
 /// The main trap handler function that orchestrates the saving and restoring of registers.
 /// The handler verifies if the trap is a TEECALL/TEERESUME or a TEERET and handles it with custom
 /// logic.
-#[align(4)]
+#[rustc_align(4)]
 #[unsafe(naked)]
-pub unsafe extern "C" fn handler() -> ! {
+pub fn handler() -> ! {
     core::arch::naked_asm!(
         /*
          * Check if the trap is a TEECALL/TEERET and perform the context switch to the tsm

@@ -548,7 +548,7 @@ fn _trap_handler() {}
 
 /// This function causes the processor to enter an infinite loop, effectively halting execution.
 /// It is typically used as a placeholder or to indicate a state where further execution should not proceed.
-#[align(4)]
+#[rustc_align(4)]
 fn hang() {
     loop {
         wfi()
