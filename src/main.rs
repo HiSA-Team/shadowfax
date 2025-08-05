@@ -298,22 +298,22 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
      * -|    |   Firmware Code & Data                        |    |
      * -|    |                                               |    |
      * -|    |   (Includes the read/write (R/W) section,     |    |
-     * -|    |    beginning at _fw_rw_start)                   |    |
+     * -|    |    beginning at _fw_rw_start)                 |    |
      * -|    +-----------------------------------------------+    |
      * -|  _fw_end                                                |
      * -+---------------------------------------------------------+
-     * -| HART Stacks (for all HARTs, total size = s7 * s8)        |
+     * -| HART Stacks (for all HARTs, total size = s7 * s8)       |
      * -|                                                         |
      * -|  Hart 0 Stack:                                          |
      * -|    +---------------------------+                        |
      * -|    |  (Stack space)            |                        |
      * -|    |                           |                        |
-     * -|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE    |
-     * -|    |    (holds various fields: |    (e.g., fw_start,     |
+     * -|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE   |
+     * -|    |    (holds various fields: |    (e.g., fw_start,    |
      * -|    |     fw_start, fw_size,     |     fw_size, RW offset,  |
-     * -|    |     fw_rw_offset,         |     heap offset/size,    |
-     * -|    |     heap offset/size,     |     boot parameters,     |
-     * -|    |     boot addresses, etc.) |     etc.)                |
+     * -|    |     fw_rw_offset,         |     heap offset/size,  |
+     * -|    |     heap offset/size,     |     boot parameters,   |
+     * -|    |     boot addresses, etc.) |     etc.)              |
      * -|    +---------------------------+                        |
      * -+---------------------------------------------------------+
      * -| Heap Region                                             |

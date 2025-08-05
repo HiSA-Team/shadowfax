@@ -376,22 +376,6 @@ fn tee_handler_entry() -> ! {
         sd t0, 48*8(sp)
         csrr t0, pmpaddr7
         sd t0, 49*8(sp)
-        csrr t0, pmpaddr8
-        sd t0, 50*8(sp)
-        csrr t0, pmpaddr9
-        sd t0, 51*8(sp)
-        csrr t0, pmpaddr10
-        sd t0, 52*8(sp)
-        csrr t0, pmpaddr11
-        sd t0, 53*8(sp)
-        csrr t0, pmpaddr12
-        sd t0, 54*8(sp)
-        csrr t0, pmpaddr13
-        sd t0, 55*8(sp)
-        csrr t0, pmpaddr14
-        sd t0, 56*8(sp)
-        csrr t0, pmpaddr15
-        sd t0, 57*8(sp)
         la sp, {tee_stack}
         add a0, a6, zero
         call {tee_handler}
