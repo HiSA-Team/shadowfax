@@ -196,7 +196,7 @@ pub fn handler() -> ! {
             ld t4, {sbi_trap_regs_offset_t4}(a0)
             ld t5, {sbi_trap_regs_offset_t5}(a0)
             ld t6, {sbi_trap_regs_offset_t6}(a0)
-            ",
+        ",
 
         /*
          * Restores the machine status (MSTATUS) and machine exception program counter (MEPC)
@@ -376,22 +376,6 @@ fn tee_handler_entry() -> ! {
         sd t0, 48*8(sp)
         csrr t0, pmpaddr7
         sd t0, 49*8(sp)
-        csrr t0, pmpaddr8
-        sd t0, 50*8(sp)
-        csrr t0, pmpaddr9
-        sd t0, 51*8(sp)
-        csrr t0, pmpaddr10
-        sd t0, 52*8(sp)
-        csrr t0, pmpaddr11
-        sd t0, 53*8(sp)
-        csrr t0, pmpaddr12
-        sd t0, 54*8(sp)
-        csrr t0, pmpaddr13
-        sd t0, 55*8(sp)
-        csrr t0, pmpaddr14
-        sd t0, 56*8(sp)
-        csrr t0, pmpaddr15
-        sd t0, 57*8(sp)
         la sp, {tee_stack}
         add a0, a6, zero
         call {tee_handler}
@@ -632,9 +616,6 @@ fn tee_handler_exit() -> ! {
             csrw pmpaddr6, t0
             ld t0, 49*8(sp)
             csrw pmpaddr7, t0
-
-            fence
-            fence.i
 
             ld t0, 41*8(sp)
             csrw pmpcfg0, t0
