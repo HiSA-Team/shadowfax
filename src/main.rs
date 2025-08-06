@@ -50,7 +50,8 @@ mod opensbi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-mod shadowfax_core;
+mod domain;
+mod state;
 mod trap;
 
 extern crate alloc;
@@ -267,7 +268,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     };
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
-    shadowfax_core::state::init(fdt_addr).unwrap();
+    state::init(fdt_addr).unwrap();
 
     /*
      * This code initializes the scratch space, which is a per-HART data structure
