@@ -405,8 +405,22 @@ pub fn supd_handler_entry() -> ! {
     ",
     // save csrs
     "
-        csrr t0, mstatus
+        csrr t0, sstatus
         sd t0, 32*8(sp)
+        csrr t0, stvec
+        sd t0, 33*8(sp)
+        csrr t0, sip
+        sd t0, 34*8(sp)
+        csrr  t0,scounteren
+        sd t0, 35*8(sp)
+        csrr  t0, sscratch
+        sd t0, 36*8(sp)
+        csrr t0, satp
+        sd t0, 37*8(sp)
+        csrr t0,senvcfg
+        sd t0, 38*8(sp)
+        // sd t0, 39*8(sp)
+        // csrr scontext, t0
         csrr t0, mepc
         sd t0, 40*8(sp)
     ",
