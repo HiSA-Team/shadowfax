@@ -98,6 +98,13 @@
 		shadowfax-domains {
 			compatible = "shadowfax,domain,config";
 
+			untrusted-domain {
+				compatible = "shadowfax,domain,instance";
+				id = <0x0>;
+				trust = <0x1>;
+				tsm-type = "none";
+			};
+
 			trusted-domain {
 				compatible = "shadowfax,domain,instance";
 				id = <0x1>;

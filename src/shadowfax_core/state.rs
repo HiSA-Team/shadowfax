@@ -26,7 +26,7 @@ static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../../crypto/publickey-pkcs1.
 
 pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
-pub fn init(fdt_addr: usize, next_addr: usize) -> Result<(), anyhow::Error> {
+pub fn init(fdt_addr: usize) -> Result<(), anyhow::Error> {
     let fdt = unsafe {
         let address = fdt_addr as *const u8;
         DevTree::from_raw_pointer(address).unwrap()
@@ -35,23 +35,14 @@ pub fn init(fdt_addr: usize, next_addr: usize) -> Result<(), anyhow::Error> {
     let state = state.get_mut_or_init(|| State::new());
 
     let tee_stack = &raw const crate::_tee_scratch_start as *const u8 as usize;
-    // push domain zero since it is mandated by the ISA
-    state.domains.push(Domain {
-        name: String::from("root"),
-        id: 0,
-        active: 1,
-        start_address: 0,
-        end_address: 0,
-        tsm_type: TsmType::None,
-    });
 
     let mut node_iter = fdt.compatible_nodes("shadowfax,domain,instance");
     while let Some(node) = node_iter.next().unwrap() {
-        let domain = Domain::from_fdt_node(&node);
+        let (domain, start_addr, end_addr) = Domain::from_fdt_node(&node);
 
         // load the correct TSM for now only the default one is supported
         match domain.tsm_type {
-            // Nothing to do, TSM is not required for this domain
+            // Get trusted supervisor domains
             TsmType::None => {}
             // Load the default TSM. This involves:
             // - verify the hash
@@ -59,7 +50,7 @@ pub fn init(fdt_addr: usize, next_addr: usize) -> Result<(), anyhow::Error> {
             TsmType::Default => {
                 Domain::verify_and_load_tsm(
                     DEFAULT_TSM,
-                    domain.start_address,
+                    start_addr,
                     DEFAULT_TSM_SIGN,
                     DEFAULT_TSM_PUBKEY,
                 )?;
@@ -68,10 +59,8 @@ pub fn init(fdt_addr: usize, next_addr: usize) -> Result<(), anyhow::Error> {
                     - (domain.id + 1) * size_of::<Context>();
                 let hssa = ctx_addr as *mut Context;
 
-                let start = domain.start_address;
-                let end = domain.end_address;
-                let size = (end - start).next_power_of_two();
-                let base = start & !(size - 1);
+                let size = (end_addr - start_addr).next_power_of_two();
+                let base = start_addr & !(size - 1);
 
                 let k = size.trailing_zeros() as usize;
                 let ones = (1 << (k - 3)) - 1;
@@ -89,9 +78,9 @@ pub fn init(fdt_addr: usize, next_addr: usize) -> Result<(), anyhow::Error> {
                 // setup basic registers for first context switch
                 unsafe {
                     core::ptr::write_bytes(hssa, 0, 1);
-                    (*hssa).stvec = domain.start_address;
-                    (*hssa).mepc = domain.start_address;
-                    (*hssa).regs[2] = domain.start_address;
+                    (*hssa).stvec = start_addr;
+                    (*hssa).mepc = start_addr;
+                    (*hssa).regs[2] = 0x00;
                     (*hssa).pmpcfg = pmpcfg;
                     (*hssa).pmpaddr[0] = pmpaddr;
                 }
@@ -128,9 +117,8 @@ pub struct Domain {
     pub id: usize,
     name: String,
     pub active: usize,
-    pub start_address: usize,
-    pub end_address: usize,
     pub tsm_type: TsmType,
+    pub trust_map: usize,
 }
 
 impl Domain {
@@ -139,14 +127,15 @@ impl Domain {
             id: 0,
             name: String::default(),
             active: 0,
-            start_address: 0,
-            end_address: 0,
             tsm_type: TsmType::None,
+            trust_map: 0,
         }
     }
 
-    fn from_fdt_node(node: &DevTreeNode) -> Self {
+    fn from_fdt_node(node: &DevTreeNode) -> (Self, usize, usize) {
         let mut domain = Domain::empty();
+        let mut start_addr = 0;
+        let mut end_addr = 0;
         for prop in node.props().iterator() {
             if let Ok(prop) = prop {
                 let name = prop.name().unwrap_or("");
@@ -155,16 +144,35 @@ impl Domain {
                     "name" => domain.name = String::from(prop.str().unwrap()),
                     "tsm-type" => domain.tsm_type = TsmType::from(prop.str().unwrap()),
                     "memory" => {
-                        let start_addr = prop.u64(0).unwrap() as usize;
-                        let end_addr = prop.u64(1).unwrap() as usize;
-                        domain.start_address = start_addr;
-                        domain.end_address = end_addr;
+                        start_addr = prop.u64(0).unwrap() as usize;
+                        end_addr = prop.u64(1).unwrap() as usize;
+                    }
+                    "trust" => {
+                        let node = node
+                            .props()
+                            .iterator()
+                            .find(|c| c.as_ref().unwrap().name().unwrap_or("") == "trust")
+                            .unwrap()
+                            .unwrap();
+
+                        let mut i = 0;
+                        let mut trust = 0;
+                        loop {
+                            if let Ok(d) = node.u32(i) {
+                                trust |= 1 << (d as usize);
+                                i += 1
+                            } else {
+                                break;
+                            }
+                        }
+                        domain.trust_map = trust;
                     }
                     _ => {}
                 }
             }
         }
-        domain
+        domain.active = if domain.id == 0 { 1 } else { 0 };
+        (domain, start_addr, end_addr)
     }
     fn verify_and_load_tsm(
         bin: &[u8],
@@ -186,6 +194,10 @@ impl Domain {
         }
 
         Ok(())
+    }
+
+    pub fn is_trusted(&self, dst: usize) -> bool {
+        self.trust_map & (1 << dst) != 0
     }
 }
 
