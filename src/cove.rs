@@ -132,14 +132,14 @@ pub fn tee_handler_entry() -> ! {
         context_size= const size_of::<Context>(),
         scratch_size = const TEE_SCRATCH_SIZE,
         sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
-        tee_handler = sym tee_handler,
+        tee_handler = sym covh_handler,
         tee_handler_exit = sym tee_handler_exit
     )
 }
 
 #[no_mangle]
 #[inline(never)]
-extern "C" fn tee_handler(fid: usize) -> usize {
+extern "C" fn covh_handler(fid: usize) -> usize {
     // unlock the state
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
@@ -449,21 +449,21 @@ fn supd_handler(fid: usize) -> usize {
     let scratch_addr = &raw const _tee_scratch_start as *const u8 as usize;
     let dst_addr = scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let dst_ctx = dst_addr as *mut Context;
-    match fid {
-        SBI_EXT_SUPD_GET_ACTIVE_DOMAINS => {
-            let mut ret: usize = 0;
-            for d in state.domains.iter() {
-                ret |= 1 << d.id;
-            }
-            unsafe {
-                (*dst_ctx).regs[10] = 0;
-                (*dst_ctx).regs[11] = ret;
-            }
+
+    if fid == SBI_EXT_SUPD_GET_ACTIVE_DOMAINS {
+        let mut ret: usize = 0;
+        for d in state.domains.iter() {
+            ret |= 1 << d.id;
         }
-        _ => unsafe {
+        unsafe {
+            (*dst_ctx).regs[10] = 0;
+            (*dst_ctx).regs[11] = ret;
+        }
+    } else {
+        unsafe {
             (*dst_ctx).regs[10] = usize::MAX - 1;
             (*dst_ctx).regs[11] = 0;
-        },
+        }
     }
 
     unsafe {
