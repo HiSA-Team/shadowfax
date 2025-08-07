@@ -1,21 +1,22 @@
-use core::{error::Error, fmt::Display};
+use core::{error::Error, fmt::Display, str::FromStr};
 
-use alloc::string::String;
 use fdt_rs::{
     base::DevTreeNode,
     prelude::{FallibleIterator, PropReader},
 };
+use heapless::String;
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
     pkcs1v15::{Signature, VerifyingKey},
     signature::Verifier,
 };
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Domain {
     pub id: usize,
-    name: String,
+    name: String<8>,
     pub active: usize,
     pub tsm_type: TsmType,
     pub trust_map: usize,
@@ -41,7 +42,7 @@ impl Domain {
                 let name = prop.name().unwrap_or("");
                 match name {
                     "id" => domain.id = prop.u32(0).unwrap() as usize,
-                    "name" => domain.name = String::from(prop.str().unwrap()),
+                    "name" => domain.name = String::from_str(prop.str().unwrap()).unwrap(),
                     "tsm-type" => domain.tsm_type = TsmType::from(prop.str().unwrap()),
                     "memory" => {
                         start_addr = prop.u64(0).unwrap() as usize;
@@ -102,7 +103,7 @@ impl Domain {
 }
 
 #[allow(unused)]
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum TsmType {
     Default,
     External,

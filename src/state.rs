@@ -1,11 +1,11 @@
-use core::cell::OnceCell;
-
 use alloc::vec::Vec;
 use fdt_rs::{base::DevTree, prelude::FallibleIterator};
-use spin::mutex::Mutex;
+use serde::{Deserialize, Serialize};
+use spin::{mutex::Mutex, MutexGuard};
 
 use crate::{
-    cove::TEE_SCRATCH_SIZE,
+    context::Context,
+    cove::{MAX_DOMAINS, TEE_SCRATCH_SIZE},
     domain::{Domain, TsmType},
 };
 
@@ -13,21 +13,64 @@ use crate::{
 static DEFAULT_TSM: &[u8] = include_bytes!("../bin/tsm.bin");
 
 #[link_section = ".rodata"]
-static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../crypto/tsm.bin.signature");
+static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../bin/crypto/tsm.bin.signature");
 
 #[link_section = ".rodata"]
-static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../crypto/publickey-pkcs1.der");
+static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../bin/crypto/publickey-pkcs1.der");
 
-pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
+pub struct Locked;
+pub struct Unlocked;
 
+static STATE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
+pub struct GlobalState<S = Locked> {
+    guard: MutexGuard<'static, Vec<u8>>,
+    state: Option<State>,
+
+    _phantom: core::marker::PhantomData<S>,
+}
+
+impl GlobalState<Locked> {
+    pub fn unlock() -> GlobalState<Unlocked> {
+        let mut guard = STATE.lock();
+        // array is empty. It is the first initialization
+        if guard.is_empty() {
+            *guard = encrypt_state(&State::new());
+        }
+
+        let decrypted = decrypt_state(&guard);
+
+        GlobalState {
+            guard,
+            state: Some(decrypted),
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl GlobalState<Unlocked> {
+    pub fn state_mut(&mut self) -> &mut State {
+        self.state.as_mut().unwrap()
+    }
+    pub fn state(&self) -> &State {
+        self.state.as_ref().unwrap()
+    }
+    pub fn lock(mut self) {
+        let state = self.state.take().unwrap();
+        let new_blob = encrypt_state(&state);
+        *self.guard = new_blob;
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct State {
-    pub domains: Vec<Domain>,
+    pub domains: heapless::Vec<Domain, MAX_DOMAINS>,
 }
 
 impl State {
     fn new() -> Self {
         Self {
-            domains: Vec::new(),
+            domains: heapless::Vec::new(),
         }
     }
 }
@@ -37,8 +80,6 @@ pub fn init(fdt_addr: usize) -> Result<(), anyhow::Error> {
         let address = fdt_addr as *const u8;
         DevTree::from_raw_pointer(address).unwrap()
     };
-    let mut state = STATE.lock();
-    let state = state.get_mut_or_init(|| State::new());
 
     let tee_stack = &raw const crate::_tee_scratch_start as *const u8 as usize;
 
@@ -93,28 +134,33 @@ pub fn init(fdt_addr: usize) -> Result<(), anyhow::Error> {
             }
             TsmType::External => {}
         }
-        state.domains.push(domain.clone());
+        with_state(|s| unsafe {
+            s.domains.push_unchecked(domain.clone());
+        })
     }
 
     Ok(())
 }
 
-#[derive(Clone, Debug)]
-#[repr(C, align(4))]
-pub struct Context {
-    pub regs: [usize; 32],
+impl<Locked> Drop for GlobalState<Locked> {
+    fn drop(&mut self) {
+        let state = self.state.take().unwrap();
 
-    sstatus: usize,
-    stvec: usize,
-    sip: usize,
-    scounteren: usize,
-    sscratch: usize,
-    satp: usize,
-    senvcfg: usize,
-    scontext: usize,
-    pub mepc: usize,
+        let new_blob = encrypt_state(&state);
+        *self.guard = new_blob;
+    }
+}
 
-    pub pmpcfg: usize,
-    pub pmpaddr: [usize; 8],
-    interrupted: usize,
+fn encrypt_state(_s: &State) -> Vec<u8> {
+    Vec::new()
+}
+fn decrypt_state(_v: &Vec<u8>) -> State {
+    State::new()
+}
+
+pub fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
+    let mut sm = GlobalState::<Locked>::unlock();
+    let res = f(sm.state_mut());
+    // sm.lock();
+    res
 }
