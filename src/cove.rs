@@ -19,7 +19,7 @@ macro_rules! cove_unpack_fid {
     };
 }
 
-pub const TEE_SCRATCH_SIZE: usize = 0xF000;
+pub const TEE_SCRATCH_SIZE: usize = 0x2000;
 
 #[unsafe(naked)]
 pub fn tee_handler_entry() -> ! {
