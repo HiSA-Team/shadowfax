@@ -33,7 +33,7 @@ ARG OPENSBI_VERSION=1.6
 # Install system dependencies for RISC-V dev
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install \
     qemu-system-riscv64 gcc-riscv64-linux-gnu build-essential \
-    libncurses-dev bison flex libssl-dev \
+    libncurses-dev bison flex libssl-dev device-tree-compiler \
     libelf-dev dwarves curl git file cpio sudo bc clang libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
