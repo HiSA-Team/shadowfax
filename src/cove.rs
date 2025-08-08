@@ -19,6 +19,7 @@ macro_rules! cove_unpack_fid {
     };
 }
 
+// 8K scratch memory
 pub const TEE_SCRATCH_SIZE: usize = 0x2000;
 
 #[unsafe(naked)]
@@ -200,7 +201,11 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // with an error. In this case we don't do the context switch into the TSM since there is
     // not one. A malicious supervisor domain could attempt to get into a non TEE-aware
     // OS. So we change the dst_addr to the src domain.
-    if matches!(dst_type, TsmType::None) || !active_domain.is_trusted(dst_id) {
+    let dst_domain = &state.domains[dst_id];
+    if matches!(dst_type, TsmType::None)
+        || !active_domain.is_trusted(dst_id)
+        || !dst_domain.is_trusted(src_id)
+    {
         unsafe {
             (*scratch_ctx).regs[10] = usize::MAX;
             (*scratch_ctx).regs[11] = 0;
