@@ -10,12 +10,14 @@
 /target
 payload/tsm/target/
 
-# Exclude everything except this folders in root
+# Exclude everything except these folders in root
 /*
 !/.cargo
 !/.github
 !/.gitignore
 !/.devcontainer
+!/.dockerignore
+!/.pre-commit-config.yaml
 !/docs
 !/payload
 !/README.md
@@ -23,3 +25,12 @@ payload/tsm/target/
 !/platform
 !/src
 !/scripts
+!/Dockerfile
+!/Cargo.lock
+!/Cargo.toml
+!/LICENSE
+!/Dockerfile
+!/build.rs
+!/requirements.txt
+!/rust-toolchain.toml
+!/wrapper.h
