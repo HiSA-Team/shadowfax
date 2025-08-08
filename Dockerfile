@@ -31,10 +31,10 @@ ARG PLATFORM=generic
 ARG OPENSBI_VERSION=1.6
 
 # Install system dependencies for RISC-V dev
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install \
-    qemu-system-riscv64 gcc-riscv64-linux-gnu build-essential \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
+    qemu-system-riscv64 gcc-riscv64-linux-gnu build-essential qemu-utils \
     libncurses-dev bison flex libssl-dev device-tree-compiler \
-    libelf-dev dwarves curl git file cpio sudo bc clang libclang-dev \
+    libelf-dev dwarves curl git file cpio sudo bc libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user matching host UID
@@ -60,16 +60,17 @@ RUN rustup show \
 # Install OpenSBI
 RUN curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v$OPENSBI_VERSION.tar.gz -o /tmp/opensbi-$OPENSBI_VERSION.tar.gz \
     && tar xvf /tmp/opensbi-$OPENSBI_VERSION.tar.gz -C /tmp \
-    && . /environment.sh && make -C /tmp/opensbi-$OPENSBI_VERSION PLATFORM=$PLATFORM \
-    && make -C /tmp/opensbi-$OPENSBI_VERSION I=/shadowfax PLATFORM=$PLATFORM install
+    && . /environment.sh && make -C /tmp/opensbi-$OPENSBI_VERSION PLATFORM=$PLATFORM
 
 # Entrypoint
 USER root
-COPY ./scripts/environment.sh /etc/profile.d/environment.sh
 RUN echo '#!/bin/sh' > /entrypoint.sh \
-    && echo '. /etc/profile.d/environment.sh' >> /entrypoint.sh \
+    && echo '. /environment.sh' >> /entrypoint.sh \
     && echo 'exec "$@"' >> /entrypoint.sh \
     && chmod +x /entrypoint.sh
 USER devuser
 
+ENV OPENSBI_PATH=/tmp/opensbi-${OPENSBI_VERSION}
+
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["bash"]

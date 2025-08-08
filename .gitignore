@@ -34,3 +34,4 @@ payload/tsm/target/
 !/requirements.txt
 !/rust-toolchain.toml
 !/wrapper.h
+!/environment.sh
