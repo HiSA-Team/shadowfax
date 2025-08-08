@@ -1,3 +1,41 @@
+/*
+* Global State of the TSM Driver. For now this state is an array of supervisor domains. The state
+* is initialized by the init function which populates the array from the device tree. The device
+* tree must declare supervisor domains with `compatible = "shadowfax,domain,config";`. Each
+* supervisor domain must declare an id and a `compatible = "shadowfax,domain,instance";`.
+* Other fields may be:
+* - trust: a list of id of other supervisor domains that are trusted;
+* - tsm-type:
+*  - "none": don't load anything not a confidential supervisor domains;
+*  - "default": confidential supervisor domain. Load the default TSM;
+*  - "external": confidential supervisor domain. Don't load the TSN;
+* - memory: an entry for the memory range used to program the PMP of the domain
+*
+* Note: since we use the OpenSBI implementation, the domain with id=0x0 is initialized by OpenSBI
+* sbi_scratch_init() function.
+*
+* Examples:
+* `
+       shadowfax-domains {
+           compatible = "shadowfax,domain,config";
+
+           untrusted-domain {
+               compatible = "shadowfax,domain,instance";
+               id = <0x0>
+               trust = <0x1>;
+               tsm-type = "none";
+           };
+
+           trusted-domain {
+               compatible = "shadowfax,domain,instance";
+               id = <0x1>;
+               memory = <0x0 0x81000000 0x0 0x82000000>;
+               tsm-type = "default";
+           };
+       };
+* `
+* Author: Giuseppe Capasso <capassog97@gmail.com>
+*/
 use core::cell::OnceCell;
 
 use alloc::vec::Vec;

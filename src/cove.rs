@@ -1,3 +1,18 @@
+/*
+ * CoVE handler module. In this module, we provide CoVH and SUPD extension trap handling.
+ * The handling is structured as follows:
+ * - entry: the context is saved to the TEE_SCRATCH and calls the handler
+ * - handler: the function which handles the interrupt and prepare the context switch. Returns the
+ * address of the Context to be restored
+ * - exit: restores the Context prepared by the handler
+ *
+ * While the entry is separed, the exit is shared across the SUPD and COVH since the operations are
+ * the same. The entry tells the exit if it needs to restore the PMP using a0 register (0 don't
+ * restore)
+ *
+ * Author: Giuseppe Capasso <capassog97@gmail.com>
+ */
+
 use core::mem::offset_of;
 
 use crate::{
@@ -138,6 +153,14 @@ pub fn tee_handler_entry() -> ! {
     )
 }
 
+/// Handle the CoVH call:
+/// - Unlock the state;
+/// - Find out if it is a TEECALL or a TEERET
+/// - Find the destination context address
+/// - Return the destination address
+///
+/// The `domain.active` field of a TSM encodes the src supervisor domain which must be preserved by
+/// the TSM in a TEERET.
 #[no_mangle]
 #[inline(never)]
 extern "C" fn covh_handler(fid: usize) -> usize {
@@ -267,99 +290,6 @@ extern "C" fn covh_handler(fid: usize) -> usize {
 }
 
 #[unsafe(naked)]
-fn tee_handler_exit() -> ! {
-    core::arch::naked_asm!(
-        "
-            ld zero, 0(sp)
-            ld ra, 1*8(sp)
-            ld gp, 3*8(sp)
-            ld tp, 4*8(sp)
-            ld t1, 6*8(sp)
-            ld t2, 7*8(sp)
-            ld s0, 8*8(sp)
-            ld s1, 9*8(sp)
-            ld a1, 11*8(sp)
-            ld a2, 12*8(sp)
-            ld a3, 13*8(sp)
-            ld a4, 14*8(sp)
-            ld a5, 15*8(sp)
-            ld a6, 16*8(sp)
-            ld a7, 17*8(sp)
-            ld s2, 18*8(sp)
-            ld s3, 19*8(sp)
-            ld s4, 20*8(sp)
-            ld s5, 21*8(sp)
-            ld s6, 22*8(sp)
-            ld s7, 23*8(sp)
-            ld s8, 24*8(sp)
-            ld s9, 25*8(sp)
-            ld s10, 26*8(sp)
-            ld s11, 27*8(sp)
-            ld t3, 28*8(sp)
-            ld t4, 29*8(sp)
-            ld t5, 30*8(sp)
-            ld t6, 31*8(sp)
-        ",
-        // restore CSRs
-        "
-            ld t0, 32*8(sp)
-            csrw sstatus, t0
-            ld t0, 33*8(sp)
-            csrw stvec, t0
-            ld t0, 34*8(sp)
-            csrw sip, t0
-            ld t0, 35*8(sp)
-            csrw scounteren, t0
-            ld t0, 36*8(sp)
-            csrw sscratch, t0
-            ld t0, 37*8(sp)
-            csrw satp, t0
-            ld t0, 38*8(sp)
-            csrw senvcfg, t0
-            // ld t0, 39*8(sp)
-            // csrw scontext, t0
-            ld t0, 40*8(sp)
-            csrw mepc, t0
-        ",
-        // restore pmp
-        "
-            beqz a0, 1f
-            ld t0, 42*8(sp)
-            csrw pmpaddr0, t0
-            ld t0, 43*8(sp)
-            csrw pmpaddr1, t0
-            ld t0, 44*8(sp)
-            csrw pmpaddr2, t0
-            ld t0, 45*8(sp)
-            csrw pmpaddr3, t0
-            ld t0, 46*8(sp)
-            csrw pmpaddr4, t0
-            ld t0, 47*8(sp)
-            csrw pmpaddr5, t0
-            ld t0, 48*8(sp)
-            csrw pmpaddr6, t0
-            ld t0, 49*8(sp)
-            csrw pmpaddr7, t0
-
-            ld t0, 41*8(sp)
-            csrw pmpcfg0, t0
-
-            fence
-            fence.i
-
-            1:
-            // restore t0, a0, sp
-            ld t0, 5*8(sp)
-            ld a0, 10*8(sp)
-            ld sp, 2*8(sp)
-        ",
-        "
-            mret
-        ",
-    )
-}
-
-#[unsafe(naked)]
 pub fn supd_handler_entry() -> ! {
     core::arch::naked_asm!(
     "
@@ -476,4 +406,98 @@ fn supd_handler(fid: usize) -> usize {
     }
 
     return dst_addr;
+}
+
+#[unsafe(naked)]
+fn tee_handler_exit() -> ! {
+    core::arch::naked_asm!(
+        "
+            ld zero, 0(sp)
+            ld ra, 1*8(sp)
+            ld gp, 3*8(sp)
+            ld tp, 4*8(sp)
+            ld t1, 6*8(sp)
+            ld t2, 7*8(sp)
+            ld s0, 8*8(sp)
+            ld s1, 9*8(sp)
+            ld a1, 11*8(sp)
+            ld a2, 12*8(sp)
+            ld a3, 13*8(sp)
+            ld a4, 14*8(sp)
+            ld a5, 15*8(sp)
+            ld a6, 16*8(sp)
+            ld a7, 17*8(sp)
+            ld s2, 18*8(sp)
+            ld s3, 19*8(sp)
+            ld s4, 20*8(sp)
+            ld s5, 21*8(sp)
+            ld s6, 22*8(sp)
+            ld s7, 23*8(sp)
+            ld s8, 24*8(sp)
+            ld s9, 25*8(sp)
+            ld s10, 26*8(sp)
+            ld s11, 27*8(sp)
+            ld t3, 28*8(sp)
+            ld t4, 29*8(sp)
+            ld t5, 30*8(sp)
+            ld t6, 31*8(sp)
+        ",
+        // restore CSRs
+        "
+            ld t0, 32*8(sp)
+            csrw sstatus, t0
+            ld t0, 33*8(sp)
+            csrw stvec, t0
+            ld t0, 34*8(sp)
+            csrw sip, t0
+            ld t0, 35*8(sp)
+            csrw scounteren, t0
+            ld t0, 36*8(sp)
+            csrw sscratch, t0
+            ld t0, 37*8(sp)
+            csrw satp, t0
+            ld t0, 38*8(sp)
+            csrw senvcfg, t0
+            // ld t0, 39*8(sp)
+            // csrw scontext, t0
+            ld t0, 40*8(sp)
+            csrw mepc, t0
+        ",
+        // restore pmp
+        "
+            // check if we need to restore the PMP
+            beqz a0, 1f
+            ld t0, 42*8(sp)
+            csrw pmpaddr0, t0
+            ld t0, 43*8(sp)
+            csrw pmpaddr1, t0
+            ld t0, 44*8(sp)
+            csrw pmpaddr2, t0
+            ld t0, 45*8(sp)
+            csrw pmpaddr3, t0
+            ld t0, 46*8(sp)
+            csrw pmpaddr4, t0
+            ld t0, 47*8(sp)
+            csrw pmpaddr5, t0
+            ld t0, 48*8(sp)
+            csrw pmpaddr6, t0
+            ld t0, 49*8(sp)
+            csrw pmpaddr7, t0
+
+            ld t0, 41*8(sp)
+            csrw pmpcfg0, t0
+
+            fence
+            fence.i
+
+            1:
+            // restore t0, a0, sp
+            ld t0, 5*8(sp)
+            ld a0, 10*8(sp)
+            ld sp, 2*8(sp)
+        ",
+        "
+            mret
+        ",
+    )
 }
