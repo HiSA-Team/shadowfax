@@ -55,7 +55,7 @@ install_dependencies() {
   noble | jammy | bookworm | bullseye)
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
       qemu-system-riscv64 gcc-riscv64-linux-gnu build-essential qemu-utils \
-      libncurses-dev bison flex libssl-dev device-tree-compiler \
+      libncurses-dev bison flex libssl-dev device-tree-compiler python3 \
       libelf-dev dwarves curl git file cpio sudo bc libclang-dev ca-certificates
     if [ "$architecture" != "riscv64" ]; then
       DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-"$LIBC_PREFIX"
@@ -63,7 +63,7 @@ install_dependencies() {
     ;;
   void)
     xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf \
-      elfutils-devel libdwarf-devel curl git file cpio clang cmake ninja
+      elfutils-devel libdwarf-devel curl git file cpio clang cmake ninja python3
     if [ "$architecture" != "riscv64" ]; then
       xbps-install -Sy cross-riscv64-linux-"$LIBC_PREFIX"
     fi
@@ -92,13 +92,12 @@ install_rust() {
 
 # Function to download, build, and install OpenSBI
 install_opensbi() {
-  printf "Downloading opensbi source..."
-  su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${OPENSBI_PATH}.tar.gz"
-  printf " done\n"
+  print_info "Downloading opensbi source"
+  su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz"
 
-  printf "Extracting opensbi source..."
-  su $USER_NAME -c "tar xf ${OPENSBI_PATH}.tar.gz -C ${TEMP_DIR}"
-  printf " done\n"
+  print_info "Extracting opensbi source"
+  mkdir -p ${OPENSBI_PATH}
+  su $USER_NAME -c "tar xf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${OPENSBI_PATH} --strip-components=1"
 
   # build opensbi
   su $USER_NAME -c "make -C ${OPENSBI_PATH} PLATFORM=${PLATFORM}"
@@ -106,20 +105,17 @@ install_opensbi() {
 
 # Function to download, build, and install Clang from source for musl-based systems
 build_clang_from_source() {
-  printf "Downloading LLVM source..."
+  print_info "Downloading LLVM source..."
   su $USER_NAME -c "curl -fsSL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz \
     -o ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
-  printf " done\n"
 
-  printf "Extracting LLVM source..."
+  print_info "Extracting LLVM source..."
   su $USER_NAME -c "tar -xf ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
-  printf " done\n"
 
-  printf "Creating build directory..."
+  print_info "Creating build directory..."
   su $USER_NAME -c "mkdir llvm-project-${LLVM_VERSION}.src/build"
-  printf " done\n"
 
-  printf "Configuring LLVM build with CMake..."
+  print_info "Configuring LLVM build with CMake..."
   su $USER_NAME -c "cmake -G 'Ninja' \
     -S llvm-project-${LLVM_VERSION}.src/llvm/ \
     -B llvm-project-${LLVM_VERSION}.src/build \
@@ -129,11 +125,9 @@ build_clang_from_source() {
     -DLLVM_ENABLE_ZSTD=OFF \
     -DLLVM_TARGETS_TO_BUILD='X86;RISCV' \
     -DLLVM_HOST_TRIPLE=${ARCHITECTURE}-unknown-linux-${LIBC_PREFIX}"
-  printf " done\n"
 
-  printf "Building LLVM with Ninja..."
+  print_info "Building LLVM with Ninja..."
   su $USER_NAME -c "ninja -C llvm-project-${LLVM_VERSION}.src/build"
-  printf " done\n"
 }
 
 # Global variables
