@@ -9,3 +9,17 @@
 
 /target
 payload/tsm/target/
+
+# Exclude everything except this folders in root
+/*
+!/.cargo
+!/.github
+!/.gitignore
+!/.devcontainer
+!/docs
+!/payload
+!/README.md
+!/payload
+!/platform
+!/src
+!/scripts
