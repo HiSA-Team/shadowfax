@@ -15,12 +15,7 @@
 
 use core::mem::offset_of;
 
-use crate::{
-    _tee_scratch_start,
-    domain::TsmType,
-    opensbi,
-    state::{Context, STATE},
-};
+use crate::{_tee_scratch_start, context::Context, domain::TsmType, opensbi, state::STATE};
 
 pub const COVH_EXT_ID: usize = 0x434F5648;
 pub const SBI_COVH_GET_TSM_INFO: usize = 0;
