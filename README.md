@@ -89,8 +89,6 @@ export LLVM_CONFIG_PATH=$(pwd)/scripts/llvm-config.sh
 
 Due to some bugs in [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#environment-variables), the `scripts/llvm-config.sh` is needed as a workaround as described [here](https://github.com/rust-lang/rust-bindgen/issues/2360).
 
-Also, users will need to change the linker in `.cargo/config.toml` from `riscv64-linux-gnu-ld` to `riscv64-linux-musl-ld`.
-
 ### Unsupported distributions
 If your distribution is not supported by the script, you can install required dependencies by yourself or refer to the [Docker setup](#docker-setup). You need:
 
