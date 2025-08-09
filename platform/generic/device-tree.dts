@@ -108,6 +108,7 @@
 			trusted-domain {
 				compatible = "shadowfax,domain,instance";
 				id = <0x1>;
+				trust = <0x0>;
 				memory = <0x0 0x81000000 0x0 0x82000000>;
 				tsm-type = "default";
 			};

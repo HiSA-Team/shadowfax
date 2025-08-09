@@ -119,61 +119,63 @@ const STACK_SIZE_PER_HART: usize = 4096 * 2;
 /// from the cli, we need to provide a custom linkerscript.
 #[link_section = ".text.entry"]
 #[no_mangle]
-extern "C" fn start() -> ! {
-    unsafe {
-        core::arch::asm!(
-            // If there are multiple hart, init only hartid 0
-            "csrr s6, mhartid",
-            // If not zero, go to wait loop
-            "bnez s6, {hang}",
+#[unsafe(naked)]
+extern "C" fn _start() -> ! {
+    core::arch::naked_asm!(
+        // If there are multiple hart, init only hartid 0
+        // The .attribute is needed. LLVM does not produce code seems to be a bug.
+    r#"
+    .attribute arch, "rv64imac"
+        csrr s6, mhartid
+        // If not zero, go to wait loop
+        bnez s6, {hang}
 
-            // setup a temporary stack pointer
-            "li t0, {stack_size_per_hart}",
-            "mul t1, a0, t0",
-            "la sp, {stack_top}",
-            "sub sp, sp, t1",
+        // setup a temporary stack pointer
+        li t0, {stack_size_per_hart}
+        mul t1, a0, t0
+        la sp, {stack_top}
+        sub sp, sp, t1
 
-            // zero out bss
-            "la s4, {bss_start}",
-            "la s5, {bss_end}",
-            "0:",
-            "sd zero, 0(s4)",
-            "addi s4, s4, {pointer_size}",
+        // zero out bss
+        la s4, {bss_start}
+        la s5, {bss_end}
+        0:
+        sd zero, 0(s4)
+        addi s4, s4, {pointer_size}
 
-            // Loop if s4 is less than s5
-            "blt s4, s5, 0b",
-            // call fw_platform_init
-            // save registers a0-a4
-            "add s0, a0, zero",
-            "add s1, a1, zero",
-            "add s2, a2, zero",
-            "add s3, a3, zero",
-            "add s4, a4, zero",
-            "call {fw_platform_init}",
-            // the platform init could change the device tree address
-            // save the return value in t0
-            "add t0, a0, zero",
-            // restore the a0-a4 registers
-            "add a0, s0, zero",
-            "add a1, s1, zero",
-            "add a2, s2, zero",
-            "add a3, s3, zero",
-            "add a4, s4, zero",
-            // put the new fdt in a1
-            "add a1, t0, zero",
-            // Jump to our main function
-            "call {main}",
-            stack_size_per_hart = const STACK_SIZE_PER_HART,
-            stack_top = sym _top_b_stack,
-            hang = sym hang,
-            fw_platform_init = sym opensbi::fw_platform_init,
-            main = sym main,
-            bss_start = sym _start_bss,
-            bss_end = sym _end_bss,
-            pointer_size = const size_of::<usize>(),
-            options(noreturn)
-        )
-    }
+        // Loop if s4 is less than s5
+        blt s4, s5, 0b
+        // call fw_platform_init
+        // save registers a0-a4
+        add s0, a0, zero
+        add s1, a1, zero
+        add s2, a2, zero
+        add s3, a3, zero
+        add s4, a4, zero
+        call {fw_platform_init}
+        // the platform init could change the device tree address
+        // save the return value in t0
+        add t0, a0, zero
+        // restore the a0-a4 registers
+        add a0, s0, zero
+        add a1, s1, zero
+        add a2, s2, zero
+        add a3, s3, zero
+        add a4, s4, zero
+        // put the new fdt in a1
+        add a1, t0, zero
+        // Jump to our main function
+        call {main}
+    "#,
+        stack_size_per_hart = const STACK_SIZE_PER_HART,
+        stack_top = sym _top_b_stack,
+        hang = sym hang,
+        fw_platform_init = sym opensbi::fw_platform_init,
+        main = sym main,
+        bss_start = sym _start_bss,
+        bss_end = sym _end_bss,
+        pointer_size = const size_of::<usize>(),
+    )
 }
 
 #[allow(unused)]

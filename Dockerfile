@@ -43,7 +43,7 @@ RUN useradd -m -u ${USER_ID} -s /bin/bash devuser \
     && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Copy environment setup
-COPY ./scripts/environment.sh /environment.sh
+COPY environment.sh /environment.sh
 
 # Workdir for project
 WORKDIR /shadowfax
@@ -60,17 +60,15 @@ RUN rustup show \
 # Install OpenSBI
 RUN curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v$OPENSBI_VERSION.tar.gz -o /tmp/opensbi-$OPENSBI_VERSION.tar.gz \
     && tar xvf /tmp/opensbi-$OPENSBI_VERSION.tar.gz -C /tmp \
-    && . /environment.sh && make -C /tmp/opensbi-$OPENSBI_VERSION PLATFORM=$PLATFORM
+    && bash -c ". /environment.sh  /tmp/opensbi-${OPENSBI_VERSION} && make -C /tmp/opensbi-$OPENSBI_VERSION PLATFORM=$PLATFORM"
 
 # Entrypoint
 USER root
 RUN echo '#!/bin/sh' > /entrypoint.sh \
-    && echo '. /environment.sh' >> /entrypoint.sh \
+    && echo '. /environment.sh /tmp/opensbi-${OPENSBI_VERSION}' >> /entrypoint.sh \
     && echo 'exec "$@"' >> /entrypoint.sh \
     && chmod +x /entrypoint.sh
 USER devuser
-
-ENV OPENSBI_PATH=/tmp/opensbi-${OPENSBI_VERSION}
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["bash"]

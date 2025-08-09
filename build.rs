@@ -20,7 +20,7 @@ const PLATFORM_BASE: &str = "platform";
 fn main() {
     // output directory
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let opensbi_path = env::var("OPENSBI_PATH").map(PathBuf::from).expect("OPENSBI_PATH must be set; run `source scripts/environment.sh` or set OPENSBI_PATH in your environment");
+    let opensbi_path = env::var("OPENSBI_PATH").map(PathBuf::from).expect("OPENSBI_PATH must be set; run `source environment.sh <opensbi-path>` or set OPENSBI_PATH in your environment");
 
     // Sourcing `scripts/environment.sh` allow users to specify a PLATFORM (defaults to 'generic').
     // Retrieve platform details if exists otherwise throw an error
@@ -59,6 +59,8 @@ fn main() {
     println!("cargo:rustc-link-arg=-T{}", out_path.join("memory.x").display());
     println!("cargo:rustc-link-arg=-static");
     println!("cargo:rustc-link-arg=-nostdlib");
+    println!("cargo:rustc-link-arg=-melf64lriscv");
+    println!("cargo:rustc-link-arg=-Map=linker.map");
 
     // Link the openbsi platform library. We specify the opensbi installation path
     // (by default this is obtained from `make PLATFORM=generic install I=<path-to-shadowfax>`)
