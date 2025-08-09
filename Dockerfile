@@ -65,8 +65,8 @@ RUN curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v
 USER root
 RUN echo '#!/bin/sh' > /entrypoint.sh \
     && echo ". /environment.sh /tmp/opensbi-${OPENSBI_VERSION}" >> /entrypoint.sh \
-    && echo 'exec "$@"' >> /entrypoint.sh \
-    && chmod +x /entrypoint.sh
+    && echo 'exec "$@"' >> /entrypoint.sh
+RUN cp /entrypoint.sh /etc/profile.d/shadowfax.sh
 USER devuser
 
 ENTRYPOINT ["/entrypoint.sh"]
