@@ -18,8 +18,8 @@ use std::{env, fs};
 const PLATFORM_BASE: &str = "platform";
 
 fn main() {
+    // Ensure the bin/ folder exists.
     fs::create_dir_all("bin").unwrap();
-    // output directory
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let opensbi_path = env::var("OPENSBI_PATH").map(PathBuf::from).expect("OPENSBI_PATH must be set; run `source environment.sh <opensbi-path>` or set OPENSBI_PATH in your environment");
 
