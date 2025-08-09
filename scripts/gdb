@@ -1,8 +1,5 @@
 set confirm off
 set breakpoint pending on
-set logging enabled on
-set logging overwrite on
-set print pretty on
 set pagination off
 set arch riscv:rv64
 
