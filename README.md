@@ -110,7 +110,7 @@ docker build -t shadowfax-build \
 docker run -v $(pwd):/shadowfax -w /shadowfax --network=host -it shadowfax-build
 ```
 
-If using modern editors like VS-code, the repository supports devcontainer workspaces and should automatically
+If using modern editors like VS-code, the repository supports [devcontainer workspaces](https://containers.dev/) and should automatically
 ask you to create a new workspace when creating using the `.devcontainer/devcontainer.json` file.
 
 ## Contributing
