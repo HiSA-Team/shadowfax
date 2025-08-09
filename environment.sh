@@ -49,8 +49,13 @@ get_libc() {
 }
 
 export ARCHITECTURE=$(uname -m)
+print_export "ARCHITECTURE" "$ARCHITECTURE"
+
 export LIBC=$(get_libc)
+print_export "LIBC" "$LIBC"
+
 export LIBC_PREFIX=$([ "$LIBC" = "glibc" ] && echo "gnu" || echo "$LIBC")
+print_export "LIBC_PREFIX" "$LIBC_PREFIX"
 
 # Export CROSS_COMPILE if not on riscv64
 if [ "$ARCHITECTURE" != "riscv64" ]; then
