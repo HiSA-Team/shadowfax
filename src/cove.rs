@@ -100,8 +100,8 @@ pub fn tee_handler_entry() -> ! {
         sd t0, 36*8(sp)
         csrr t0, satp
         sd t0, 37*8(sp)
-        csrr t0,senvcfg
-        sd t0, 38*8(sp)
+        //csrr t0,senvcfg
+        //sd t0, 38*8(sp)
         // sd t0, 39*8(sp)
         // csrr scontext, t0
         csrr t0, mepc
@@ -347,8 +347,8 @@ pub fn supd_handler_entry() -> ! {
         sd t0, 36*8(sp)
         csrr t0, satp
         sd t0, 37*8(sp)
-        csrr t0,senvcfg
-        sd t0, 38*8(sp)
+        //csrr t0,senvcfg
+        //sd t0, 38*8(sp)
         // sd t0, 39*8(sp)
         // csrr scontext, t0
         csrr t0, mepc
@@ -451,8 +451,8 @@ fn tee_handler_exit() -> ! {
             csrw sscratch, t0
             ld t0, 37*8(sp)
             csrw satp, t0
-            ld t0, 38*8(sp)
-            csrw senvcfg, t0
+            //ld t0, 38*8(sp)
+            //csrw senvcfg, t0
             // ld t0, 39*8(sp)
             // csrw scontext, t0
             ld t0, 40*8(sp)
