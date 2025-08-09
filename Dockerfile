@@ -13,7 +13,7 @@
 #   docker build -t shadowfax-build \
 #     --build-arg USER_ID=$(id -u) \
 #     --build-arg PLATFORM=generic \
-#     --build-arg OPENSBI=1.6 .     .
+#     --build-arg OPENSBI=1.6 .
 #
 # Default starts a shell environment:
 #   docker run -v $(pwd):/shadowfax -it shadowfax-build
