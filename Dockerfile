@@ -13,8 +13,7 @@
 #   docker build -t shadowfax-build \
 #     --build-arg USER_ID=$(id -u) \
 #     --build-arg PLATFORM=generic \
-#     --build-arg OPENSBI=1.6 \
-#     .
+#     --build-arg OPENSBI=1.6 .     .
 #
 # Default starts a shell environment:
 #   docker run -v $(pwd):/shadowfax -it shadowfax-build
@@ -34,7 +33,7 @@ ARG OPENSBI_VERSION=1.6
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
     qemu-system-riscv64 gcc-riscv64-linux-gnu build-essential qemu-utils \
     libncurses-dev bison flex libssl-dev device-tree-compiler \
-    libelf-dev dwarves curl git file cpio sudo bc libclang-dev \
+    libelf-dev dwarves curl git file cpio sudo bc libclang-dev gdb-multiarch \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user matching host UID
@@ -65,7 +64,7 @@ RUN curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v
 # Entrypoint
 USER root
 RUN echo '#!/bin/sh' > /entrypoint.sh \
-    && echo '. /environment.sh /tmp/opensbi-${OPENSBI_VERSION}' >> /entrypoint.sh \
+    && echo ". /environment.sh /tmp/opensbi-${OPENSBI_VERSION}" >> /entrypoint.sh \
     && echo 'exec "$@"' >> /entrypoint.sh \
     && chmod +x /entrypoint.sh
 USER devuser
