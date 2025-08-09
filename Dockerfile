@@ -66,7 +66,7 @@ USER root
 RUN echo '#!/bin/sh' > /entrypoint.sh \
     && echo ". /environment.sh /tmp/opensbi-${OPENSBI_VERSION}" >> /entrypoint.sh \
     && echo 'exec "$@"' >> /entrypoint.sh
-COPY environment.sh /etc/profile.d/shadowfax.sh
+RUN cp /entrypoint.sh /etc/profile.d/shadowfax.sh
 RUN chmod +x /entrypoint.sh
 USER devuser
 
