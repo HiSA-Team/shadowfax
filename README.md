@@ -8,6 +8,8 @@ confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC
 computing is defined in the RISC-V AP-TEE specification, also known as CoVE
 (**Co**nfidential **V**irtualization **E**xtension).
 
+This code is tested on `riscv64imac` with Privilege ISA **v1.10**.
+
 Further details can be found in the [documentation](https://granp4sso.github.io/shadowfax/).
 
 ### Goals
