@@ -5,6 +5,7 @@ use cove::{SbiRet, TsmInfo};
 use heapless::Vec;
 use spin::mutex::SpinMutex;
 mod cove;
+mod log;
 
 // make sure the panic handler is linked in
 extern crate panic_halt;
@@ -42,6 +43,7 @@ macro_rules! cove_pack_fid {
 #[riscv_rt::entry]
 fn main() -> ! {
     let mut domains = DOMAINS.lock();
+    println!("[SHADOWFAX-HYPERVISOR] enumerating supervisor domains");
     // get all active_domains
     let active_domains = sbi_call(
         SUPD_EXT_ID as usize,
@@ -67,13 +69,19 @@ fn main() -> ! {
         }
     }
 
-    for (i, domain) in domains.iter().enumerate() {
-        let mut sbi_args = [0, 0, 0, 0, 0];
-        let fid = cove_pack_fid!(i, SBI_EXT_COVE_HOST_GET_TSM_INFO as usize);
-        sbi_args[0] = &raw const domain as u64;
-        sbi_args[1] = size_of::<TsmInfo>() as u64;
-        sbi_call(COVEH_EXT_ID as usize, fid, &sbi_args);
-    }
+    assert_eq!(domains.len(), 2);
+    println!(
+        "[SHADOWFAX-HYPERVISOR] found one supervisor domain with ID {}",
+        1
+    );
+
+    let domain = &domains[1];
+    let fid = cove_pack_fid!(1, SBI_EXT_COVE_HOST_GET_TSM_INFO as usize);
+    let mut sbi_args = [0, 0, 0, 0, 0];
+    sbi_args[0] = &raw const domain as u64;
+    sbi_args[1] = size_of::<TsmInfo>() as u64;
+
+    sbi_call(COVEH_EXT_ID as usize, fid, &sbi_args);
 
     loop {
         riscv::asm::wfi();

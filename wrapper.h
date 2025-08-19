@@ -11,11 +11,11 @@
 #include <sbi/sbi_types.h>
 
 #include <sbi/riscv_asm.h>
-#include <sbi/riscv_encoding.h>
 #include <sbi/riscv_atomic.h>
 #include <sbi/riscv_barrier.h>
 #include <sbi/riscv_dbtr.h>
 #include <sbi/riscv_elf.h>
+#include <sbi/riscv_encoding.h>
 #include <sbi/riscv_fp.h>
 #include <sbi/riscv_io.h>
 #include <sbi/riscv_locks.h>

@@ -4,7 +4,6 @@
 # - installs rust toolchain with riscv target;
 # - builds and install opensbi libraries and header files;
 # - builds a custom clang with static linking from llvm (only for musl systems)
-#
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -31,27 +30,28 @@ get_distro_codename() {
 
 # Function to install necessary build dependencies based on the distribution codename
 install_dependencies() {
-  case "$DISTRO_CODENAME" in
-    # Ubuntu 24.04, Ubuntu 22.04, Debian 12, Debian 11
-    noble | jammy | bookworm | bullseye)
-      apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make qemu-system build-essential \
-        libncurses-dev bison flex libssl-dev libelf-dev dwarves curl git file bc cpio clang cmake ninja-build
-      if [ "$ARCHITECTURE" != "riscv64" ]; then
-        DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-$LIBC_PREFIX
-      fi
-      ;;
-    void)
-      xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf elfutils-devel libdwarf-devel \
-        curl git file cpio git clang cmake ninja
-      if [ "$ARCHITECTURE" != "riscv64" ]; then
-        xbps-install -Sy cross-riscv64-linux-$LIBC_PREFIX
-      fi
-      ;;
-    *)
-      echo "Unsupported distribution: $DISTRO_CODENAME" >&2
-      echo "Make sure you install dependencies according to your distribution."
-      exit 1
-      ;;
+  case "$distro_codename" in
+  # ubuntu 24.04, ubuntu 22.04, debian 12, debian 11
+  noble | jammy | bookworm | bullseye)
+    apt-get update && debian_frontend=noninteractive apt-get -y install \
+      make qemu-system build-essential libncurses-dev bison flex libssl-dev \
+      libelf-dev dwarves curl git file bc cpio clang cmake ninja-build
+    if [ "$architecture" != "riscv64" ]; then
+      debian_frontend=noninteractive apt-get -y install gcc-riscv64-linux-"$libc_prefix"
+    fi
+    ;;
+  void)
+    xbps-install -sy qemu make base-devel bison flex openssl-devel libelf \
+      elfutils-devel libdwarf-devel curl git file cpio clang cmake ninja
+    if [ "$architecture" != "riscv64" ]; then
+      xbps-install -sy cross-riscv64-linux-"$libc_prefix"
+    fi
+    ;;
+  *)
+    echo "unsupported distribution: $distro_codename" >&2
+    echo "make sure you install dependencies according to your distribution."
+    exit 1
+    ;;
   esac
 }
 
@@ -119,6 +119,57 @@ build_clang_from_source() {
 DISTRO_CODENAME=$(get_distro_codename)
 TEMP_DIR=$(mktemp -d)
 USER_NAME="${SUDO_USER:-root}"
+install_opensbi() {
+  printf "Downloading opensbi source..."
+  su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz"
+  printf " done\n"
+
+  su $USER_NAME -c "tar xvf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${TEMP_DIR}"
+
+  # build opensbi
+  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} PLATFORM=${PLATFORM}"
+
+  # install opensbi in root directory
+  su $USER_NAME -c "make -C ${TEMP_DIR}/opensbi-${OPENSBI_VERSION} I=${BASEDIR}/.. PLATFORM=${PLATFORM} install"
+}
+
+# Function to download, build, and install Clang from source for musl-based systems
+build_clang_from_source() {
+  printf "Downloading LLVM source..."
+  su $USER_NAME -c "curl -fsSL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz \
+    -o ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
+  printf " done\n"
+
+  printf "Extracting LLVM source..."
+  su $USER_NAME -c "tar -xf ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
+  printf " done\n"
+
+  printf "Creating build directory..."
+  su $USER_NAME -c "mkdir llvm-project-${LLVM_VERSION}.src/build"
+  printf " done\n"
+
+  printf "Configuring LLVM build with CMake..."
+  su $USER_NAME -c "cmake -G 'Ninja' \
+    -S llvm-project-${LLVM_VERSION}.src/llvm/ \
+    -B llvm-project-${LLVM_VERSION}.src/build \
+    -DLLVM_ENABLE_PROJECTS='clang' \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLIBCLANG_BUILD_STATIC=ON \
+    -DLLVM_ENABLE_ZSTD=OFF \
+    -DLLVM_TARGETS_TO_BUILD='X86;RISCV' \
+    -DLLVM_HOST_TRIPLE=${ARCHITECTURE}-unknown-linux-${LIBC_PREFIX}"
+  printf " done\n"
+
+  printf "Building LLVM with Ninja...\n"
+  su $USER_NAME -c "ninja -C llvm-project-${LLVM_VERSION}.src/build"
+  printf " done\n"
+}
+
+# Global variables
+DISTRO_CODENAME=$(get_distro_codename)
+TEMP_DIR=$(mktemp -d)
+USER_NAME="$SUDO_USER"
+USER_HOME=$(eval echo ~$USER_NAME)
 
 # Make temp directory owned by the user
 chown -R ${USER_NAME} ${TEMP_DIR}
@@ -137,3 +188,12 @@ if [ "$LIBC_PREFIX" = "musl" ]; then
   echo "Building Clang from source for musl-based system..."
   build_clang_from_source
 fi
+
+# use environment.sh variables
+. ${BASEDIR}/environment.sh
+
+install_opensbi
+
+printf "Removing ${TEMP_DIR}..."
+rm -rf ${TEMP_DIR}
+printf " done\n"

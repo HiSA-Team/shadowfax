@@ -1,15 +1,13 @@
 MEMORY
 {
-  FLASH (rx) : ORIGIN = 0x80800000, LENGTH = 1M
-  BOOT_RAM (rw) : ORIGIN = 0x80900000, LENGTH = 10M
+  FLASH (rx) : ORIGIN = 0x0, LENGTH = 1M
+  BOOT_RAM (rw) : ORIGIN = 0x00100000, LENGTH = 1M
 }
 
 REGION_ALIAS("REGION_TEXT", FLASH);
-REGION_ALIAS("REGION_RODATA", FLASH);
 REGION_ALIAS("REGION_STACK", BOOT_RAM);
 
 _b_stack_size = 0x2000;
-_stack_start = ORIGIN(BOOT_RAM) + LENGTH(BOOT_RAM);
 
 SECTIONS {
 
@@ -24,9 +22,4 @@ SECTIONS {
         . += _b_stack_size;
         _top_b_stack = .;
     } > REGION_STACK
-
-    .guest_kernel : ALIGN(4K) {
-        KEEP(*(.guest_kernel));
-        . = ALIGN(4K);
-    } > REGION_RODATA
 }

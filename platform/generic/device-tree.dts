@@ -90,7 +90,21 @@
 
 	chosen {
 		stdout-path = "/soc/serial@10000000";
-		rng-seed = <0x423102ac 0x8130c11b 0x367c785c 0xa89ba4a 0xa5f26be 0x3e4026ae 0x8bd48538 0x426d5f5a>;
+		rng-seed = <0x4d28c772 0x2ab93c6a 0x79330cab 0x8b454f44 0x26c1e886 0x97d8b4e3 0x738e0214 0x3a5e1abc>;
+		bootargs = "console=ttyS0,115200 root=/dev/sda earlyprintk=serial net.ifnames=0 nokaslr loglevel=8";
+		linux,initrd-start = <0x80820000>;
+		linux,initrd-end = <0x8093f7c0>;
+
+		shadowfax-domains {
+			compatible = "shadowfax,domain,config";
+
+			trusted-domain {
+				compatible = "shadowfax,domain,instance";
+				id = <0x1>;
+				memory = <0x0 0x81000000 0x0 0x82000000>;
+				tsm-type = "default";
+			};
+		};
 	};
 
 	soc {
@@ -106,7 +120,7 @@
 			compatible = "google,goldfish-rtc";
 		};
 
-		uart1: serial@10000000 {
+		serial@10000000 {
 			interrupts = <0x0a>;
 			interrupt-parent = <0x03>;
 			clock-frequency = "", "8@";

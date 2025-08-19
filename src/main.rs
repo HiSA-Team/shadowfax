@@ -8,7 +8,7 @@
  * The external firmware or bootloader must ensure that interrupts are disabled in the MSTATUS and MIE CSRs
  * when calling the functions sbi_init() and sbi_trap_handler().
  *
- * Part of this code is taken from https://github.com/riscv-software-src/opensbi/blob/master/firmware/fw_base.S
+ * Part of this code has been taken from https://github.com/riscv-software-src/opensbi/blob/master/firmware/fw_base.S
  *
  * This firmware starts from _start, sets up the stack pointer and jumps to a never returning main
  * function.
@@ -25,13 +25,16 @@
 #![no_std]
 #![no_main]
 #![feature(fn_align)]
-use core::{arch::asm, ffi, panic::PanicInfo};
+#![feature(once_cell_get_mut)]
+use core::{ffi, panic::PanicInfo};
 
-use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
-use heapless::Vec;
+use linked_list_allocator::LockedHeap;
 use riscv::asm::wfi;
+use sbi::cove::supd_extension::SBI_SUPD_EXTENSION;
 
-mod cove;
+#[macro_use]
+mod debug;
+mod sbi;
 
 /// This module includes the `bindings.rs` generated
 /// using `build.rs` which translates opensbi C definitions
@@ -46,7 +49,14 @@ mod opensbi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+mod shadowfax_core;
 mod trap;
+
+extern crate alloc;
+
+#[global_allocator]
+/// Global allocator.
+static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
 /*
  * This "object" is just to hold symbols declared in the linkerscript
@@ -60,6 +70,9 @@ unsafe extern "C" {
     static _start_bss: u8;
     static _end_bss: u8;
     static _top_b_stack: u8;
+    static mut _tee_heap_start: u8;
+    static _heap_size: u8;
+    pub static _tee_scratch_start: u8;
 }
 
 /*
@@ -67,7 +80,8 @@ unsafe extern "C" {
  */
 #[inline(never)]
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    debug!("{}", info);
     loop {}
 }
 
@@ -78,24 +92,20 @@ fn panic(_info: &PanicInfo) -> ! {
 /// However this will be more flexible since we will likely need to load more
 /// payloads to support different domain.
 ///
-/// TODO: make the payload name variable
+// TODO: make the payload name variable
+#[cfg(feature = "embed-elf")]
 #[link_section = ".payload"]
-static PAYLOAD: &[u8] = include_bytes!("../test.elf");
-
-/// Custom device tree supporting opensbi domains.
-#[link_section = ".dtb"]
-static DTB: [u8; include_bytes!("../device-tree.dtb").len()] =
-    *include_bytes!("../device-tree.dtb");
-
+static PAYLOAD: [u8; include_bytes!("../bin/payload.elf").len()] =
+    *include_bytes!("../bin/payload.elf");
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
 
-/// The _start function is the first functio loaded at the starting address of
+/// The _start function is the first function loaded at the starting address of
 /// the linkerscript. This function:
 ///
 /// - setup a the stack pointer
-/// - loads the custom device tree in `a1` register overwritng the default one
+/// - loads the custom device tree in `a1` register overwriting the default one
 /// provided by qemu
 /// - zero bss section
 /// - call `fw_platform_init` provided by opensbi
@@ -104,20 +114,15 @@ const STACK_SIZE_PER_HART: usize = 4096 * 2;
 /// main function.
 /// Since qemu does not support creating opensbi domains
 /// from the cli, we need to provide a custom linkerscript.
-/// The linkerscript will be loaded in the firmware elf
-/// using the
 #[link_section = ".text.entry"]
 #[no_mangle]
 extern "C" fn start() -> ! {
     unsafe {
-        asm!(
+        core::arch::asm!(
             // If there are multiple hart, init only hartid 0
             "csrr s6, mhartid",
             // If not zero, go to wait loop
             "bnez s6, {hang}",
-
-            // write in `a1` the new device tree
-            "lla a1, {dtb_address}",
 
             // setup a temporary stack pointer
             "li t0, {stack_size_per_hart}",
@@ -155,7 +160,6 @@ extern "C" fn start() -> ! {
             "add a1, t0, zero",
             // Jump to our main function
             "call {main}",
-            dtb_address = sym DTB,
             stack_size_per_hart = const STACK_SIZE_PER_HART,
             stack_top = sym _top_b_stack,
             hang = sym hang,
@@ -169,6 +173,7 @@ extern "C" fn start() -> ! {
     }
 }
 
+#[allow(unused)]
 enum PrivMode {
     PrivM = 3_isize,
     PrivS = 1,
@@ -186,11 +191,11 @@ enum PrivMode {
 /// registers and relies on specific memory layout assumptions. It should only be called in a
 /// controlled environment where these assumptions hold true.
 #[link_section = ".text"]
-extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
+extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     unsafe {
         // Ensure all previous instructions have been completed
         riscv::asm::fence_i();
-        asm!(
+        core::arch::asm!(
             // remove ra
             "li ra, 0",
             // Set general-purpose registers to zero
@@ -233,11 +238,43 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
-    // initialize cove extension
-    cove::init(fdt_address);
+    // this enables heap allocations
+    unsafe {
+        // Initialize global allocator
+        ALLOCATOR.lock().init(
+            core::ptr::addr_of_mut!(_tee_heap_start),
+            core::ptr::addr_of!(_heap_size) as usize,
+        );
+    }
+    // prepare the next stage. Depending on the configuration,
+    // we can include an elf and jump to the first section or
+    // jump to a prefixed address.
+    let next_stage_address = {
+        #[cfg(feature = "embed-elf")]
+        let next_stage_address = load_elf(&PAYLOAD);
 
-    // Load the elf. The function gives back the entry point
-    let entry = load_elf(&PAYLOAD);
+        #[cfg(not(feature = "embed-elf"))]
+        let next_stage_address = {
+            let address = option_env!("SHADOWFAX_JUMP_ADDRESS")
+                .unwrap_or("0x80A00000")
+                .strip_prefix("0x")
+                .unwrap();
+            usize::from_str_radix(address, 16)
+                .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
+        };
+        next_stage_address
+    };
+
+    // initialize shadowfax state which will be used to handle the CoVE SBI
+    shadowfax_core::state::init(fdt_addr, next_stage_address).unwrap();
+
+    // register the supd extension leveraging the existing opensbi extension ecosystem.
+    // we could make this independent from opensbi, but this is ok for now since it
+    // is trivial to implement.
+    unsafe {
+        opensbi::sbi_ecall_register_extension(&raw mut SBI_SUPD_EXTENSION);
+    }
+
     /*
      * This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
@@ -337,9 +374,9 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
             // fw_heap_size: heap size specified by the platform
             fw_heap_size: heap_size as ffi::c_ulong,
             // next_arg1: the fdt_address passed to the next stage
-            next_arg1: fdt_address as ffi::c_ulong,
+            next_arg1: fdt_addr as ffi::c_ulong,
             // next_addr: address of the next stage
-            next_addr: entry as ffi::c_ulong,
+            next_addr: next_stage_address as ffi::c_ulong,
             // next_mode: mode used to launch next_addr
             next_mode: PrivMode::PrivS as ffi::c_ulong,
             // warmboot_addr: address of the warmboot function.
@@ -379,8 +416,6 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
             // write the structure to the calculated address
             p.write_volatile(sbi_scratch);
         }
-        let check: opensbi::sbi_scratch = unsafe { p.read() };
-        assert_eq!(check.warmboot_addr, 0);
     }
 
     // Prepare and jump to sbi_init. We need to:
@@ -398,16 +433,14 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
         // set the stack pointer to the scratch.
         // First thing they will need to do is to setup the stack pointer
         // to a valid location
-        asm!(
+        core::arch::asm!(
             "csrr a0, mscratch",
             "add tp, a0, zero",
             options(nomem, nostack)
         );
 
-        let scratch_addr = riscv::register::mscratch::read();
-
         // set the trap handler
-        let a = Mtvec::from_bits(trap::_trap_handler as usize);
+        let a = Mtvec::from_bits(trap::handler as usize);
         riscv::register::mtvec::write(a);
 
         riscv::register::mstatus::clear_tsr();
@@ -415,8 +448,8 @@ extern "C" fn main(boot_hartid: usize, fdt_address: usize) -> ! {
 
         // call sbi_init for the current hart
         let sbi_scratch_addr = scratch_addr as *mut opensbi::sbi_scratch;
-        asm!(
-        "add sp, tp, {}", in(reg) opensbi::SBI_SCRATCH_SIZE
+        core::arch::asm!(
+            "add sp, tp, {}", in(reg) opensbi::SBI_SCRATCH_SIZE
         );
         opensbi::sbi_init(sbi_scratch_addr)
     }
@@ -466,15 +499,19 @@ extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
 ///
 ///  Returns:
 ///  - the entry point address
+#[cfg(feature = "embed-elf")]
 #[link_section = ".text"]
 fn load_elf(data: &[u8]) -> usize {
+    use alloc::vec::Vec;
+    use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
+
     let elf = ElfBytes::<AnyEndian>::minimal_parse(data).unwrap();
     let all_load_phdrs = elf
         .segments()
         .unwrap()
         .iter()
         .filter(|phdr| phdr.p_type == PT_LOAD)
-        .collect::<Vec<ProgramHeader, 128>>();
+        .collect::<Vec<ProgramHeader>>();
 
     for segment in all_load_phdrs {
         // Get segment details
@@ -506,12 +543,18 @@ fn load_elf(data: &[u8]) -> usize {
 }
 
 // Needed for opensbi
+// For some reason the static lib needs these 2 symbols defined
+// TODO: investigate why these are needed.
+// Maybe we can just use libsbi.a (without libplatsbi.a) and provide the `fw_platform_init`
+// externally.
 #[no_mangle]
 fn _start_warm() {}
+#[no_mangle]
+fn _trap_handler() {}
 
 /// This function causes the processor to enter an infinite loop, effectively halting execution.
 /// It is typically used as a placeholder or to indicate a state where further execution should not proceed.
-#[repr(align(4))]
+#[align(4)]
 fn hang() {
     loop {
         wfi()

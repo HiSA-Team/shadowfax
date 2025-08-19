@@ -48,6 +48,19 @@ USER user
 
 WORKDIR /shadowfax
 
+# Create a user with the specified or default UID and add him to the sudo group
+# and allow for passwordless sudo
+RUN useradd -m -u $USER_ID -s /bin/bash user
+RUN usermod -aG sudo user
+RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+COPY ./scripts/environment.sh /environment.sh
+
+# Switch to 'user' for the rest of the of setup
+USER user
+
+WORKDIR /shadowfax
+
 # Install and setup rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 

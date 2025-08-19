@@ -4,11 +4,10 @@
 # and the initramfs.cpio.gz.
 # Args:
 #   - kernel-version (mandatory): kernel version to build; i.e 6.13.2
-#   - busybox-version (optional): busybox version to build. Default 1.36.1
 # Usage:
 #   - ./setup_linux.sh --kernel <kernel-version> [--busybox <busybox>]
 # A quick test can be executed with:
-# qemu-system-riscv64 -M virt -m 64M \
+# qemu-system-riscv64 -M virtual -m 64M \
 #   -kernel linux-<kernel-version>/arch/riscv/boot/Image \
 #   -initrd linux-<kernel-version>/initramfs.cpio.gz \
 #   -nographic \
@@ -17,6 +16,19 @@
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
 set -e
+BASEDIR=$(dirname $(realpath $0))
+BUSYBOX_VERSION="1.36.1"
+KERNEL_VERSION=""
+TEMP_DIR=$(mktemp -d)
+
+# use environment.sh variables
+. ${BASEDIR}/environment.sh
+
+# parse args
+# Author:  Giuseppe Capasso <capassog97@gmail.com>
+
+set -e
+ARCH="riscv"
 BASEDIR=$(dirname $(realpath $0))
 BUSYBOX_VERSION="1.36.1"
 KERNEL_VERSION=""
@@ -84,6 +96,49 @@ build_initramfs() {
   tar -xf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
   printf "done\n"
 
+  make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} ARCH=${ARCH} defconfig
+
+  # Prepare initramfs
+  mkdir -p ${TEMP_DIR}/initramfs/bin
+  mkdir -p ${TEMP_DIR}/initramfs/etc/init.d
+  mkdir -p ${TEMP_DIR}/initramfs/usr
+
+  cp -r scripts/initramfs/etc/* ${TEMP_DIR}/initramfs/etc/
+  LDFLAGS="--static" make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} CONFIG_PREFIX=${TEMP_DIR}/initramfs -j $(nproc) install
+  mv ${TEMP_DIR}/initramfs/linuxrc ${TEMP_DIR}/initramfs/init
+
+  find "${TEMP_DIR}/initramfs" -mindepth 1 -printf '%P\0' | cpio --null -ov --format=newc --directory "${TEMP_DIR}/initramfs" > "${TEMP_DIR}/initramfs.cpio"
+  gzip "${TEMP_DIR}/initramfs.cpio"
+  cp "${TEMP_DIR}/initramfs.cpio.gz" "${ODIR}/initramfs.cpio.gz"
+}
+
+build_kernel
+build_initramfs
+
+printf "Removing ${TEMP_DIR}..."
+rm -rf ${TEMP_DIR}
+printf " done\n"
+
+  # Get linux source code
+  printf "Downloading kernel source... "
+  curl -fsSL https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KERNEL_VERSION}.tar.xz -o ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz
+  printf "done\n"
+  tar -xvf ${TEMP_DIR}/linux-${KERNEL_VERSION}.tar.xz -C ${TEMP_DIR}
+
+  # Build linux
+  make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} O=${ODIR} defconfig
+  make -C ${TEMP_DIR}/linux-${KERNEL_VERSION} O=${ODIR} -j $(nproc) Image
+}
+
+build_initramfs() {
+  # Build busybox
+  printf "Downloading busybox source..."
+  curl -fsSL https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2 -o ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2
+  printf "done\n"
+
+  printf "Extracting busybox source..."
+  tar -xf ${TEMP_DIR}/busybox-${BUSYBOX_VERSION}.tar.bz2 -C ${TEMP_DIR}
+  printf "done\n"
 
   make -C ${TEMP_DIR}/busybox-${BUSYBOX_VERSION} ARCH=${ARCH} defconfig
 
@@ -101,6 +156,11 @@ build_initramfs() {
   cp "${TEMP_DIR}/initramfs.cpio.gz" "${ODIR}/initramfs.cpio.gz"
 }
 
+cd ${TEMP_DIR}/initramfs
+find . -print0 | cpio --null -ov --format=newc > ${TEMP_DIR}/initramfs.cpio
+gzip ${TEMP_DIR}/initramfs.cpio
+cp ${TEMP_DIR}/initramfs.cpio.gz ${ODIR}/initramfs.cpio.gz
+cd -
 build_kernel
 build_initramfs
 

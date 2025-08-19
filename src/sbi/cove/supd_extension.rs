@@ -9,14 +9,19 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 
-use super::{
-    cove_host_extension::TSM_INFO, SbiRet, TsmState, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SUPD_EXT_ID,
-    SUPD_EXT_NAME,
-};
-use crate::opensbi;
+use crate::{opensbi, sbi::SbiRet, shadowfax_core::state::STATE};
+
+/// This section relates to the Supervisor Domain Extension
+pub const SUPD_EXT_ID: u64 = 0x53555044;
+
+/// The SUPD_EXT_NAME is used to register the extension and debugging
+pub const SUPD_EXT_NAME: [u8; 8] = *b"supd\0\0\0\0";
+
+///Lists of FID for SUPD Extension
+pub const SBI_EXT_SUPD_GET_ACTIVE_DOMAINS: u64 = 0x00;
 
 #[link_section = ".data.supd_ext"]
-static mut SBI_SUPD_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
+pub static mut SBI_SUPD_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall_extension {
     experimental: true,
     probe: None,
     name: SUPD_EXT_NAME,
@@ -44,8 +49,7 @@ static mut SBI_SUPD_EXTENSION: opensbi::sbi_ecall_extension = opensbi::sbi_ecall
 /// Returns:
 /// - SBI_SUCCESS (0) on success, setting `ret.value` appropriately.
 /// - SBI_ENOTSUPP if the `fid` is not recognized.
-#[link_section = ".text"]
-pub unsafe extern "C" fn sbi_supd_handler(
+unsafe extern "C" fn sbi_supd_handler(
     _extid: u64,
     fid: u64,
     _regs: *mut opensbi::sbi_trap_regs,
@@ -54,7 +58,7 @@ pub unsafe extern "C" fn sbi_supd_handler(
     match fid {
         SBI_EXT_SUPD_GET_ACTIVE_DOMAINS => {
             // SUPD_FID_GET_ACTIVE_DOMAINS
-            opensbi::sbi_printf("sbi_supd_get_active_domains()\n\0".as_ptr());
+            debug!("sbi_supd_get_active_domains()");
             let result = sbi_supd_get_active_domains();
             (*ret).value = result.value as u64;
 
@@ -68,16 +72,6 @@ pub unsafe extern "C" fn sbi_supd_handler(
     }
 }
 
-/// Initialize and register the SUPD extension with OpenSBI.
-///
-/// This must be called during SBI bring‐up to make the SUPD ecall available.
-/// It constructs an `sbi_ecall_extension` record and registers it.
-#[link_section = ".text"]
-pub fn init() -> i32 {
-    // SAFETY: we trust OpenSBI to correctly link this extension into its ecall handlers
-    unsafe { opensbi::sbi_ecall_register_extension(&raw mut SBI_SUPD_EXTENSION) }
-}
-
 /// SUPD operation: get the set of currently active domains.
 ///
 /// Parameters:
@@ -87,10 +81,8 @@ pub fn init() -> i32 {
 /// - Sbiret.value = a bitmask of active‐domain identifiers.
 fn sbi_supd_get_active_domains() -> SbiRet {
     let mut ret: isize = 0;
-    for (i, tsm) in TSM_INFO.lock().iter().enumerate() {
-        if matches!(tsm.tsm_state, TsmState::TsmReady) {
-            ret |= 1 << i;
-        }
+    for (i, _) in STATE.lock().get().unwrap().domains.iter().enumerate() {
+        ret |= 1 << i;
     }
 
     SbiRet {
