@@ -26,6 +26,7 @@
 #![no_main]
 #![feature(fn_align)]
 #![feature(once_cell_get_mut)]
+
 #![feature(naked_functions_rustic_abi)]
 
 use core::{ffi, panic::PanicInfo};
