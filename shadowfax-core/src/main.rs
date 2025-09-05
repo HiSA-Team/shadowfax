@@ -21,7 +21,7 @@
  *
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
-#![doc = include_str!("../README.md")]
+#![doc = include_str!("../../README.md")]
 #![no_std]
 #![no_main]
 #![feature(fn_align)]

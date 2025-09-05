@@ -49,13 +49,13 @@ use crate::{
 };
 
 #[link_section = ".rodata"]
-static DEFAULT_TSM: &[u8] = include_bytes!("../bin/tsm.bin");
+static DEFAULT_TSM: &[u8] = include_bytes!("../../bin/tsm.bin");
 
 #[link_section = ".rodata"]
-static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../bin/crypto/tsm.bin.signature");
+static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../../bin/tsm.bin.signature");
 
 #[link_section = ".rodata"]
-static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../bin/crypto/publickey-pkcs1.der");
+static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey-pkcs.der");
 
 pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 

@@ -52,9 +52,6 @@ extern "C" fn entry() -> ! {
 
 const SBI_COVH_GET_TSM_INFO: usize = 0x0;
 
-const COVE_TSM_CAP_PROMOTE_TVM: usize = 0x0;
-const COVE_TSM_CAP_ATTESTATION_LOCAL: usize = 0x1;
-
 // Since this is a TSM with non reentrant model, an ECALL should be a TEERET
 fn main(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> ! {
     let mut a6: usize;
@@ -67,16 +64,14 @@ fn main(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> ! {
                 tsm_state: TsmState::TsmReady,
                 tsm_impl_id: 69,
                 tsm_version: 0,
-                tsm_capabilities: (0 << COVE_TSM_CAP_PROMOTE_TVM)
-                    | (1 << COVE_TSM_CAP_ATTESTATION_LOCAL),
+                tsm_capabilities: 0,
                 tvm_state_pages: 0,
-                tvm_max_vcpus: 0,
+                tvm_max_vcpus: 1,
                 tvm_vcpu_state_pages: 0,
             };
 
-            unsafe { tsm_info_ptr.write(state) }
-
             assert_eq!(a1, core::mem::size_of::<TsmInfo>());
+            unsafe { tsm_info_ptr.write(state) }
         }
         _ => {}
     }

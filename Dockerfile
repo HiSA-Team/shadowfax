@@ -1,14 +1,14 @@
 # The goal of this Dockerfile is to create a consistent build environment.
-# The base image is debian:12.
+# The base image is rust:bullseye which is based on Debian 12.
 # Project dependencies are:
-# - rust toolchain (with riscv64gc and riscv64imac target)
+# - rust toolchain (with riscv64imac target)
 # - gcc riscv toolchain
 # - shell utils to build Linux kernel
 # - qemu
 # - opensbi development files
 #
 # Usage: run this image in a container mounting the project directory as a bind
-# volume. Opensbi is installed in /shadowfax directory
+# volume. Opensbi is installed in /tmp/opensbi-{OPENSBI_VERSION} directory
 #
 #   docker build -t shadowfax-build \
 #     --build-arg USER_ID=$(id -u) \
@@ -19,7 +19,7 @@
 #   docker run -v $(pwd):/shadowfax -it shadowfax-build
 #
 # Execute an example with:
-#   docker run --rm -v $(pwd):/shadowfax -it shadowfax-build run
+#   docker run --rm -v $(pwd):/shadowfax -it shadowfax-build bash -c "cargo build"
 # Author: Giuseppe Capsso <capassog97@gmail.com>
 
 FROM rust:1-bullseye
@@ -67,6 +67,7 @@ RUN echo '#!/bin/sh' > /entrypoint.sh \
     && echo ". /environment.sh /tmp/opensbi-${OPENSBI_VERSION}" >> /entrypoint.sh \
     && echo 'exec "$@"' >> /entrypoint.sh
 RUN cp /entrypoint.sh /etc/profile.d/shadowfax.sh
+RUN chmod +x /entrypoint.sh
 USER devuser
 
 ENTRYPOINT ["/entrypoint.sh"]

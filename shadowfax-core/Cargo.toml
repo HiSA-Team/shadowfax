@@ -1,0 +1,39 @@
+[package]
+name = "shadowfax-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Giuseppe Capasso"]
+
+[features]
+embed-elf = []
+
+# build-dependencies are related to the host building the application.
+# Since, this firmware aims to provide support minimal environments (ie. alpine linux),
+# it can also be built for musl libc. Also this could give an hand for eventual
+# certification/formal-verification process, since musl is much smaller than glibc
+# (gnu-libc). For now, there are no better ways of configuring the "host" build system.
+# So, users on standard systems should comment the following two dependencies and use
+# the standard bindgen version below.
+
+# [build-dependencies]
+# bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
+#
+# [build-dependencies.clang-sys]
+# version = "1.8.1"
+# features = ["static"]
+
+# comment previous build-dependencies bindgen and clang and use the following for glibc systems.
+[build-dependencies]
+bindgen = "0.71.1"
+
+[dependencies]
+anyhow = { version = "1.0.98", default-features = false }
+digest = "0.10.7"
+elf = { version = "0.7.2", default-features = false }
+fdt-rs = {version = "0.4", default-features = false }
+heapless = "0.8.0"
+linked_list_allocator = "0.10.5"
+riscv = "0.13.0"
+sha2 = { version = "0.10.9", default-features = false }
+rsa = { version = "0.9.8", default-features = false, features = ["pem", "u64_digit", "sha2"] }
+spin = { version = "0.10.0", features = ["spin_mutex"] }

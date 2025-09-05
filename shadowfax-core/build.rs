@@ -18,9 +18,11 @@ use std::{env, fs};
 const PLATFORM_BASE: &str = "platform";
 
 fn main() {
-    fs::create_dir_all("bin").unwrap();
-    // output directory
+    // Ensure the bin/ folder exists.
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let bin_path = PathBuf::from("../bin");
+    fs::create_dir_all(&bin_path).unwrap();
+
     let opensbi_path = env::var("OPENSBI_PATH").map(PathBuf::from).expect("OPENSBI_PATH must be set; run `source environment.sh <opensbi-path>` or set OPENSBI_PATH in your environment");
 
     // Sourcing `scripts/environment.sh` allow users to specify a PLATFORM (defaults to 'generic').
@@ -35,8 +37,8 @@ fn main() {
     fs::write(out_path.join("memory.x"), content).unwrap();
 
     // compile the device tree
-    let dts_file = platform_dir.join("device-tree.dts");
-    let dtb_file = "bin/device-tree.dtb";
+    let dts_file = &platform_dir.join("device-tree.dts");
+    let dtb_file = &bin_path.join("device-tree.dtb");
     let status = Command::new("dtc")
         .args([
             "-I",
@@ -44,7 +46,7 @@ fn main() {
             "-O",
             "dtb",
             "-o",
-            dtb_file,
+            dtb_file.as_path().to_str().unwrap(),
             dts_file.to_str().unwrap(),
         ])
         .status()
@@ -61,7 +63,7 @@ fn main() {
     println!("cargo:rustc-link-arg=-static");
     println!("cargo:rustc-link-arg=-nostdlib");
     println!("cargo:rustc-link-arg=-melf64lriscv");
-    println!("cargo:rustc-link-arg=-Map=linker.map");
+    // println!("cargo:rustc-link-arg=-Map=linker.map");
 
     // Link the openbsi platform library. We specify the opensbi installation path
     // (by default this is obtained from `make PLATFORM=generic install I=<path-to-shadowfax>`)

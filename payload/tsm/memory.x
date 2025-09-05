@@ -18,7 +18,6 @@ SECTIONS {
     } > REGION_TEXT
 
     .boot_stack (NOLOAD) : ALIGN(4K) {
-        _bottom_b_stack = .;
         . += _b_stack_size;
         _top_b_stack = .;
     } > REGION_STACK
