@@ -89,12 +89,4 @@ jobs:
 
     - name: Build and test
       run: |
-        # TODO: make these the real payloads. This is just to test the basic boot for the firmware.
-        mkdir -p bin shadowfax-core/keys
-
-        touch bin/tsm.bin
-        touch bin/tsm.bin.signature
-        touch shadowfax-core/keys/publickey-pkcs.der
-
-        cargo build --target riscv64imac-unknown-none-elf --bin shadowfax-core
-        cargo test -p shadowfax-test
+        make info test
