@@ -61,7 +61,7 @@ jobs:
     # TODO: reuse scripts/setup.sh
     - name: Setup host (install deps and OpenSBI)
       run: |
-        source environment.sh ${OPENSBI_PATH}
+        . environment.sh ${OPENSBI_PATH}
 
         # install packages
         sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
@@ -89,5 +89,6 @@ jobs:
 
     - name: Build and test
       run: |
+        . environment.sh ${OPENSBI_PATH}
         mkdir -p bin
         make info test
