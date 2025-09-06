@@ -89,4 +89,5 @@ jobs:
 
     - name: Build and test
       run: |
+        mkdir -p bin
         make info test
