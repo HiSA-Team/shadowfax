@@ -91,4 +91,4 @@ jobs:
       run: |
         . environment.sh ${OPENSBI_PATH}
         mkdir -p bin
-        make info test
+        make info generate-keys test
