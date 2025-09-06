@@ -18,6 +18,7 @@
 !/Dockerfile
 !/environment.sh
 !/LICENSE
+!/Makefile
 !/payload
 !/README.md
 !/requirements.txt
