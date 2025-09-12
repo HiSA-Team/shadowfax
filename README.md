@@ -56,28 +56,6 @@ All dependencies can be installed with the `scripts/setup.sh` script.
 sudo ./scripts/setup.sh
 ```
 
-#### Builing on musl systems
-Musl is a security and safety oriented libc implementation which requires static linking. Building on
-musl needs more setup because `bindgen` has a direct depenndency with `libclang` and most Linux distribution
-do not ship `libclang.a`, so during the setup phase (this is handled by `scripts/setup.sh`), `shadowfax`
-will attempt to build `libclang.a` from source (requires some time). `Cargo.toml` will be modified removing
-the following:
-
-```toml
-[build-dependencies]
-bindgen = "0.71.1"
-```
-And adding the `bindgen` and `clang` crate with the *static* feature enabled.
-
-```toml
-[build-dependencies]
-bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
-
-[build-dependencies.clang-sys]
-version = "1.8.1"
-features = ["static"]
-```
-
 > [!TIP]
 > everything related to `build-dependencies` and `build.rs` affect the host building system and not the `ŧarget` itself.
 

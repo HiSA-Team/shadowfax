@@ -7,24 +7,17 @@ authors = ["Giuseppe Capasso"]
 [features]
 embed-elf = []
 
-# build-dependencies are related to the host building the application.
-# Since, this firmware aims to provide support minimal environments (ie. alpine linux),
-# it can also be built for musl libc. Also this could give an hand for eventual
-# certification/formal-verification process, since musl is much smaller than glibc
-# (gnu-libc). For now, there are no better ways of configuring the "host" build system.
-# So, users on standard systems should comment the following two dependencies and use
-# the standard bindgen version below.
-
-# [build-dependencies]
-# bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
-#
-# [build-dependencies.clang-sys]
-# version = "1.8.1"
-# features = ["static"]
-
-# comment previous build-dependencies bindgen and clang and use the following for glibc systems.
-[build-dependencies]
+# Default (glibc) build-deps used when the build host is NOT musl
+[target.'cfg(not(target_env = "musl"))'.build-dependencies]
 bindgen = "0.71.1"
+
+# When the build host is musl, use a bindgen build configured for static clang
+[target.'cfg(target_env = "musl")'.build-dependencies]
+bindgen = { version = "0.71.1", default-features = false, features = ["logging", "prettyplease", "static"] }
+
+[target.'cfg(target_env = "musl")'.build-dependencies.clang-sys]
+version = "1.8.1"
+features = ["static"]
 
 [dependencies]
 anyhow = { version = "1.0.98", default-features = false }
