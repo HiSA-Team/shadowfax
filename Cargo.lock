@@ -627,6 +627,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bindgen",
+ "clang-sys",
  "digest",
  "elf",
  "fdt-rs",
@@ -641,6 +642,13 @@ dependencies = [
 [[package]]
 name = "shadowfax-test"
 version = "0.1.0"
+
+[[package]]
+name = "shadowfax-tsm"
+version = "0.1.0"
+dependencies = [
+ "riscv",
+]
 
 [[package]]
 name = "shlex"
@@ -736,13 +744,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "tsm"
-version = "0.1.0"
-dependencies = [
- "riscv",
 ]
 
 [[package]]
