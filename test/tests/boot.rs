@@ -25,6 +25,7 @@ fn firmware_boots_correctly() {
             "-bios",
             firmware.to_str().unwrap(),
         ])
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
