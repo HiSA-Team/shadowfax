@@ -22,18 +22,27 @@ ifeq ($(OPENSBI_PATH),)
 $(error OPENSBI_PATH not set. Run: source environment.sh <opensbi-path>)
 endif
 
-all: firmware
+# ensure the bin directory is created
+$(shell mkdir -p $(BIN_DIR))
+
+all: firmware info
 
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm
 	cargo build --target $(TARGET) -p shadowfax-core
 
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
-tsm:
-	cargo build --target $(TARGET) -p shadowfax-tsm
-	cp $(TARGET_DIR)/shadowfax-tsm $(TSM_ELF)
+tsm: $(TSM_SIG)
+
+$(TSM_SIG): $(TSM_BIN)
+	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $@ $<
+
+$(TSM_BIN): $(TSM_ELF)
 	$(OBJCOPY) -O binary $(TSM_ELF) $(TSM_BIN)
-	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $(TSM_SIG) $(TSM_BIN)
+
+$(TSM_ELF):
+	cargo build --target $(TARGET) -p shadowfax-tsm
+	cp $(TARGET_DIR)/shadowfax-tsm $@
 
 ## hypervisor: build the Hypervisor
 hypervisor:
@@ -64,7 +73,7 @@ info:
 ## clean: removes all build artifacts
 clean:
 	cargo clean
-	$(RM) -rf bin/*.bin bin/*.elf bin/*.sig
+	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig || true
 
 ## help: display this help message
 help:
