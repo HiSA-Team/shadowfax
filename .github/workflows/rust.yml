@@ -21,6 +21,7 @@ jobs:
     env:
       OPENSBI_VERSION: 1.6
       PLATFORM: generic
+      SHADOWFAX_JUMP_ADDRESS: 0x81000000
 
     steps:
     - uses: actions/checkout@v4
