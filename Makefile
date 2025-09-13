@@ -3,18 +3,22 @@ PROFILE ?= debug
 
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
-# Directories
+# General Directories
 BIN_DIR = bin
 KEYS_DIR = shadowfax-core/keys
 TARGET_DIR = target/$(TARGET)/$(PROFILE)
 
-# Files
-TSM_ELF = $(BIN_DIR)/tsm.elf
-TSM_BIN = $(BIN_DIR)/tsm.bin
-TSM_SIG = $(BIN_DIR)/tsm.bin.signature
-PRIVATE_KEY = $(KEYS_DIR)/privatekey.pem
-PUBLIC_KEY = $(KEYS_DIR)/publickey.pem
-PUBLIC_KEY_DER = $(KEYS_DIR)/publickey.der
+# TSM Files
+TSM_ELF							 = $(BIN_DIR)/tsm.elf
+TSM_BIN							 = $(BIN_DIR)/tsm.bin
+TSM_SIG							 = $(BIN_DIR)/tsm.bin.signature
+PRIVATE_KEY					 = $(KEYS_DIR)/privatekey.pem
+PUBLIC_KEY					 = $(KEYS_DIR)/publickey.pem
+
+# Hypervisor Files
+HYPERVISOR_ELF       = $(BIN_DIR)/hypervisor.elf
+HYPERVISOR_BIN       = $(BIN_DIR)/hypervisor.bin
+GUEST_DIR            = payload/hypervisor/guests
 
 .PHONY: all clean firmware tsm hypervisor test generate-keys help info
 
@@ -25,7 +29,7 @@ endif
 # ensure the bin directory is created
 $(shell mkdir -p $(BIN_DIR))
 
-all: firmware info
+all: firmware hypervisor info
 
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm
@@ -37,27 +41,31 @@ tsm: $(TSM_SIG)
 $(TSM_SIG): $(TSM_BIN)
 	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $@ $<
 
-$(TSM_BIN): $(TSM_ELF)
-	$(OBJCOPY) -O binary $(TSM_ELF) $(TSM_BIN)
-
 $(TSM_ELF):
 	cargo build --target $(TARGET) -p shadowfax-tsm
 	cp $(TARGET_DIR)/shadowfax-tsm $@
 
 ## hypervisor: build the Hypervisor
-hypervisor:
+hypervisor: $(HYPERVISOR_BIN)
+
+$(HYPERVISOR_ELF):
+	$(MAKE) -C $(GUEST_DIR)
 	cargo build --target $(TARGET) -p hypervisor
+	cp $(TARGET_DIR)/hypervisor $@
+
+# general rule to convert elf to binary
+$(BIN_DIR)/%.bin: $(BIN_DIR)/%.elf
+	$(OBJCOPY) -O binary $< $@
 
 ## test: builds and run the tests
-test: firmware
+test: firmware hypervisor
 	cargo test -p shadowfax-test
 
 ## generate-keys: generates a couple of RSA keys 2048 bit in shadowfax-core/keys/
 generate-keys:
 	mkdir -p $(KEYS_DIR)
 	openssl genrsa -out $(PRIVATE_KEY) 2048
-	openssl rsa -in $(PRIVATE_KEY) -outform PEM -pubout -out $(PUBLIC_KEY)
-	openssl rsa -pubin -inform PEM -in $(PUBLIC_KEY) -outform DER -out $(PUBLIC_KEY_DER)
+	openssl rsa -in $(PRIVATE_KEY) -RSAPublicKey_out -outform PEM -out $(PUBLIC_KEY)
 
 ## info: display build configuration
 info:
@@ -73,7 +81,8 @@ info:
 ## clean: removes all build artifacts
 clean:
 	cargo clean
-	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig || true
+	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig
+	$(MAKE) -C $(GUEST_DIR) clean
 
 ## help: display this help message
 help:

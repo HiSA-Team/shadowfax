@@ -11,8 +11,8 @@ _b_stack_size = 0x2000;
 
 SECTIONS {
 
-    .text : {
-        KEEP(*(.text.entry));
+    .text : ALIGN(4k) {
+        KEEP(*(._start));
         . = ALIGN(4K);
         *(.text .text.*);
     } > REGION_TEXT

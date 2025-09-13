@@ -98,19 +98,19 @@
 		shadowfax-domains {
 			compatible = "shadowfax,domain,config";
 
-			untrusted-domain {
+			trusted-domain {
 				compatible = "shadowfax,domain,instance";
 				id = <0x0>;
 				trust = <0x1>;
-				tsm-type = "none";
+				memory = <0x0 0x80A00000 0x0 0x80FFFFFF>;
+				tsm-type = "default";
 			};
 
-			trusted-domain {
+			untrusted-domain {
 				compatible = "shadowfax,domain,instance";
 				id = <0x1>;
 				trust = <0x0>;
-				memory = <0x0 0x81000000 0x0 0x82000000>;
-				tsm-type = "default";
+				tsm-type = "none";
 			};
 		};
 	};

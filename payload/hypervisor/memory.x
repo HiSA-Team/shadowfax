@@ -1,14 +1,12 @@
-ENTRY(entry)
-
 /* Memory Layout:
- * FLASH (rx)  : 0x80A0_0000 - 0x819F_FFFF (16MB) - Code, rodata
+ * FLASH (rx)  : 0x8100_0000 - 0x819F_FFFF (10MB) - Code, rodata
  * NOX_RAM (rw): 0x81A0_0000 - 0x81DF_FFFF (4MB)  - Stack, heap
  * RAM   (rxw) : 0x81E0_0000 - 0x825F_FFFF (8MB)  - Data, bss
  * L2_LIM (rw) : 0x8260_0000 - 0x82AF_FFFF (4MB)  - Guest stacks
  */
 MEMORY
 {
-  FLASH (rx)  : ORIGIN = 0x80A00000, LENGTH = 16M
+  FLASH (rx)  : ORIGIN = 0x81000000, LENGTH = 10M
   NOX_RAM (rw): ORIGIN = 0x81A00000, LENGTH = 4M
   RAM (rxw)   : ORIGIN = 0x81E00000, LENGTH = 8M
   L2_LIM (rw) : ORIGIN = 0x82600000, LENGTH = 4M
@@ -20,7 +18,7 @@ REGION_ALIAS("REGION_RODATA", FLASH);
 REGION_ALIAS("REGION_DATA", RAM);
 REGION_ALIAS("REGION_BSS", RAM);
 REGION_ALIAS("REGION_HEAP", RAM);
-REGION_ALIAS("REGION_STACK", RAM);
+REGION_ALIAS("REGION_STACK", NOX_RAM);
 REGION_ALIAS("REGION_GUEST", L2_LIM);
 
 _hv_boot_stack_size = 0x2000; /* 8k stack */
@@ -30,28 +28,16 @@ _g_stack_start = ORIGIN(L2_LIM) + LENGTH(L2_LIM);
 SECTIONS {
 
     /* ===== CODE SECTION ===== */
-    .text : ALIGN(4K) {
-        /* Entry point must be first */
-        KEEP(*(.text.entry));
+    .text : ALIGN(4k) {
+        KEEP(*(._start));
         . = ALIGN(4K);
         *(.text .text.*);
-
-        /* Ensure section ends on page boundary */
-        . = ALIGN(4K);
     } > REGION_TEXT
 
     /* ===== READ-ONLY DATA ===== */
     .rodata : ALIGN(4K) {
         *(.rodata .rodata.*);
         *(.srodata .srodata.*);
-        . = ALIGN(4K);
-    } > REGION_RODATA
-
-    /* Guest kernel binary (if any) */
-    .guest_kernel : ALIGN(4K) {
-        _guest_kernel_start = .;
-        KEEP(*(.guest_kernel));
-        _guest_kernel_end = .;
         . = ALIGN(4K);
     } > REGION_RODATA
 
@@ -92,6 +78,12 @@ SECTIONS {
         . = ALIGN(4K);
         _end_bss = .;
     } > REGION_BSS
+
+    /* Guest kernel binary (if any) */
+    .guest_kernel : ALIGN(4K) {
+        _guest_kernel_start = .;
+        .incbin "./guests/empty.bin"
+    } > RAM
 
     /* ===== MEMORY USAGE TRACKING ===== */
     _ram_start = ORIGIN(RAM);

@@ -117,15 +117,14 @@ const STACK_SIZE_PER_HART: usize = 4096 * 2;
 /// main function.
 /// Since qemu does not support creating opensbi domains
 /// from the cli, we need to provide a custom linkerscript.
-#[link_section = ".text.entry"]
 #[no_mangle]
 #[unsafe(naked)]
 extern "C" fn _start() -> ! {
     core::arch::naked_asm!(
         // If there are multiple hart, init only hartid 0
         // The .attribute is needed. LLVM does not produce code seems to be a bug.
-    r#"
-    .attribute arch, "rv64imac"
+        r#"
+        .attribute arch, "rv64imac"
         csrr s6, mhartid
         // If not zero, go to wait loop
         bnez s6, {hang}
@@ -166,7 +165,7 @@ extern "C" fn _start() -> ! {
         add a1, t0, zero
         // Jump to our main function
         call {main}
-    "#,
+        "#,
         stack_size_per_hart = const STACK_SIZE_PER_HART,
         stack_top = sym _top_b_stack,
         hang = sym hang,
@@ -260,10 +259,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 
         #[cfg(not(feature = "embed-elf"))]
         let next_stage_address = {
-            let address = option_env!("SHADOWFAX_JUMP_ADDRESS")
-                .unwrap_or("0x80A00000")
-                .strip_prefix("0x")
-                .unwrap();
+            let address = env!("SHADOWFAX_JUMP_ADDRESS").strip_prefix("0x").unwrap();
             usize::from_str_radix(address, 16)
                 .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
         };

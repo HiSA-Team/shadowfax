@@ -9,7 +9,14 @@ fn main() {
     // Put the linker script somewhere the linker can find it.
     fs::write(out_dir.join("memory.x"), include_bytes!("memory.x")).unwrap();
     println!("cargo:rustc-link-search={}", out_dir.display());
-    println!("cargo:rerun-if-changed=memory.x");
 
+    println!(
+        "cargo:rustc-link-arg=-T{}",
+        out_dir.join("memory.x").display()
+    );
+    println!("cargo:rustc-link-arg=-static");
+    println!("cargo:rustc-link-arg=-nostdlib");
+
+    println!("cargo:rerun-if-changed=memory.x");
     println!("cargo:rerun-if-changed=build.rs");
 }

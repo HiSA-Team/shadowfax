@@ -81,8 +81,9 @@ impl Domain {
         public_key: &[u8],
     ) -> Result<(), anyhow::Error> {
         // Verify the tsm signature with the provided payload using the the public key
+        let public_key = str::from_utf8(public_key)?;
         let signature = Signature::try_from(signature).map_err(TsmError::SignatureError)?;
-        let verifying_key = VerifyingKey::<Sha256>::from_pkcs1_der(&public_key)
+        let verifying_key = VerifyingKey::<Sha256>::from_pkcs1_pem(&public_key)
             .map_err(TsmError::RsaPublicKeyError)?;
         verifying_key
             .verify(bin, &signature)

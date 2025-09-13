@@ -2,6 +2,15 @@
 #![no_main]
 #![feature(fn_align)]
 
+#[repr(C, align(8))]
+struct VirtualCPU {
+    regs: [usize; 32],
+}
+
+struct TrustedVM {
+    vcpus: VirtualCPU,
+}
+
 use core::panic::PanicInfo;
 
 unsafe extern "C" {
@@ -27,27 +36,28 @@ macro_rules! cove_unpack_fid {
     };
 }
 
-#[link_section = ".text.entry"]
 #[no_mangle]
-extern "C" fn entry() -> ! {
-    unsafe {
-        core::arch::asm!(
-            // setup up the stack
-            // a0-a4 contains TEECALL parameters. We must preserve them
-            "add a5, zero, zero",
-            "li t0, {stack_size_per_hart}",
-            "mul t1, a5, t0",
-            "la sp, {stack_top}",
-            "sub sp, sp, t1",
+#[unsafe(naked)]
+#[link_section = "._start"]
+extern "C" fn _start() -> ! {
+    core::arch::naked_asm!(
+        // setup up the stack
+        // a0-a4 contains TEECALL parameters. We must preserve them
+        r#"
+        .attribute arch, "rv64imac"
+        add a5, zero, zero
+        li t0, {stack_size_per_hart}
+        mul t1, a5, t0
+        la sp, {stack_top}
+        sub sp, sp, t1
 
-            "call {main}",
+        call {main}
+        "#,
 
-            stack_size_per_hart = const STACK_SIZE_PER_HART,
-            stack_top = sym _top_b_stack,
-            main = sym main,
-            options(noreturn, nostack)
-        )
-    }
+        stack_size_per_hart = const STACK_SIZE_PER_HART,
+        stack_top = sym _top_b_stack,
+        main = sym main,
+    )
 }
 
 const SBI_COVH_GET_TSM_INFO: usize = 0x0;

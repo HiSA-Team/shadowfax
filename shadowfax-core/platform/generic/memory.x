@@ -39,7 +39,7 @@ SECTIONS {
 
   /* text region */
   .text : ALIGN(4K) {
-    *(.text.entry);
+    KEEP(*(._start));
     . = ALIGN(4K);
     *(.text .text.*);
   } > REGION_TEXT

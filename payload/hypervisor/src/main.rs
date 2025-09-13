@@ -31,13 +31,10 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
 mod h_extension;
 mod log;
 
-#[link_section = ".guest_kernel"]
-#[used]
-static GUEST_KERNEL: [u8; include_bytes!("../empty.elf").len()] = *include_bytes!("../empty.elf");
-
 unsafe extern "C" {
     /// boot stack top (defined in `memory.x`)
     static _top_b_stack: u8;
+    static _guest_kernel_start: u8;
     static mut _hv_heap_start: u8;
     static _hv_heap_end: u8;
     static _start_bss: u8;
@@ -55,8 +52,6 @@ pub struct DomainInfo {
     pub domain_id: usize,
     pub tsm_info: TsmInfo,
 }
-
-const MAX_NUM_GUESTS: usize = 8;
 
 #[repr(C)]
 struct GuestContext {
@@ -77,14 +72,12 @@ struct Guest {
 
 // Global hypervisor data structure
 struct HState {
-    guests: heapless::Vec<Guest, MAX_NUM_GUESTS>,
+    guest: Option<Guest>,
 }
 
 impl HState {
     fn new() -> Self {
-        Self {
-            guests: heapless::Vec::new(),
-        }
+        Self { guest: None }
     }
 }
 
@@ -93,30 +86,31 @@ static H_STATE: Mutex<OnceCell<HState>> = Mutex::new(OnceCell::new());
 // Give each hart 4K stack
 const STACK_SIZE_PER_HART: usize = 1024 * 4;
 
-#[link_section = ".text.entry"]
 #[no_mangle]
-extern "C" fn entry() -> ! {
-    unsafe {
-        core::arch::asm!(
-            // setup up the stack
-            "li t0, {stack_size_per_hart}",
-            "mul t1, a0, t0",
-            "la sp, {stack_top}",
-            "sub sp, sp, t1",
+#[unsafe(naked)]
+#[link_section = "._start"]
+extern "C" fn _start() -> ! {
+    core::arch::naked_asm!(
+        r#"
+        .attribute arch, "rv64imac"
+        // setup up the stack
+        li t0, {stack_size_per_hart}
+        mul t1, a0, t0
+        la sp, {stack_top}
+        sub sp, sp, t1
 
-            "call {main}",
+        call {main}
+        "#,
 
-            stack_size_per_hart = const STACK_SIZE_PER_HART,
-            stack_top = sym _top_b_stack,
-            main = sym main,
-            options(noreturn)
-        )
-    }
+        stack_size_per_hart = const STACK_SIZE_PER_HART,
+        stack_top = sym _top_b_stack,
+        main = sym main,
+    )
 }
 
 /// Main function.
 /// -  Heap setup
-fn main(_hartid: usize, _fdt_address: usize) -> ! {
+fn main(hartid: usize, fdt_address: usize) -> ! {
     println!("[SHADOWFAX-HYPERVISOR] initializing");
     // clear bss section
     unsafe {
@@ -144,20 +138,22 @@ fn main(_hartid: usize, _fdt_address: usize) -> ! {
             .init(&raw mut _hv_heap_start as *mut u8, heap_size);
     }
 
-    // Discover and query all active domains in one go
-    match discover_and_query_domains() {
-        Ok(domains) => {
-            for domain in &domains {
-                println!(
-                    "[SHADOWFAX-HYPERVISOR] Domain {} - TSM impl_id: {}, state: {:?}",
-                    domain.domain_id, domain.tsm_info.tsm_impl_id, domain.tsm_info.tsm_state
-                );
-            }
-        }
-        Err(e) => {
-            panic!("Failed to discover domains: {}", e);
-        }
-    }
+    // // Discover and query all active domains in one go
+    // match discover_and_query_domains() {
+    //     Ok(domains) => {
+    //         for domain in &domains {
+    //             println!(
+    //                 "[SHADOWFAX-HYPERVISOR] Domain {} - TSM impl_id: {}, state: {:?}",
+    //                 domain.domain_id, domain.tsm_info.tsm_impl_id, domain.tsm_info.tsm_state
+    //             );
+    //         }
+    //     }
+    //     Err(e) => {
+    //         panic!("Failed to discover domains: {}", e);
+    //     }
+    // }
+
+    setup_hs_mode(hartid, fdt_address);
 
     loop {
         unsafe {
@@ -278,18 +274,10 @@ fn setup_hs_mode(_hartid: usize, _fdt_address: usize) -> ! {
 }
 
 fn setup_vs_mode() -> ! {
-    let mut state = H_STATE.lock();
+    let state = H_STATE.lock();
     state.get_or_init(|| HState::new());
 
-    let guest_entry_point = utils::load_elf(&GUEST_KERNEL);
-    let stack_addr = 0x1000;
-    unsafe {
-        state.get_mut().unwrap().guests.push_unchecked(Guest {
-            entry_point: guest_entry_point,
-            stack_pointer: stack_addr,
-            context_addr: stack_addr - core::mem::size_of::<GuestContext>(),
-        });
-    }
+    // let stack_addr = 0x1000;
 
     hgatp::set(hgatp::Mode::Bare, 0, 0);
     unsafe {
@@ -305,7 +293,8 @@ fn setup_vs_mode() -> ! {
         hstatus::set_spv();
 
         // set entry point
-        sepc::write(guest_entry_point);
+        let guest_start = &raw const _guest_kernel_start as *const u8 as usize;
+        sepc::write(guest_start);
 
         // // set trap vector
         // assert!(hstrap_vector as *const fn() as usize % 4 == 0);
@@ -329,7 +318,7 @@ fn setup_vs_mode() -> ! {
 #[inline(never)]
 fn guest_entry() -> ! {
     let state = H_STATE.lock();
-    let guest = state.get().unwrap().guests.first().unwrap();
+    let guest = state.get().unwrap().guest.as_ref().unwrap();
     let stack_pointer = guest.stack_pointer;
     let context_address = guest.context_addr as *const GuestContext;
     println!(
@@ -340,130 +329,88 @@ fn guest_entry() -> ! {
     // release HYPERVISOR_DATA lock
     drop(state);
 
-    unsafe {
-        asm!(
-            "
-            .align 4
-            fence.i
-
-            // Restore guest general-purpose registers (GPRs) from context
-            mv x0, {x0}
-            mv x1, {x1}
-            mv x2, {x2}
-            mv x3, {x3}
-            mv x4, {x4}
-            mv x5, {x5}
-            mv x6, {x6}
-            mv x7, {x7}
-            mv x8, {x8}
-            mv x9, {x9}
-            mv x10, {x10}
-            mv x11, {x11}
-            mv x12, {x12}
-            mv x13, {x13}
-            mv x14, {x14}
-            mv x15, {x15}
-            mv x16, {x16}
-            mv x17, {x17}
-            mv x18, {x18}
-            mv x19, {x19}
-            mv x20, {x20}
-            mv x21, {x21}
-            mv x22, {x22}
-            mv x23, {x23}
-            mv x24, {x24}
-            mv x25, {x25}
-            mv x26, {x26}
-            mv x27, {x27}
-            mv x28, {x28}
-            mv x29, {x29}
-            mv x30, {x30}
-            mv x31, {x31}
-
-            // set sp to scratch stack top
-            mv sp, {stack_top}
-
-            sret
-            ",
-            x0 = in(reg) (*context_address).regs[0],
-            x1 = in(reg) (*context_address).regs[1],
-            x2 = in(reg) (*context_address).regs[2],
-            x3 = in(reg) (*context_address).regs[3],
-            x4 = in(reg) (*context_address).regs[4],
-            x5 = in(reg) (*context_address).regs[5],
-            x6 = in(reg) (*context_address).regs[6],
-            x7 = in(reg) (*context_address).regs[7],
-            x8 = in(reg) (*context_address).regs[8],
-            x9 = in(reg) (*context_address).regs[9],
-            x10 = in(reg) (*context_address).regs[10],
-            x11 = in(reg) (*context_address).regs[11],
-            x12 = in(reg) (*context_address).regs[12],
-            x13 = in(reg) (*context_address).regs[13],
-            x14 = in(reg) (*context_address).regs[14],
-            x15 = in(reg) (*context_address).regs[15],
-            x16 = in(reg) (*context_address).regs[16],
-            x17 = in(reg) (*context_address).regs[17],
-            x18 = in(reg) (*context_address).regs[18],
-            x19 = in(reg) (*context_address).regs[19],
-            x20 = in(reg) (*context_address).regs[20],
-            x21 = in(reg) (*context_address).regs[21],
-            x22 = in(reg) (*context_address).regs[22],
-            x23 = in(reg) (*context_address).regs[23],
-            x24 = in(reg) (*context_address).regs[24],
-            x25 = in(reg) (*context_address).regs[25],
-            x26 = in(reg) (*context_address).regs[26],
-            x27 = in(reg) (*context_address).regs[27],
-            x28 = in(reg) (*context_address).regs[28],
-            x29 = in(reg) (*context_address).regs[29],
-            x30 = in(reg) (*context_address).regs[30],
-            x31 = in(reg) (*context_address).regs[31],
-            stack_top = in(reg) stack_pointer,
-            options(noreturn)
-        );
-    }
-}
-
-mod utils {
-    use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
-    use heapless::Vec;
-
-    pub fn load_elf(data: &[u8]) -> usize {
-        let elf = ElfBytes::<AnyEndian>::minimal_parse(data).unwrap();
-        let all_load_phdrs = elf
-            .segments()
-            .unwrap()
-            .iter()
-            .filter(|phdr| phdr.p_type == PT_LOAD)
-            .collect::<Vec<ProgramHeader, 128>>();
-
-        for segment in all_load_phdrs {
-            // Get segment details
-            let p_offset = segment.p_offset as usize;
-            let p_filesz = segment.p_filesz as usize;
-            let p_paddr = segment.p_paddr as *mut u8;
-            let p_memsz = segment.p_memsz as usize;
-            // Check if the segment data is within bounds
-            assert!(
-                p_offset + p_filesz <= data.len(),
-                "Segment data out of bounds"
-            );
-
-            // Copy the segment data to RAM
-            let segment_data = &data[p_offset..p_offset + p_filesz];
-            unsafe {
-                core::ptr::copy_nonoverlapping(segment_data.as_ptr(), p_paddr, p_filesz);
-            }
-            // zero any .bss past the end of file
-            if p_memsz > p_filesz {
-                let bss_start = unsafe { p_paddr.add(p_filesz) };
-                let bss_len = p_memsz - p_filesz;
-                unsafe { core::ptr::write_bytes(bss_start, 0, bss_len) }
-            }
-        }
-
-        // Return the entry point address of the ELF
-        elf.ehdr.e_entry as usize
-    }
+    // unsafe {
+    //     asm!(
+    //         "
+    //         .align 4
+    //         fence.i
+    //
+    //         // Restore guest general-purpose registers (GPRs) from context
+    //         mv x0, {x0}
+    //         mv x1, {x1}
+    //         mv x2, {x2}
+    //         mv x3, {x3}
+    //         mv x4, {x4}
+    //         mv x5, {x5}
+    //         mv x6, {x6}
+    //         mv x7, {x7}
+    //         mv x8, {x8}
+    //         mv x9, {x9}
+    //         mv x10, {x10}
+    //         mv x11, {x11}
+    //         mv x12, {x12}
+    //         mv x13, {x13}
+    //         mv x14, {x14}
+    //         mv x15, {x15}
+    //         mv x16, {x16}
+    //         mv x17, {x17}
+    //         mv x18, {x18}
+    //         mv x19, {x19}
+    //         mv x20, {x20}
+    //         mv x21, {x21}
+    //         mv x22, {x22}
+    //         mv x23, {x23}
+    //         mv x24, {x24}
+    //         mv x25, {x25}
+    //         mv x26, {x26}
+    //         mv x27, {x27}
+    //         mv x28, {x28}
+    //         mv x29, {x29}
+    //         mv x30, {x30}
+    //         mv x31, {x31}
+    //
+    //         // set sp to scratch stack top
+    //         mv sp, {stack_top}
+    //
+    //         sret
+    //         ",
+    //         x0 = in(reg) (*context_address).regs[0],
+    //         x1 = in(reg) (*context_address).regs[1],
+    //         x2 = in(reg) (*context_address).regs[2],
+    //         x3 = in(reg) (*context_address).regs[3],
+    //         x4 = in(reg) (*context_address).regs[4],
+    //         x5 = in(reg) (*context_address).regs[5],
+    //         x6 = in(reg) (*context_address).regs[6],
+    //         x7 = in(reg) (*context_address).regs[7],
+    //         x8 = in(reg) (*context_address).regs[8],
+    //         x9 = in(reg) (*context_address).regs[9],
+    //         x10 = in(reg) (*context_address).regs[10],
+    //         x11 = in(reg) (*context_address).regs[11],
+    //         x12 = in(reg) (*context_address).regs[12],
+    //         x13 = in(reg) (*context_address).regs[13],
+    //         x14 = in(reg) (*context_address).regs[14],
+    //         x15 = in(reg) (*context_address).regs[15],
+    //         x16 = in(reg) (*context_address).regs[16],
+    //         x17 = in(reg) (*context_address).regs[17],
+    //         x18 = in(reg) (*context_address).regs[18],
+    //         x19 = in(reg) (*context_address).regs[19],
+    //         x20 = in(reg) (*context_address).regs[20],
+    //         x21 = in(reg) (*context_address).regs[21],
+    //         x22 = in(reg) (*context_address).regs[22],
+    //         x23 = in(reg) (*context_address).regs[23],
+    //         x24 = in(reg) (*context_address).regs[24],
+    //         x25 = in(reg) (*context_address).regs[25],
+    //         x26 = in(reg) (*context_address).regs[26],
+    //         x27 = in(reg) (*context_address).regs[27],
+    //         x28 = in(reg) (*context_address).regs[28],
+    //         x29 = in(reg) (*context_address).regs[29],
+    //         x30 = in(reg) (*context_address).regs[30],
+    //         x31 = in(reg) (*context_address).regs[31],
+    //         stack_top = in(reg) stack_pointer,
+    //         options(noreturn)
+    //     );
+    // }
+    loop {}
 }
 
 mod sbi {

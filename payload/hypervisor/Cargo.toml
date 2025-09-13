@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-elf = { version = "0.7.2", default-features = false }
 heapless = "0.8.0"
 linked_list_allocator = "0.10.5"
 riscv = "0.13.0"
