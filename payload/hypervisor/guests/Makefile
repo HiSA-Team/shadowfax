@@ -1,19 +1,42 @@
-include ../common/config.mk
+# Programs
+CC        = $(CROSS_COMPILE)gcc
+LD        = $(CROSS_COMPILE)ld
+AS        = $(CROSS_COMPILE)as
+OBJCOPY   = $(CROSS_COMPILE)objcopy
 
-ASFLAGS += -O0 -g
-LDFLAGS += -static -nostdlib -T kernel.ld
+# ===============================
+#  Compilation and Linking Flags
+# ===============================
+
+MARCH = rv64imac
+MABI  = lp64
+
+CFLAGS  = -Wall -Wextra -march=$(MARCH) -mabi=$(MABI)
+LDFLAGS = -static -nostdlib
+ASFLAGS = -march=$(MARCH) -mabi=$(MABI)
+
+# =========================
+#  Sources & Objects
+# =========================
+ALL_SRCS        := $(wildcard *.c) $(wildcard *.S)
+ALL_OBJS        := $(patsubst %.c,%.o,$(ALL_SRCS))   $(patsubst %.S,%.o,$(ALL_SRCS))
+ALL_ELFS        := $(patsubst %.c,%.elf,$(ALL_SRCS)) $(patsubst %.S,%.elf,$(ALL_SRCS))
+ALL_BINS        := $(patsubst %.c,%.bin,$(ALL_SRCS)) $(patsubst %.S,%.bin,$(ALL_SRCS))
 
 .PHONY: all clean
+all: $(ALL_BINS)
 
-all: ecall.elf empty.elf
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-ecall.elf: ecall.S kernel.ld
-	$(CC) $(ASFLAGS) -c $< -o ecall.o
-	$(LD) ecall.o $(LDFLAGS) -o $@
+%.o: %.S
+	$(AS) $(ASFLAGS) -c -o $@ $<
 
-empty.elf: empty.S kernel.ld
-	$(CC) $(ASFLAGS) -c $< -o empty.o
-	$(LD) empty.o $(LDFLAGS) -o $@
+%.elf: kernel.ld %.o
+	$(LD) $(LDFLAGS) -o $@ -T $^
+
+%.bin: %.elf
+	$(OBJCOPY) -O binary $< $@
 
 clean:
-	rm -f *.o *.elf
+	rm -f *.o *.elf *.bin
