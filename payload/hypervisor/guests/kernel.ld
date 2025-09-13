@@ -2,15 +2,15 @@ ENTRY(_start)
 
 SECTIONS
 {
-  /* Text goes at 0x8020 0000, the Linux-on-virt default */
-  . = 0x80A00000;
+  /* The start does not matteer since we are not using this as an ELF for now.*/
+  . = 0x0;
 
   .text : {
-    KEEP(*(.text.entry))    /* your entry code */
-    *(.text*)               /* anything else in .text */
+    KEEP(*(.text.entry))
+    *(.text*)
   }
 
   .rodata : {
-    *(.rodata*)             /* your debug string */
+    *(.rodata*)
   }
 }
