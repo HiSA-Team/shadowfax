@@ -92,4 +92,4 @@ jobs:
       run: |
         . environment.sh ${OPENSBI_PATH}
         mkdir -p bin
-        make info generate-keys test
+        make clean info generate-keys test
