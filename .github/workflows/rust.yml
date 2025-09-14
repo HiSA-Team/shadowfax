@@ -47,11 +47,6 @@ jobs:
         sudo mkdir -p /var/cache/apt/archives
         sudo cp -r /tmp/apt-cache/archives/* /var/cache/apt/archives/ || true
 
-        # if opensbi was cached, do a clean to ensure a fresh build
-        if [ -d "${OPENSBI_PATH}" ]; then
-          make -C "${OPENSBI_PATH}" PLATFORM=${PLATFORM} clean || true
-        fi
-
     - name: Download OpenSBI
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
@@ -66,9 +61,8 @@ jobs:
 
         # install packages
         sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-        qemu-system-riscv64 gcc-riscv64-linux-gnu build-essential qemu-utils \
-        libncurses-dev bison flex libssl-dev device-tree-compiler python3 \
-        libelf-dev dwarves curl git file cpio sudo bc libclang-dev ca-certificates
+        qemu-system-riscv64 gcc-riscv64-linux-gnu make libssl-dev device-tree-compiler python3 \
+        libelf-dev curl file sudo bc libclang-dev
 
         # build opensbi
         make -C ${OPENSBI_PATH} PLATFORM=${PLATFORM}
@@ -90,6 +84,7 @@ jobs:
 
     - name: Build and test
       run: |
+        qemu-system-riscv64 --version || true
         . environment.sh ${OPENSBI_PATH}
         mkdir -p bin
         make clean info generate-keys test
