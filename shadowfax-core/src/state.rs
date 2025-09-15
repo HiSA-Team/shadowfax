@@ -135,6 +135,14 @@ pub fn init(fdt_addr: usize) -> Result<(), anyhow::Error> {
         }
         state.domains.push(domain.clone());
     }
+    // the first active domain is the first untrusted one
+    let starting_domain = state
+        .domains
+        .iter_mut()
+        .find(|c| matches!(c.tsm_type, TsmType::None))
+        .expect("cannot have only TSMs. The system will deadlock");
+
+    starting_domain.active = 1 << starting_domain.id;
 
     Ok(())
 }

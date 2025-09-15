@@ -71,7 +71,6 @@ impl Domain {
                 }
             }
         }
-        domain.active = if domain.id == 0 { 1 } else { 0 };
         (domain, start_addr, end_addr)
     }
     pub fn verify_and_load_tsm(
