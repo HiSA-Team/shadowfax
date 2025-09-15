@@ -2,15 +2,6 @@
 #![no_main]
 #![feature(fn_align)]
 
-#[repr(C, align(8))]
-struct VirtualCPU {
-    regs: [usize; 32],
-}
-
-struct TrustedVM {
-    vcpus: VirtualCPU,
-}
-
 use core::panic::PanicInfo;
 
 unsafe extern "C" {

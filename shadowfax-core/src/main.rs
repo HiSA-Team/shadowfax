@@ -88,19 +88,6 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
-/// We include the `next-stage` .elf in the firmware as read-only data.
-/// We cannot execute directly from here since we will have problems with non-executable
-/// sections. The `load_elf` function will load this .elf in memory.
-/// This technique "mocks" what happens when we pass the `-kernel` flag to QEMU.
-/// However this will be more flexible since we will likely need to load more
-/// payloads to support different domain.
-///
-// TODO: make the payload name variable
-#[cfg(feature = "embed-elf")]
-#[link_section = ".payload"]
-static PAYLOAD: [u8; include_bytes!("../bin/payload.elf").len()] =
-    *include_bytes!("../bin/payload.elf");
-
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 4096 * 2;
 
@@ -250,20 +237,12 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
             core::ptr::addr_of!(_heap_size) as usize,
         );
     }
-    // prepare the next stage. Depending on the configuration,
-    // we can include an elf and jump to the first section or
-    // jump to a prefixed address.
+    // prepare the next stage. If SHADOWFAX_JUMP_ADDRESS is specified, jump to that address (the
+    // user will load that payload). Otherwise fallback to empty payload which does nothing
     let next_stage_address = {
-        #[cfg(feature = "embed-elf")]
-        let next_stage_address = load_elf(&PAYLOAD);
-
-        #[cfg(not(feature = "embed-elf"))]
-        let next_stage_address = {
-            let address = env!("SHADOWFAX_JUMP_ADDRESS").strip_prefix("0x").unwrap();
-            usize::from_str_radix(address, 16)
-                .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
-        };
-        next_stage_address
+        let address = env!("SHADOWFAX_JUMP_ADDRESS");
+        usize::from_str_radix(address, 16)
+            .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
     };
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
@@ -326,6 +305,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     let hart_stack_size = unsafe { opensbi::platform.hart_stack_size } as usize;
     let heap_size = unsafe { opensbi::platform.heap_size } as usize;
     // parse linkerscript symbols
+
     let fw_start = unsafe { &_fw_start as *const u8 as usize };
     let fw_end = unsafe { &_fw_end as *const u8 as usize };
     let fw_rw_start = unsafe { &_fw_rw_start as *const u8 as usize };
@@ -483,57 +463,6 @@ extern "C" fn hartid_to_scratch(_hartid: usize, hartindex: usize) -> usize {
         .saturating_sub(opensbi::SBI_SCRATCH_SIZE as usize);
 
     scratch_addr
-}
-
-/// This functions loads an elf in memory and returns the entry address.
-/// Loading an elf in memory means to load the LOAD segments.
-///
-/// Params:
-///  - data: the slice of the included elf
-///
-///  Returns:
-///  - the entry point address
-#[cfg(feature = "embed-elf")]
-#[link_section = ".text"]
-fn load_elf(data: &[u8]) -> usize {
-    use alloc::vec::Vec;
-    use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
-
-    let elf = ElfBytes::<AnyEndian>::minimal_parse(data).unwrap();
-    let all_load_phdrs = elf
-        .segments()
-        .unwrap()
-        .iter()
-        .filter(|phdr| phdr.p_type == PT_LOAD)
-        .collect::<Vec<ProgramHeader>>();
-
-    for segment in all_load_phdrs {
-        // Get segment details
-        let p_offset = segment.p_offset as usize;
-        let p_filesz = segment.p_filesz as usize;
-        let p_paddr = segment.p_paddr as *mut u8;
-        let p_memsz = segment.p_memsz as usize;
-        // Check if the segment data is within bounds
-        assert!(
-            p_offset + p_filesz <= data.len(),
-            "Segment data out of bounds"
-        );
-
-        // Copy the segment data to RAM
-        let segment_data = &data[p_offset..p_offset + p_filesz];
-        unsafe {
-            core::ptr::copy_nonoverlapping(segment_data.as_ptr(), p_paddr, p_filesz);
-        }
-        // zero any .bss past the end of file
-        if p_memsz > p_filesz {
-            let bss_start = unsafe { p_paddr.add(p_filesz) };
-            let bss_len = p_memsz - p_filesz;
-            unsafe { core::ptr::write_bytes(bss_start, 0, bss_len) }
-        }
-    }
-
-    // Return the entry point address of the ELF
-    elf.ehdr.e_entry as usize
 }
 
 // Needed for opensbi

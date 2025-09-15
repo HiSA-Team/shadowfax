@@ -4,9 +4,6 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Giuseppe Capasso"]
 
-[features]
-embed-elf = []
-
 # Default (glibc) build-deps used when the build host is NOT musl
 [target.'cfg(not(target_env = "musl"))'.build-dependencies]
 bindgen = "0.71.1"

@@ -138,7 +138,7 @@ fn main(hartid: usize, fdt_address: usize) -> ! {
             .init(&raw mut _hv_heap_start as *mut u8, heap_size);
     }
 
-    // // Discover and query all active domains in one go
+    // // // Discover and query all active domains in one go
     // match discover_and_query_domains() {
     //     Ok(domains) => {
     //         for domain in &domains {

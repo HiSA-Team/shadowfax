@@ -1,12 +1,17 @@
+include config.mk
+
 TARGET ?= riscv64imac-unknown-none-elf
 PROFILE ?= debug
-
-OBJCOPY = $(CROSS_COMPILE)objcopy
 
 # General Directories
 BIN_DIR = bin
 KEYS_DIR = shadowfax-core/keys
 TARGET_DIR = target/$(TARGET)/$(PROFILE)
+
+# Empty target
+EMPTY_DIR							= payload/empty
+EMPTY_BIN							= $(BIN_DIR)/empty.bin
+EMPTY_ELF							= $(BIN_DIR)/empty.elf
 
 # TSM Files
 TSM_ELF							 = $(BIN_DIR)/tsm.elf
@@ -16,9 +21,9 @@ PRIVATE_KEY					 = $(KEYS_DIR)/privatekey.pem
 PUBLIC_KEY					 = $(KEYS_DIR)/publickey.pem
 
 # Hypervisor Files
-HYPERVISOR_ELF       = $(BIN_DIR)/hypervisor.elf
-HYPERVISOR_BIN       = $(BIN_DIR)/hypervisor.bin
-GUEST_DIR            = payload/hypervisor/guests
+HYPERVISOR_ELF					= $(BIN_DIR)/hypervisor.elf
+HYPERVISOR_BIN					= $(BIN_DIR)/hypervisor.bin
+GUEST_DIR								= payload/hypervisor/guests
 
 .PHONY: all clean firmware tsm hypervisor test generate-keys help info
 
@@ -29,11 +34,18 @@ endif
 # ensure the bin directory is created
 $(shell mkdir -p $(BIN_DIR))
 
-all: firmware hypervisor info
+all: info firmware hypervisor empty
 
 ## firmware: build the firmware. It includes building the TSM and signing it
-firmware: tsm
+firmware: tsm empty
 	cargo build --target $(TARGET) -p shadowfax-core
+
+## empty: build the empty payload for testing purposes
+empty: $(EMPTY_BIN)
+
+$(EMPTY_ELF):
+	$(MAKE) -C $(EMPTY_DIR)
+	cp $(EMPTY_DIR)/empty.elf $@
 
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
 tsm: $(TSM_SIG)
@@ -83,6 +95,7 @@ clean:
 	cargo clean
 	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig
 	$(MAKE) -C $(GUEST_DIR) clean
+	$(MAKE) -C $(EMPTY_DIR) clean
 
 ## help: display this help message
 help:

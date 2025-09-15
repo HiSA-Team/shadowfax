@@ -50,18 +50,8 @@ SECTIONS {
     . = ALIGN(4K);
   } > REGION_RODATA
 
-  .dtb : ALIGN(4K) {
-    *(.dtb);
-    . = ALIGN(4K);
-  } >  REGION_RODATA
-
-  .payload : ALIGN(4K) {
-    *(.payload .payload.*);
-    . = ALIGN(4K);
-  } > REGION_RODATA
-
   /* PMP mandates R/W sections aligned in power of 2 */
-  . = ALIGN(1 << LOG2CEIL(SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.dtb) + SIZEOF(.payload)));
+  . = ALIGN(1 << LOG2CEIL(SIZEOF(.text) + SIZEOF(.rodata)));
   _fw_rw_start = .;
 
   /* here we can store heap data */
