@@ -8,13 +8,7 @@ target remote localhost:1234
 file target/riscv64imac-unknown-none-elf/debug/shadowfax-core
 
 # load tsm elf file for debug symbols
-# restore bin/tsm.bin binary 0x80A00000
 add-symbol-file bin/tsm.elf 0x80A00000
 
-# load the hypervisor
-restore bin/hypervisor.bin binary 0x81000000
-add-symbol-file bin/hypervisor.elf 0x81000000
-
-break shadowfax_core::cove::covh_handler
-break shadowfax_core::trap::handler
+# break shadowfax_core::trap::handler
 break shadowfax_tsm::main
