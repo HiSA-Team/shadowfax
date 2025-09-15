@@ -1,25 +1,25 @@
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 fn spawn_qemu_and_stream(
-    firmware: &PathBuf,
+    firmware: &Path,
+    dtb: &Path,
 ) -> (Child, Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>) {
     let mut child = Command::new("qemu-system-riscv64")
         .args(&[
             "-M",
             "virt",
             "-m",
-            "32M",
-            "-display",
-            "none",
-            "-serial",
-            "mon:stdio",
+            "64M",
+            "-nographic",
             "-bios",
             firmware.to_str().unwrap(),
+            "-dtb",
+            dtb.to_str().unwrap(),
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -60,14 +60,20 @@ fn spawn_qemu_and_stream(
 #[test]
 fn firmware_boots_correctly() {
     let firmware = PathBuf::from("../target/riscv64imac-unknown-none-elf/debug/shadowfax-core");
+    let dtb = PathBuf::from("../bin/device-tree.dtb");
 
     assert!(
         firmware.exists(),
-        "firmware {} does not exist. Build it first or set FIRMWARE_PATH.",
+        "firmware {} does not exist. Build it first.",
         firmware.display()
     );
+    assert!(
+        dtb.exists(),
+        "dtb {} does not exist. Build it first.",
+        dtb.display()
+    );
 
-    let (mut child, out_lines, err_lines) = spawn_qemu_and_stream(&firmware);
+    let (mut child, out_lines, err_lines) = spawn_qemu_and_stream(&firmware, &dtb);
 
     let timeout = Duration::from_secs(60);
     let deadline = Instant::now() + timeout;
