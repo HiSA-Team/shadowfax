@@ -8,11 +8,6 @@ BIN_DIR = bin
 KEYS_DIR = shadowfax-core/keys
 TARGET_DIR = target/$(TARGET)/$(PROFILE)
 
-# Empty target
-EMPTY_DIR							= payload/empty
-EMPTY_BIN							= $(BIN_DIR)/empty.bin
-EMPTY_ELF							= $(BIN_DIR)/empty.elf
-
 # TSM Files
 TSM_ELF							 = $(BIN_DIR)/tsm.elf
 TSM_BIN							 = $(BIN_DIR)/tsm.bin
@@ -39,13 +34,6 @@ all: info firmware hypervisor empty
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm empty
 	cargo build --target $(TARGET) -p shadowfax-core
-
-## empty: build the empty payload for testing purposes
-empty: $(EMPTY_BIN)
-
-$(EMPTY_ELF):
-	$(MAKE) -C $(EMPTY_DIR)
-	cp $(EMPTY_DIR)/empty.elf $@
 
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
 tsm: $(TSM_SIG)
