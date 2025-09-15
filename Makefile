@@ -29,10 +29,10 @@ endif
 # ensure the bin directory is created
 $(shell mkdir -p $(BIN_DIR))
 
-all: info firmware hypervisor empty
+all: info firmware hypervisor
 
 ## firmware: build the firmware. It includes building the TSM and signing it
-firmware: tsm empty
+firmware: tsm
 	cargo build --target $(TARGET) -p shadowfax-core
 
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
