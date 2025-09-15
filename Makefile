@@ -83,7 +83,6 @@ clean:
 	cargo clean
 	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig
 	$(MAKE) -C $(GUEST_DIR) clean
-	$(MAKE) -C $(EMPTY_DIR) clean
 
 ## help: display this help message
 help:
