@@ -1,12 +1,12 @@
 include config.mk
 
-TARGET ?= riscv64imac-unknown-none-elf
+TARGET  ?= riscv64imac-unknown-none-elf
 PROFILE ?= debug
 
 # General Directories
-BIN_DIR = bin
-KEYS_DIR = shadowfax-core/keys
-TARGET_DIR = target/$(TARGET)/$(PROFILE)
+BIN_DIR			= bin
+KEYS_DIR		= shadowfax-core/keys
+TARGET_DIR	= target/$(TARGET)/$(PROFILE)
 
 # TSM Files
 TSM_ELF							 = $(BIN_DIR)/tsm.elf
@@ -29,7 +29,7 @@ endif
 # ensure the bin directory is created
 $(shell mkdir -p $(BIN_DIR))
 
-all: info firmware hypervisor
+all: firmware hypervisor build-info
 
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm
@@ -68,7 +68,7 @@ generate-keys:
 	openssl rsa -in $(PRIVATE_KEY) -RSAPublicKey_out -outform PEM -out $(PUBLIC_KEY)
 
 ## info: display build configuration
-info:
+build-info:
 	@echo "Build Configuration:"
 	@echo "  TARGET:        $(TARGET)"
 	@echo "  PROFILE:       $(PROFILE)"
