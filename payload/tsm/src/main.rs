@@ -20,6 +20,8 @@ fn panic(_info: &PanicInfo) -> ! {
 
 // Give each hart 8K stack
 const STACK_SIZE_PER_HART: usize = 1024 * 8;
+const SBI_COVH_GET_TSM_INFO: usize = 0;
+const SBI_COVH_CREATE_TVM: usize = 5;
 
 macro_rules! cove_unpack_fid {
     ($fid:expr) => {
@@ -51,17 +53,18 @@ extern "C" fn _start() -> ! {
     )
 }
 
-const SBI_COVH_GET_TSM_INFO: usize = 0x0;
+struct Guest {
+    vcpu_state: [u64; 32],
+}
+struct State {
+    info: TsmInfo,
+    guest: Option<Guest>,
+}
 
-// Since this is a TSM with non reentrant model, an ECALL should be a TEERET
-fn main(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> ! {
-    let mut a6: usize;
-    unsafe { core::arch::asm!("add {}, a6, zero", out(reg) a6, options(nomem)) };
-    let (_sdid, fid) = cove_unpack_fid!(a6);
-    match fid {
-        SBI_COVH_GET_TSM_INFO => {
-            let tsm_info_ptr = a0 as *mut TsmInfo;
-            let state = TsmInfo {
+impl State {
+    fn new() -> Self {
+        Self {
+            info: TsmInfo {
                 tsm_state: TsmState::TsmReady,
                 tsm_impl_id: 69,
                 tsm_version: 0,
@@ -69,15 +72,54 @@ fn main(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> ! {
                 tvm_state_pages: 0,
                 tvm_max_vcpus: 1,
                 tvm_vcpu_state_pages: 0,
-            };
+            },
+            guest: None,
+        }
+    }
+}
+
+struct SbiRet {
+    a0: isize,
+    a1: isize,
+}
+
+// Since this is a TSM with non reentrant model, an ECALL should be a TEERET
+fn main(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> ! {
+    let mut a6: usize;
+    unsafe { core::arch::asm!("add {}, a6, zero", out(reg) a6, options(nomem)) };
+    let (_sdid, fid) = cove_unpack_fid!(a6);
+    let state = State::new();
+    let ret = match fid {
+        SBI_COVH_GET_TSM_INFO => {
+            let tsm_info_ptr = a0 as *mut TsmInfo;
+            let info = state.info.clone();
 
             assert_eq!(a1, core::mem::size_of::<TsmInfo>());
-            unsafe { tsm_info_ptr.write(state) }
+            unsafe {
+                tsm_info_ptr.write(info);
+            }
+            SbiRet {
+                a0: 0,
+                a1: core::mem::size_of::<TsmInfo>() as isize,
+            }
         }
-        _ => {}
-    }
+        SBI_COVH_CREATE_TVM => SbiRet { a0: 0, a1: 1 },
+        _ => SbiRet { a0: -1, a1: 0 },
+    };
 
-    unsafe { core::arch::asm!("ecall", options(noreturn)) }
+    // Issue the TEERET
+    unsafe {
+        core::arch::asm!(
+            "
+            ecall
+            ",
+            in("a0") ret.a0,
+            in("a1") ret.a1,
+            in("a6") a6,
+            in("a7") 0x434F5648,
+            options(noreturn)
+        );
+    };
 }
 
 #[repr(C)]
@@ -124,17 +166,6 @@ pub struct TsmInfo {
      */
     pub tvm_vcpu_state_pages: usize,
 }
-/*
- * Sbiret is a structure used to return the result of an SBI (Supervisor Binary Interface) call.
- * It contains an error code and a value, which provide information about the success or failure
- * of the call and any resulting data.
- */
-#[repr(C)]
-pub struct SbiRet {
-    pub error: isize,
-    pub value: isize,
-}
-
 /*
  * TsmPageType is an enumeration that defines the types of memory pages supported by the TSM.
  * It includes options for 4 KiB, 2 MiB, 1 GiB, and 512 GiB pages, allowing for flexible memory
