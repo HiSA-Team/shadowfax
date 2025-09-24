@@ -8,7 +8,7 @@ target remote localhost:1234
 file target/riscv64imac-unknown-none-elf/debug/shadowfax-core
 
 # load tsm elf file for debug symbols
-add-symbol-file bin/tsm.elf 0x80A00000
+add-symbol-file target/riscv64imac-unknown-none-elf/debug/shadowfax-tsm 0x80A00000
 
 # break shadowfax_core::trap::handler
 break shadowfax_tsm::main
