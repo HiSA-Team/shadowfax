@@ -15,7 +15,7 @@
 
 use core::mem::offset_of;
 
-use crate::{_tee_scratch_start, context::Context, domain::TsmType, opensbi, state::STATE};
+use crate::{_tee_scratch_start, context::Context, opensbi, state::STATE};
 
 pub const COVH_EXT_ID: usize = 0x434F5648;
 pub const SBI_COVH_GET_TSM_INFO: usize = 0;
@@ -163,125 +163,117 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
 
-    let (dst_id, fid) = cove_unpack_fid!(fid);
-    let active_domain = state.domains.iter().find(|d| d.active != 0).unwrap();
-    let src_id = active_domain.id;
-    let dst_type = state.domains[dst_id].tsm_type.clone();
-
     // scratch context base pointer
     let scratch_start = &raw const _tee_scratch_start as *const u8 as usize;
     let base_ctx = scratch_start - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let scratch_ctx = base_ctx as *mut Context;
 
-    // understand if we are in a TEECALL or a TEERET. To do so we need to check the target
-    // domain (which is assumed to be a confidential domain). If the target domain is the same as
-    // the active one, it means that this call comes from a TSM and it is a TEERET, otherwise it is
-    // a TEECALL.
-    // The outcome of this block is the address of the domain to be restored.
-    if src_id == dst_id {
-        // TEERET
-        // We don't need to store the calling context since we are implementing the
-        // non interruptible TSM. We need a0 and a1 registers to deliver the result
-        //
-        // We need to retrieve the original calling context
-        let target_id = (active_domain.active & !(1 << dst_id)).trailing_zeros() as usize;
-        let dst_addr = base_ctx - (target_id + 1) * size_of::<Context>();
-        let dst_ctx = dst_addr as *mut Context;
-        unsafe {
-            (*dst_ctx).regs[10] = (*scratch_ctx).regs[10];
-            (*dst_ctx).regs[11] = (*scratch_ctx).regs[11];
-            // increment mepc to avoid loop
-            (*dst_ctx).mepc += 4;
+    let (dst_id, fid) = cove_unpack_fid!(fid);
+    let tsm = state.tsms.iter().find(|d| d.id == dst_id);
+
+    // TEECALL
+    if let Some(tsm) = tsm {
+        let src_id = state.current_id;
+        // check if the domain is trusted. If not just return an error to the caller
+        if !tsm.is_trusted(src_id) {
+            unsafe {
+                (*scratch_ctx).regs[10] = usize::MAX;
+                (*scratch_ctx).regs[11] = 0;
+                // increment mepc to avoid loop
+                (*scratch_ctx).mepc += 4;
+            }
+            return base_ctx;
         }
-        // Perform operations to cleanup specific to the functionality
+        // We need to store the calling context into the right structure
+        let caller_ctx_addr = base_ctx - (src_id + 1) * size_of::<Context>();
+        let caller_ctx = caller_ctx_addr as *mut Context;
+        unsafe {
+            core::ptr::copy_nonoverlapping(scratch_ctx, caller_ctx, 1);
+        }
+
+        let tsm_ctx = tsm.context_addr as *mut Context;
+
+        // we need to preserve all a0-a4 and a6--a7 registers.
+        unsafe {
+            // a0 is the 10th general purpose register
+            // a7 is the 17th general purpose register
+            for i in 10..18 {
+                (*tsm_ctx).regs[i] = (*caller_ctx).regs[i];
+            }
+
+            // save the caller into a6 register
+            (*tsm_ctx).regs[16] = src_id;
+
+            // save the caller context address into TSM context
+            (*tsm_ctx).caller_ctx = caller_ctx_addr;
+        }
+
+        // Perform operations to allow the specific functionality
         match fid {
-            // Reset the PMP address to the shared memory
+            // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
+            // where he will write the tsm_info struct (a0) for the necessary size (a1).
             SBI_COVH_GET_TSM_INFO => {
-                let tsm_ctx = (scratch_start
-                    - (TEE_SCRATCH_SIZE + size_of::<Context>())
-                    - (dst_id + 1) * size_of::<Context>())
-                    as *mut Context;
+                let addr = unsafe { (*tsm_ctx).regs[10] };
+                let size = unsafe { (*tsm_ctx).regs[11] };
+
+                let slot = 2;
+
+                // Build the CFG byte for TOR + RW (not locked)
+                let range = riscv::register::Range::TOR as usize;
+                let perm = riscv::register::Permission::RW as usize;
+                let locked = false as usize;
+                let cfg_byte = (locked << 7) | (range << 3) | (perm);
+
+                // Mask out old byte for slot 1 in pmpcfg0
+                let byte_mask = 0xff << (slot * 8);
 
                 unsafe {
-                    (*tsm_ctx).pmpaddr[2] = 0;
-                    (*tsm_ctx).pmpaddr[1] = 0;
-                    (*dst_ctx).pmpcfg &= !0xFF << (2 * 8);
+                    (*tsm_ctx).pmpaddr[slot - 1] = addr >> 2;
+                    (*tsm_ctx).pmpaddr[slot] = (addr + size) >> 2;
+
+                    (*tsm_ctx).pmpcfg &= !byte_mask;
+                    (*tsm_ctx).pmpcfg |= cfg_byte << (slot * 8);
                 }
             }
             _ => {}
         }
-        state.domains[src_id].active = 0;
-        state.domains[target_id].active = 1 << target_id;
-        return dst_addr;
+        // mark the new tsm as the current domain
+        state.current_id = tsm.id;
+        return tsm.context_addr;
     }
-    // TEECALL
-    // If the target domain is not a TSM, we will just respond to the src domain
-    // with an error. In this case we don't do the context switch into the TSM since there is
-    // not one. A malicious supervisor domain could attempt to get into a non TEE-aware
-    // OS. So we change the dst_addr to the src domain.
-    let dst_domain = &state.domains[dst_id];
-    if matches!(dst_type, TsmType::None)
-        || !active_domain.is_trusted(dst_id)
-        || !dst_domain.is_trusted(src_id)
-    {
-        unsafe {
-            (*scratch_ctx).regs[10] = usize::MAX;
-            (*scratch_ctx).regs[11] = 0;
-            // increment mepc to avoid loop
-            (*scratch_ctx).mepc += 4;
-        }
-        return base_ctx;
-    }
-    // first check if there is a trust relationship between the two domains
-    // We need to store the calling context into the right structure
-    let src_ctx = (base_ctx - (src_id + 1) * size_of::<Context>()) as *mut Context;
+
+    // TEERET
+    // Retrive the TSM ID as the current running
+    // We don't need to store the calling context since we are implementing the
+    // non interruptible TSM. We need a0 and a1 registers to deliver the result
+    let tsm = state
+        .tsms
+        .iter()
+        .find(|t| t.id == state.current_id)
+        .unwrap();
+
+    let tsm_ctx = tsm.context_addr as *mut Context;
+    let caller_ctx = unsafe { (*tsm_ctx).caller_ctx as *mut Context };
+
     unsafe {
-        core::ptr::copy_nonoverlapping(scratch_ctx, src_ctx, 1);
+        (*caller_ctx).regs[10] = (*scratch_ctx).regs[10];
+        (*caller_ctx).regs[11] = (*scratch_ctx).regs[11];
+        (*caller_ctx).regs[16] = (*scratch_ctx).regs[16];
+        // increment mepc to avoid loop
+        (*caller_ctx).mepc += 4;
     }
-    let dst_addr = base_ctx - (dst_id + 1) * size_of::<Context>();
-
-    let dst_ctx = dst_addr as *mut Context;
-    unsafe {
-        // we need to preserve all a0-a7 registers.
-        for i in 10..18 {
-            (*dst_ctx).regs[i] = (*src_ctx).regs[i];
-        }
-    }
-
-    // mark the src domain inactive and the target TSM as "in communication with the src domain"
-    state.domains[src_id].active = 0;
-    state.domains[dst_id].active = (1 << src_id) | (1 << dst_id);
-
-    // Perform operations to allow the specific functionality
+    // Perform operations to cleanup specific to the functionality
     match fid {
-        // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
-        // where he will write the tsm_info struct (a0) for the necessary size (a1).
-        SBI_COVH_GET_TSM_INFO => {
-            let addr = unsafe { (*dst_ctx).regs[10] };
-            let size = unsafe { (*dst_ctx).regs[11] };
-
-            let slot = 2;
-
-            // Build the CFG byte for TOR + RW (not locked)
-            let range = riscv::register::Range::TOR as usize;
-            let perm = riscv::register::Permission::RW as usize;
-            let locked = false as usize;
-            let cfg_byte = (locked << 7) | (range << 3) | (perm);
-
-            // Mask out old byte for slot 1 in pmpcfg0
-            let byte_mask = 0xff << (slot * 8);
-
-            unsafe {
-                (*dst_ctx).pmpaddr[slot - 1] = addr >> 2;
-                (*dst_ctx).pmpaddr[slot] = (addr + size) >> 2;
-
-                (*dst_ctx).pmpcfg &= !byte_mask;
-                (*dst_ctx).pmpcfg |= cfg_byte << (slot * 8);
-            }
-        }
+        // Reset the PMP address to the shared memory
+        SBI_COVH_GET_TSM_INFO => unsafe {
+            (*tsm_ctx).pmpaddr[2] = 0;
+            (*tsm_ctx).pmpaddr[1] = 0;
+            (*caller_ctx).pmpcfg &= !0xFF << (2 * 8);
+        },
         _ => {}
     }
-    dst_addr
+    state.current_id = dst_id;
+    return unsafe { (*tsm_ctx).caller_ctx };
 }
 
 #[unsafe(naked)]
@@ -382,7 +374,7 @@ fn supd_handler(fid: usize) -> usize {
 
     if fid == SBI_EXT_SUPD_GET_ACTIVE_DOMAINS {
         let mut ret: usize = 0;
-        for d in state.domains.iter() {
+        for d in state.tsms.iter() {
             ret |= 1 << d.id;
         }
         unsafe {

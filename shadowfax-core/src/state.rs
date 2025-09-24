@@ -43,14 +43,11 @@ use alloc::vec::Vec;
 use fdt_rs::{base::DevTree, prelude::FallibleIterator};
 use spin::mutex::Mutex;
 
-use crate::{
-    context::Context,
-    cove::TEE_SCRATCH_SIZE,
-    domain::{Domain, TsmType},
-};
+use crate::{context::Context, cove::TEE_SCRATCH_SIZE, tsm::Tsm};
 
 #[link_section = ".rodata"]
-static DEFAULT_TSM: &[u8] = include_bytes!("../../bin/tsm.bin");
+static DEFAULT_TSM: &[u8] =
+    include_bytes!("../../target/riscv64imac-unknown-none-elf/debug/shadowfax-tsm");
 
 #[link_section = ".rodata"]
 static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../../bin/tsm.bin.signature");
@@ -61,13 +58,15 @@ static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey.pem");
 pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
 pub struct State {
-    pub domains: Vec<Domain>,
+    pub tsms: Vec<Tsm>,
+    pub current_id: usize,
 }
 
 impl State {
     fn new() -> Self {
         Self {
-            domains: Vec::new(),
+            tsms: Vec::new(),
+            current_id: 0,
         }
     }
 }
@@ -84,65 +83,54 @@ pub fn init(fdt_addr: usize) -> Result<(), anyhow::Error> {
 
     let mut node_iter = fdt.compatible_nodes("shadowfax,domain,instance");
     while let Some(node) = node_iter.next().unwrap() {
-        let (domain, start_addr, end_addr) = Domain::from_fdt_node(&node);
+        let mut tsm = Tsm::from_fdt_node(&node);
 
-        // load the correct TSM for now only the default one is supported
-        match domain.tsm_type {
-            // Get trusted supervisor domains
-            TsmType::None => {}
-            // Load the default TSM. This involves:
-            // - verify the hash
-            // - load the TSM into memory
-            TsmType::Default => {
-                Domain::verify_and_load_tsm(
-                    DEFAULT_TSM,
-                    start_addr,
-                    DEFAULT_TSM_SIGN,
-                    DEFAULT_TSM_PUBKEY,
-                )?;
-                let ctx_addr = tee_stack
-                    - (TEE_SCRATCH_SIZE + size_of::<Context>())
-                    - (domain.id + 1) * size_of::<Context>();
-                let hssa = ctx_addr as *mut Context;
+        Tsm::verify_and_load(
+            DEFAULT_TSM,
+            tsm.start_region_addr,
+            DEFAULT_TSM_SIGN,
+            DEFAULT_TSM_PUBKEY,
+        )?;
+        let ctx_addr = tee_stack
+            - (TEE_SCRATCH_SIZE + size_of::<Context>())
+            - (tsm.id + 1) * size_of::<Context>();
+        let hssa = ctx_addr as *mut Context;
 
-                let size = (end_addr - start_addr).next_power_of_two();
-                let base = start_addr & !(size - 1);
+        // Save the context address
+        tsm.context_addr = ctx_addr;
 
-                let k = size.trailing_zeros() as usize;
-                let ones = (1 << (k - 3)) - 1;
+        // Setup PMP entries
+        let start_addr = tsm.start_region_addr;
+        let end_addr = tsm.end_region_addr;
 
-                // Source: https://www.five-embeddev.com/riscv-priv-isa-manual/latest-adoc/machine.html#pmp
-                let pmpaddr = ((base >> 2) as usize) | ones;
-                let locked = false;
-                let range = riscv::register::Range::NAPOT;
-                let permission = riscv::register::Permission::RWX;
-                let index = 0;
-                let byte = (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
-                let pmpcfg = byte << (8 * index);
+        let size = (end_addr - start_addr).next_power_of_two();
+        let base = start_addr & !(size - 1);
 
-                // zero out the tsm supervisor state area
-                // setup basic registers for first context switch
-                unsafe {
-                    core::ptr::write_bytes(hssa, 0, 1);
-                    (*hssa).stvec = start_addr;
-                    (*hssa).mepc = start_addr;
-                    (*hssa).regs[2] = 0x00;
-                    (*hssa).pmpcfg = pmpcfg;
-                    (*hssa).pmpaddr[0] = pmpaddr;
-                }
-            }
-            TsmType::External => {}
+        let k = size.trailing_zeros() as usize;
+        let ones = (1 << (k - 3)) - 1;
+
+        // Source: https://www.five-embeddev.com/riscv-priv-isa-manual/latest-adoc/machine.html#pmp
+        let pmpaddr = ((base >> 2) as usize) | ones;
+        let locked = false;
+        let range = riscv::register::Range::NAPOT;
+        let permission = riscv::register::Permission::RWX;
+        let index = 0;
+        let byte = (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
+        let pmpcfg = byte << (8 * index);
+
+        // zero out the tsm supervisor state area
+        // setup basic registers for first context switch
+        unsafe {
+            core::ptr::write_bytes(hssa, 0, 1);
+            (*hssa).stvec = start_addr;
+            (*hssa).mepc = start_addr;
+            (*hssa).regs[2] = 0x00;
+            (*hssa).pmpcfg = pmpcfg;
+            (*hssa).pmpaddr[0] = pmpaddr;
         }
-        state.domains.push(domain.clone());
-    }
-    // the first active domain is the first untrusted one
-    let starting_domain = state
-        .domains
-        .iter_mut()
-        .find(|c| matches!(c.tsm_type, TsmType::None))
-        .expect("cannot have only TSMs. The system will deadlock");
 
-    starting_domain.active = 1 << starting_domain.id;
+        state.tsms.push(tsm);
+    }
 
     Ok(())
 }

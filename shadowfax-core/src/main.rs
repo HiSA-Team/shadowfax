@@ -51,9 +51,9 @@ mod opensbi {
 }
 
 mod context;
-mod domain;
 mod state;
 mod trap;
+mod tsm;
 
 extern crate alloc;
 
