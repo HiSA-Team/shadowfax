@@ -87,6 +87,11 @@ fn main() {
             // command `make PLATFORM=generic install I=<path-to-shadowfax>`
             .clang_arg("-I")
             .clang_arg(include_path.to_string_lossy())
+            .clang_args([
+                "-mabi=lp64",
+                "-march=rv64imac",
+                "--target=riscv64-unknown-elf",
+            ])
             .derive_debug(true)
             .derive_default(true)
             .ctypes_prefix("::core::ffi")
