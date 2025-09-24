@@ -59,7 +59,7 @@ fn spawn_qemu_and_stream(
 
 #[test]
 fn firmware_boots_correctly() {
-    let firmware = PathBuf::from("../target/riscv64imac-unknown-none-elf/debug/shadowfax-core");
+    let firmware = PathBuf::from("../target/riscv64imac-unknown-none-elf/debug/shadowfax");
     let dtb = PathBuf::from("../bin/device-tree.dtb");
 
     assert!(

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-  "shadowfax-core",
+  "shadowfax",
   "payload/hypervisor",
   "payload/tsm",
   "test",

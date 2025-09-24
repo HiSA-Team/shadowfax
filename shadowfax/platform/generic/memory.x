@@ -10,7 +10,7 @@
 /*
  * FLASH    0x80000000 - 0x803FFFFF
  * RAM_FW   0x80400000 - 0x807FFFFF
- * RAM_TEE  0x80800000 - 0x8083FFFF
+ * RAM_TEE  0x80800000 - 0x809FFFFF
  */
 MEMORY
 {
@@ -29,9 +29,10 @@ REGION_ALIAS("REGION_BOOT_STACK", RAM_TEE);
 REGION_ALIAS("REGION_TEE_MEM", RAM_TEE);
 
 /* variables */
-_stack_size = 0x1000; /* 1k */
-_heap_size = 0x80000; /* 512K */
-_tee_stack_size = 0x100000; /* 1M */
+_stack_size     = 0x1000;   /* 4k  */
+_heap_size      = 0x10000;  /* 64k */
+_tee_stack_size = 0x10000;  /* 64k */
+_tsm_state_size = 0x10000;  /* 64k */
 
 _fw_start = ORIGIN(FLASH);
 
@@ -76,13 +77,20 @@ SECTIONS {
     _top_b_stack = .;
   } > REGION_BOOT_STACK
 
-  .tee_ctx (NOLOAD): ALIGN(4K) {
+  .tee_ram (NOLOAD): ALIGN(4K) {
     /* Heap used by tsm-driver */
     _tee_heap_start = .;
     . += _heap_size;
+
     /* Scratch memory for CoVE interrupt handling and interrupt handling*/
     . = ALIGN(4K);
     . += _tee_stack_size;
     _tee_scratch_start = .;
-    } > REGION_TEE_MEM
+
+    /* Space for TSM state */
+    . = ALIGN(4K);
+    _tsm_state_start = .;
+    . += _tsm_state_size;
+
+  } > REGION_TEE_MEM
 }

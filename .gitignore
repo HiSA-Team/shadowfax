@@ -25,5 +25,5 @@
 !/requirements.txt
 !/rust-toolchain.toml
 !/scripts
-!/shadowfax-core
+!/shadowfax
 !/test

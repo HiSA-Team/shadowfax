@@ -231,16 +231,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hypervisor"
-version = "0.1.0"
-dependencies = [
- "heapless",
- "linked_list_allocator",
- "riscv",
- "spin 0.10.0",
-]
-
-[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -621,7 +611,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "shadowfax-core"
+name = "shadowfax"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -639,11 +629,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "shadowfax-test"
+name = "shadowfax_hypervisor"
 version = "0.1.0"
+dependencies = [
+ "heapless",
+ "linked_list_allocator",
+ "riscv",
+ "spin 0.10.0",
+]
 
 [[package]]
-name = "shadowfax-tsm"
+name = "shadowfax_tsm"
 version = "0.1.0"
 dependencies = [
  "riscv",
@@ -744,6 +740,10 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "test"
+version = "0.1.0"
 
 [[package]]
 name = "typenum"

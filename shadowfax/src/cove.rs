@@ -204,6 +204,9 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             // save the caller into a6 register
             (*tsm_ctx).regs[16] = src_id;
 
+            // save the TSM state into a5
+            (*tsm_ctx).regs[15] = tsm.state_addr;
+
             // save the caller context address into TSM context
             (*tsm_ctx).caller_ctx = caller_ctx_addr;
         }
@@ -216,7 +219,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let addr = unsafe { (*tsm_ctx).regs[10] };
                 let size = unsafe { (*tsm_ctx).regs[11] };
 
-                let slot = 2;
+                let slot = 3;
 
                 // Build the CFG byte for TOR + RW (not locked)
                 let range = riscv::register::Range::TOR as usize;
@@ -266,9 +269,10 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     match fid {
         // Reset the PMP address to the shared memory
         SBI_COVH_GET_TSM_INFO => unsafe {
-            (*tsm_ctx).pmpaddr[2] = 0;
-            (*tsm_ctx).pmpaddr[1] = 0;
-            (*caller_ctx).pmpcfg &= !0xFF << (2 * 8);
+            let slot = 3;
+            (*tsm_ctx).pmpaddr[slot - 1] = 0;
+            (*tsm_ctx).pmpaddr[slot] = 0;
+            (*tsm_ctx).pmpcfg &= !0xFF << (slot * 8);
         },
         _ => {}
     }

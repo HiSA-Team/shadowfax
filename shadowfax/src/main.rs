@@ -67,15 +67,27 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
  * from Rust.
  */
 unsafe extern "C" {
+    // Firmware info
     static _fw_start: u8;
     static _fw_end: u8;
     static _fw_rw_start: u8;
+    // Bss info
     static _start_bss: u8;
     static _end_bss: u8;
+
+    // Boot stack
     static _top_b_stack: u8;
+
+    // Heap info
     static mut _tee_heap_start: u8;
     static _heap_size: u8;
+
+    // Start of the TEE Scratch Stack
     pub static _tee_scratch_start: u8;
+
+    // Space for TSM state
+    pub static _tsm_state_start: u8;
+    pub static _tsm_state_size: u8;
 }
 
 /*
@@ -245,8 +257,10 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
             .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
     };
 
+    let tsm_state_start = unsafe { &_tsm_state_start as *const u8 as usize };
+    let tsm_state_size = unsafe { &_tsm_state_size as *const u8 as usize };
     // initialize shadowfax state which will be used to handle the CoVE SBI
-    state::init(fdt_addr).unwrap();
+    state::init(fdt_addr, tsm_state_start, tsm_state_size).unwrap();
 
     /*
      * This code initializes the scratch space, which is a per-HART data structure

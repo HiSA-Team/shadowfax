@@ -5,11 +5,11 @@ PROFILE ?= debug
 
 # General Directories
 BIN_DIR			= bin
-KEYS_DIR		= shadowfax-core/keys
+KEYS_DIR		= shadowfax/keys
 TARGET_DIR	= target/$(TARGET)/$(PROFILE)
 
 # TSM Files
-TSM_ELF							 = $(TARGET_DIR)/shadowfax-tsm
+TSM_ELF							 = $(TARGET_DIR)/shadowfax_tsm
 TSM_SIG							 = $(BIN_DIR)/tsm.bin.signature
 PRIVATE_KEY					 = $(KEYS_DIR)/privatekey.pem
 PUBLIC_KEY					 = $(KEYS_DIR)/publickey.pem
@@ -27,7 +27,7 @@ all: firmware build-info
 
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm
-	cargo build --target $(TARGET) -p shadowfax-core
+	cargo build --target $(TARGET) -p shadowfax
 
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
 tsm: $(TSM_SIG)
@@ -36,11 +36,11 @@ $(TSM_SIG): $(TSM_ELF)
 	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $@ $<
 
 $(TSM_ELF):
-	cargo build --target $(TARGET) -p shadowfax-tsm
+	cargo build --target $(TARGET) -p shadowfax_tsm
 
 ## test: builds and run the tests
-test: firmware hypervisor
-	cargo test -p shadowfax-test
+test: firmware
+	cargo test -p test
 
 ## generate-keys: generates a couple of RSA keys 2048 bit in shadowfax-core/keys/
 generate-keys:

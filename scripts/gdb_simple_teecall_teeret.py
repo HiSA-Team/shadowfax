@@ -120,6 +120,7 @@ def run() -> None:
     print(
         f"=== Starting COVH TEST TEECALL/TEERET FLOW (#{len(create_tvm_steps)} steps) ===="
     )
+
     for i, step in enumerate(create_tvm_steps):
         print(f"Running step (#{i}) {step['name']}")
 
