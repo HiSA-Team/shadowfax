@@ -9,18 +9,12 @@ KEYS_DIR		= shadowfax-core/keys
 TARGET_DIR	= target/$(TARGET)/$(PROFILE)
 
 # TSM Files
-TSM_ELF							 = $(BIN_DIR)/tsm.elf
-TSM_BIN							 = $(BIN_DIR)/tsm.bin
+TSM_ELF							 = $(TARGET_DIR)/shadowfax-tsm
 TSM_SIG							 = $(BIN_DIR)/tsm.bin.signature
 PRIVATE_KEY					 = $(KEYS_DIR)/privatekey.pem
 PUBLIC_KEY					 = $(KEYS_DIR)/publickey.pem
 
-# Hypervisor Files
-HYPERVISOR_ELF					= $(BIN_DIR)/hypervisor.elf
-HYPERVISOR_BIN					= $(BIN_DIR)/hypervisor.bin
-GUEST_DIR								= payload/hypervisor/guests
-
-.PHONY: all clean firmware tsm hypervisor test generate-keys help info
+.PHONY: all clean firmware tsm test generate-keys help info
 
 ifeq ($(OPENSBI_PATH),)
 $(error OPENSBI_PATH not set. Run: source environment.sh <opensbi-path>)
@@ -29,7 +23,7 @@ endif
 # ensure the bin directory is created
 $(shell mkdir -p $(BIN_DIR))
 
-all: firmware hypervisor build-info
+all: firmware build-info
 
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm
@@ -38,24 +32,11 @@ firmware: tsm
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
 tsm: $(TSM_SIG)
 
-$(TSM_SIG): $(TSM_BIN)
+$(TSM_SIG): $(TSM_ELF)
 	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $@ $<
 
 $(TSM_ELF):
 	cargo build --target $(TARGET) -p shadowfax-tsm
-	cp $(TARGET_DIR)/shadowfax-tsm $@
-
-## hypervisor: build the Hypervisor
-hypervisor: $(HYPERVISOR_BIN)
-
-$(HYPERVISOR_ELF):
-	$(MAKE) -C $(GUEST_DIR)
-	cargo build --target $(TARGET) -p hypervisor
-	cp $(TARGET_DIR)/hypervisor $@
-
-# general rule to convert elf to binary
-$(BIN_DIR)/%.bin: $(BIN_DIR)/%.elf
-	$(OBJCOPY) -O binary $< $@
 
 ## test: builds and run the tests
 test: firmware hypervisor
@@ -82,7 +63,6 @@ build-info:
 clean:
 	cargo clean
 	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig
-	$(MAKE) -C $(GUEST_DIR) clean
 
 ## help: display this help message
 help:
