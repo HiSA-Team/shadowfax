@@ -36,6 +36,7 @@ fn panic(_info: &PanicInfo) -> ! {
 const STACK_SIZE_PER_HART: usize = 1024 * 8;
 
 const SBI_COVH_GET_TSM_INFO: usize = 0;
+const SBI_COVH_CONVERT_PAGES: usize = 1;
 const SBI_COVH_CREATE_TVM: usize = 5;
 const EID_COVH: usize = 0x434F5648;
 
@@ -71,9 +72,9 @@ extern "C" fn _start() -> ! {
 fn main(
     a0: usize,
     a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
+    _a2: usize,
+    _a3: usize,
+    _a4: usize,
     a5: usize,
     a6: usize,
     a7: usize,
@@ -98,6 +99,13 @@ fn main(
                 a0: 0,
                 a1: core::mem::size_of::<TsmInfo>() as isize,
             }
+        }
+        SBI_COVH_CONVERT_PAGES => {
+            let state = unsafe { state.as_mut() };
+
+            state.add_confidential_pages(a0, a1).unwrap();
+
+            SbiRet { a0: 0, a1: 0 }
         }
         // assume we are going to create a single TVM for now.
         SBI_COVH_CREATE_TVM => {

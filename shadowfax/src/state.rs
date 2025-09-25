@@ -169,6 +169,8 @@ pub fn init(
             (*tsm_ctx).pmpaddr[1] = pmpaddr;
         }
 
+        tsm.next_pmp_slot = 2;
+
         state.tsms.push(tsm);
     }
 

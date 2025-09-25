@@ -19,6 +19,7 @@ use crate::{_tee_scratch_start, context::Context, opensbi, state::STATE};
 
 pub const COVH_EXT_ID: usize = 0x434F5648;
 pub const SBI_COVH_GET_TSM_INFO: usize = 0;
+pub const SBI_COVH_CONVERT_PAGES: usize = 1;
 
 pub const SUPD_EXT_ID: usize = 0x53555044;
 pub const SBI_EXT_SUPD_GET_ACTIVE_DOMAINS: usize = 0;
@@ -169,7 +170,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let scratch_ctx = base_ctx as *mut Context;
 
     let (dst_id, fid) = cove_unpack_fid!(fid);
-    let tsm = state.tsms.iter().find(|d| d.id == dst_id);
+    let tsm = state.tsms.iter_mut().find(|d| d.id == dst_id);
 
     // TEECALL
     if let Some(tsm) = tsm {
@@ -219,7 +220,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let addr = unsafe { (*tsm_ctx).regs[10] };
                 let size = unsafe { (*tsm_ctx).regs[11] };
 
-                let slot = 3;
+                let slot = 7;
 
                 // Build the CFG byte for TOR + RW (not locked)
                 let range = riscv::register::Range::TOR as usize;
@@ -236,6 +237,47 @@ extern "C" fn covh_handler(fid: usize) -> usize {
 
                     (*tsm_ctx).pmpcfg &= !byte_mask;
                     (*tsm_ctx).pmpcfg |= cfg_byte << (slot * 8);
+                }
+            }
+            SBI_COVH_CONVERT_PAGES => {
+                let start_addr = unsafe { (*tsm_ctx).regs[10] };
+                let num_pages = unsafe { (*tsm_ctx).regs[11] };
+                let slot = tsm.next_pmp_slot;
+
+                if slot < 6 {
+                    // TODO: remove these pages from the caller PMP
+                    // setup pmp entry for the block of pages requested
+                    let end_addr = start_addr + num_pages * 4096;
+
+                    let size = (end_addr - start_addr).next_power_of_two();
+                    let base = start_addr & !(size - 1);
+
+                    let k = size.trailing_zeros() as usize;
+                    let ones = (1 << (k - 3)) - 1;
+
+                    let pmpaddr = ((base >> 2) as usize) | ones;
+                    let locked = false;
+                    let range = riscv::register::Range::NAPOT;
+                    let permission = riscv::register::Permission::RW;
+                    let byte =
+                        (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
+                    let pmpcfg = byte << (8 * slot);
+
+                    unsafe {
+                        (*tsm_ctx).pmpcfg |= pmpcfg;
+                        (*tsm_ctx).pmpaddr[slot] = pmpaddr;
+                    }
+
+                    tsm.next_pmp_slot += 1;
+                } else {
+                    // no more pmp slot available, return an error
+                    unsafe {
+                        (*scratch_ctx).regs[10] = usize::MAX;
+                        (*scratch_ctx).regs[11] = 0;
+                        // increment mepc to avoid loop
+                        (*scratch_ctx).mepc += 4;
+                    }
+                    return base_ctx;
                 }
             }
             _ => {}
@@ -269,7 +311,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     match fid {
         // Reset the PMP address to the shared memory
         SBI_COVH_GET_TSM_INFO => unsafe {
-            let slot = 3;
+            let slot = 7;
             (*tsm_ctx).pmpaddr[slot - 1] = 0;
             (*tsm_ctx).pmpaddr[slot] = 0;
             (*tsm_ctx).pmpcfg &= !0xFF << (slot * 8);

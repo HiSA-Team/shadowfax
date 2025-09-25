@@ -22,6 +22,7 @@ pub struct Tsm {
 
     pub context_addr: usize,
     pub state_addr: usize,
+    pub next_pmp_slot: usize,
 }
 
 impl Tsm {
@@ -33,6 +34,7 @@ impl Tsm {
             end_region_addr: 0,
             context_addr: 0,
             state_addr: 0,
+            next_pmp_slot: 0,
         }
     }
 
