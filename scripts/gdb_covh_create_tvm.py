@@ -7,6 +7,7 @@ from typing import Callable, Dict, List, Optional, Any
 EID_COVH_ID: int = 0x434F5648
 
 COVH_GET_TSM_INFO: int = 0
+COVH_CONVERT_PAGES: int = 1
 COVH_CREATE_TVM: int = 5
 COVH_FINALIZE_TVM: int = 6
 COVH_DESTROY_TVM: int = 8
@@ -36,6 +37,10 @@ def assert_create_tvm() -> None:
 def assert_create_vcpu() -> None:
     a0 = int(gdb.parse_and_eval("$a0"))
     assert a0 == -1, f"ecall should not be implemented yet and returns -1({a0})"
+
+
+def setup_create_tvm_params() -> None:
+    pass
 
 
 class PayloadBP(gdb.Breakpoint):
@@ -109,18 +114,90 @@ def run() -> None:
                 "a3": 0,
                 "a4": 0,
                 "a5": 0,
-                "a6": 1 << 26 | (COVH_GET_TSM_INFO & 0xFFFF),
+                "a6": COVH_GET_TSM_INFO,
                 "a7": EID_COVH_ID,
             },
             "setup_mem_fn": None,
             "assert_fn": None,
         },
+        {
+            "name": "convert_pages",
+            "regs": {
+                "a0": payload_address + 0x1000,
+                "a1": 128,
+                "a2": 0,
+                "a3": 0,
+                "a4": 0,
+                "a5": 0,
+                "a6": COVH_CONVERT_PAGES,
+                "a7": EID_COVH_ID,
+            },
+            "setup_mem_fn": None,
+            "assert_fn": assert_get_tsm_info,
+        },
+        {
+            "name": "create_tvm",
+            "regs": {
+                "a0": payload_address + 0x1000,
+                "a1": 16,
+                "a2": 0,
+                "a3": 0,
+                "a4": 0,
+                "a5": 0,
+                "a6": COVH_CREATE_TVM,
+                "a7": EID_COVH_ID,
+            },
+            "setup_mem_fn": None,
+            "assert_fn": assert_get_tsm_info,
+        },
+        {
+            "name": "create_vcpu",
+            "regs": {
+                "a0": payload_address + 0x1000,
+                "a1": 48,
+                "a2": 0,
+                "a3": 0,
+                "a4": 0,
+                "a5": 0,
+                "a6": COVH_CREATE_TVM_VCPU,
+                "a7": EID_COVH_ID,
+            },
+            "setup_mem_fn": None,
+            "assert_fn": assert_create_tvm,
+        },
+        {
+            "name": "finalize_tvm",
+            "regs": {
+                "a0": payload_address + 0x1000,
+                "a1": 48,
+                "a2": 0,
+                "a3": 0,
+                "a4": 0,
+                "a5": 0,
+                "a6": COVH_FINALIZE_TVM,
+                "a7": EID_COVH_ID,
+            },
+            "setup_mem_fn": None,
+            "assert_fn": assert_create_vcpu,
+        },
+        {
+            "name": "tvm_run",
+            "regs": {
+                "a0": payload_address + 0x1000,
+                "a1": 48,
+                "a2": 0,
+                "a3": 0,
+                "a4": 0,
+                "a5": 0,
+                "a6": COVH_HOST_RUN_TVM_VCPU,
+                "a7": EID_COVH_ID,
+            },
+            "setup_mem_fn": None,
+            "assert_fn": assert_get_tsm_info,
+        },
     ]
 
-    print(
-        f"=== Starting COVH TEST TEECALL/TEERET FLOW (#{len(create_tvm_steps)} steps) ===="
-    )
-
+    print(f"=== Starting COVH CREATE TVM FLOW (#{len(create_tvm_steps)} steps) ====")
     for i, step in enumerate(create_tvm_steps):
         print(f"Running step (#{i}) {step['name']}")
 
