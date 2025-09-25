@@ -4,6 +4,7 @@
 *.bin
 *.o
 /**/keys
+/**/__pycache__
 
 # Exclude everything except these folders in root
 /*
