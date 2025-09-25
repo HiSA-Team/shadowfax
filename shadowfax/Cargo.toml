@@ -18,6 +18,7 @@ features = ["static"]
 
 [dependencies]
 anyhow = { version = "1.0.98", default-features = false }
+common  = { path = "../common/" }
 digest = "0.10.7"
 elf = { version = "0.7.2", default-features = false }
 fdt-rs = {version = "0.4", default-features = false }

@@ -12,6 +12,7 @@
 !/.github
 !/.gitignore
 !/.pre-commit-config.yaml
+!/common
 !/config.mk
 !/Cargo.lock
 !/Cargo.toml

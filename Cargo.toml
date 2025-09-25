@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
-  "shadowfax",
+  "common",
   "payload/hypervisor",
   "payload/tsm",
+  "shadowfax",
   "test",
 ]

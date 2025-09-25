@@ -4,8 +4,7 @@
 
 use core::{panic::PanicInfo, ptr::NonNull};
 
-mod state;
-use crate::state::{State, TsmInfo};
+use common::tsm::{Guest, State, TsmInfo};
 
 #[repr(C)]
 struct SbiRet {
@@ -44,7 +43,7 @@ extern "C" fn _start() -> ! {
         r#"
         .attribute arch, "rv64imac"
         // Save the a5 register (state address) into s9 to allow sp computation
-        mv s9, a5
+        add s9, a5, zero
 
         add a5, zero, zero
         li t0, {stack_size_per_hart}
@@ -52,7 +51,7 @@ extern "C" fn _start() -> ! {
         la sp, {stack_top}
         sub sp, sp, t1
 
-        mv a5, s9
+        add a5, s9, zero
         call {main}
         "#,
 
@@ -77,7 +76,7 @@ fn main(
     assert_eq!(a7, EID_COVH);
 
     let fid = a6 & 0xFF;
-    let state = unsafe {
+    let mut state = unsafe {
         FirmwareState::from_addr(a5).expect("firmware didn't provide state pointer in a5")
     };
 
@@ -94,7 +93,19 @@ fn main(
                 a1: core::mem::size_of::<TsmInfo>() as isize,
             }
         }
-        SBI_COVH_CREATE_TVM => SbiRet { a0: 0, a1: 1 },
+        // assume we are going to create a single TVM for now.
+        SBI_COVH_CREATE_TVM => {
+            let state = unsafe { state.as_mut() };
+
+            let guest = Guest::new();
+            let id = guest.id;
+
+            state.guest = Some(guest);
+            SbiRet {
+                a0: id as isize,
+                a1: 0,
+            }
+        }
         _ => SbiRet { a0: -1, a1: 0 },
     };
 
