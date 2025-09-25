@@ -99,6 +99,10 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "heapless",
+]
 
 [[package]]
 name = "const-oid"
@@ -648,6 +652,7 @@ name = "shadowfax_tsm"
 version = "0.1.0"
 dependencies = [
  "common",
+ "linked_list_allocator",
  "riscv",
 ]
 

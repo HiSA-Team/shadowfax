@@ -2,12 +2,15 @@
 #![no_main]
 
 pub mod tsm {
+    use heapless::Vec;
+
+    const MAX_PAGE_BLOCKS: usize = 4;
 
     #[repr(C)]
     pub struct State {
         pub info: TsmInfo,
         pub guest: Option<Guest>,
-        confidential_memory: [(usize, usize); 32],
+        confidential_memory: Vec<(usize, usize), MAX_PAGE_BLOCKS>,
     }
 
     impl State {
@@ -23,8 +26,25 @@ pub mod tsm {
                     tvm_vcpu_state_pages: 0,
                 },
                 guest: None,
-                confidential_memory: [(0, 0); 32],
+                confidential_memory: Vec::<(usize, usize), MAX_PAGE_BLOCKS>::new(),
             }
+        }
+        pub fn add_confidential_pages(
+            &mut self,
+            base_page_addr: usize,
+            num_pages: usize,
+        ) -> anyhow::Result<()> {
+            self.confidential_memory
+                .push((base_page_addr, num_pages))
+                .map_err(|c| {
+                    anyhow::anyhow!(
+                        "out of confidential memory; failed to insert {} pages from {}",
+                        c.1,
+                        c.0
+                    )
+                })?;
+
+            Ok(())
         }
     }
 

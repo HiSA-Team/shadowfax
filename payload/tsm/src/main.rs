@@ -6,6 +6,12 @@ use core::{panic::PanicInfo, ptr::NonNull};
 
 use common::tsm::{Guest, State, TsmInfo};
 
+use linked_list_allocator::LockedHeap;
+
+#[global_allocator]
+/// Global allocator.
+static ALLOCATOR: LockedHeap = LockedHeap::empty();
+
 #[repr(C)]
 struct SbiRet {
     a0: isize,
