@@ -15,5 +15,5 @@ break shadowfax_tsm::main
 
 define qemu-reset
   delete breakpoint
-  shell socat - TCP:127.0.0.1:4444 <<< "system_reset"
+  shell echo "system_reset" | socat - unix-connect:/tmp/shadowfax-qemu-monitor | tail --lines=+2 | grep -v '^(qemu)'
 end
