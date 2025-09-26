@@ -202,8 +202,10 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 (*tsm_ctx).regs[i] = (*caller_ctx).regs[i];
             }
 
-            // save the caller into a6 register
-            (*tsm_ctx).regs[16] = src_id;
+            // save the caller into a6 register, but we must preserve the EID.
+            // The caller id must be saved in bits [31:26]
+            let eid = (*tsm_ctx).regs[16] & 0xFFFF;
+            (*tsm_ctx).regs[16] = ((src_id & 0x3F) << 26) | eid;
 
             // save the TSM state into a5
             (*tsm_ctx).regs[15] = tsm.state_addr;
@@ -229,7 +231,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let cfg_byte = (locked << 7) | (range << 3) | (perm);
 
                 // Mask out old byte for slot 1 in pmpcfg0
-                let byte_mask = 0xff << (slot * 8);
+                let byte_mask = 0xFF << (slot * 8);
 
                 unsafe {
                     (*tsm_ctx).pmpaddr[slot - 1] = addr >> 2;
@@ -312,9 +314,10 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         // Reset the PMP address to the shared memory
         SBI_COVH_GET_TSM_INFO => unsafe {
             let slot = 7;
+            let byte_mask = 0xFF << (slot * 8);
             (*tsm_ctx).pmpaddr[slot - 1] = 0;
             (*tsm_ctx).pmpaddr[slot] = 0;
-            (*tsm_ctx).pmpcfg &= !0xFF << (slot * 8);
+            (*tsm_ctx).pmpcfg &= !byte_mask;
         },
         _ => {}
     }
@@ -419,7 +422,8 @@ fn supd_handler(fid: usize) -> usize {
     let dst_ctx = dst_addr as *mut Context;
 
     if fid == SBI_EXT_SUPD_GET_ACTIVE_DOMAINS {
-        let mut ret: usize = 0;
+        // root supervisor domain is mandatory
+        let mut ret: usize = 1;
         for d in state.tsms.iter() {
             ret |= 1 << d.id;
         }
