@@ -23,10 +23,9 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
 
     assert prev is not None, "expecting the previous context not None"
     tsm_info_addr = prev["regs"]["a0"]
-    tsm_state = read_mem(tsm_info_addr, 4)
-    tsm_impl_id = read_mem(tsm_info_addr, 4)
 
     # read TsmInfo as bytes in one shot. The TsmInfo struct is defined in "common/src/lib.rs" as follows:
+    # Due to the memory alignement (TsmState is a u32), there is an extra u32 before the capabilities
     # struct TsmInfo {
     #     pub tsm_state: TsmState,
     #     pub tsm_impl_id: u32,
