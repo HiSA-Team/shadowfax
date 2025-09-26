@@ -26,16 +26,45 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     tsm_state = read_mem(tsm_info_addr, 4)
     tsm_impl_id = read_mem(tsm_info_addr, 4)
 
-    # read 8 bytes in one shot (state @ addr, impl id @ addr+4)
-    raw = read_mem(tsm_info_addr, 8)
-    if not isinstance(raw, (bytes, bytearray)) or len(raw) < 8:
-        raise AssertionError(f"failed to read 8 bytes at {hex(tsm_info_addr)}: {raw!r}")
+    # read TsmInfo as bytes in one shot. The TsmInfo struct is defined in "common/src/lib.rs" as follows:
+    # struct TsmInfo {
+    #     pub tsm_state: TsmState,
+    #     pub tsm_impl_id: u32,
+    #     pub tsm_version: u32,
+    #     pub tsm_capabilities: usize,
+    #     pub tvm_state_pages: usize,
+    #     pub tvm_max_vcpus: usize,
+    #     pub tvm_vcpu_state_pages: usize,
+    # }
+    tsm_info_bytes = (4 * 4) + (8 * 4)
+    raw = read_mem(tsm_info_addr, tsm_info_bytes)
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) < tsm_info_bytes:
+        raise AssertionError(
+            f"failed to read {tsm_info_bytes} bytes at {hex(tsm_info_addr)}: {raw!r}"
+        )
 
-    tsm_state = struct.unpack("<I", raw[:4])[0]
-    tsm_impl_id = struct.unpack("<I", raw[4:8])[0]
+    (
+        tsm_state,
+        tsm_impl_id,
+        tsm_version,
+        _padding,
+        tsm_capabilities,
+        tvm_state_pages,
+        tvm_max_vcpus,
+        tvm_vcpu_state_pages,
+    ) = struct.unpack("<IIIIQQQQ", raw)
 
     assert tsm_state == 2, f"tsm_state must be 2; current {tsm_state}"
     assert tsm_impl_id == 69, f"tsm_impl_id must be 69; current {tsm_impl_id}"
+    assert tsm_version == 0, f"tsm_version must be 0; current  {tsm_version}"
+    assert tsm_capabilities == 0, (
+        f"tsm_capabilities must be 0; current {tsm_capabilities}"
+    )
+    assert tvm_state_pages == 0, f"tvm_state_pages must be 0; current {tvm_state_pages}"
+    assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
+    assert tvm_vcpu_state_pages == 0, (
+        f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
+    )
 
 
 def run() -> None:
