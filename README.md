@@ -8,7 +8,7 @@ confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC
 computing is defined in the RISC-V AP-TEE specification, also known as CoVE
 (**Co**nfidential **V**irtualization **E**xtension).
 
-This code is tested on `riscv64imac` with Privilege ISA **v1.10**.
+This code is tested on `riscv64imac` with Privilege ISA **v1.12**.
 
 Further details can be found in the [documentation](https://granp4sso.github.io/shadowfax/).
 
@@ -90,6 +90,27 @@ docker run -v $(pwd):/shadowfax -w /shadowfax --network=host -it shadowfax-build
 
 If using modern editors like VS-code, the repository supports [devcontainer workspaces](https://containers.dev/) and should automatically
 ask you to create a new workspace when creating using the `.devcontainer/devcontainer.json` file.
+
+## Running on QEMU
+Users can run the firmware on QEMU using:
+```sh
+qemu-system-riscv64 -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait -nographic \
+    -M virt -m 32M -smp 1\
+    -dtb bin/device-tree.dtb \
+    -bios target/riscv64imac-unknown-none-elf/debug/shadowfax \
+    -s -S
+```
+
+This will stop the emulator on the first instruction. You can setup a basic teecall/teeret example
+in another terminal with a remote gdb session. For example, to test a basic program that uses `sbi_covh_get_tsm_info`
+function run:
+
+```sh
+gdb -x scripts/gdb_settings -x scripts/sbi_covh_get_tsm_info.py
+
+# step through multiple breakpoints
+(gdb) continue
+```
 
 ## Contributing
 This repository uses [pre-commit](https://pre-commit.com/). Before contributing, setup your environment
