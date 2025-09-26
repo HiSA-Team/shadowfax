@@ -12,3 +12,8 @@ add-symbol-file target/riscv64imac-unknown-none-elf/debug/shadowfax_tsm 0x80A000
 
 # break shadowfax_core::trap::handler
 break shadowfax_tsm::main
+
+define qemu-reset
+  delete breakpoint
+  shell socat - TCP:127.0.0.1:4444 <<< "system_reset"
+end
