@@ -9,8 +9,22 @@ if this_dir not in sys.path:
 
 from gdb_covh_flow import Step, TestRunner, read_mem
 
+EID_SUPD_ID: int = 0x53555044
 EID_COVH_ID: int = 0x434F5648
+
+SUPD_GET_ACTIVE_DOMAINS: int = 0
+
 COVH_GET_TSM_INFO: int = 0
+
+
+def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    a1 = regs["a1"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+    assert a1 & 0x3 == 3, (
+        f"a1 must be contains tsm (id=1) and the root domain (id=0) bit set (0x3) (current {a1})"
+    )
 
 
 def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
@@ -72,6 +86,24 @@ def run() -> None:
     print(f"S-Mode address 0x{payload_address:x}")
 
     runner = TestRunner(payload_address)
+
+    runner.add_step(
+        Step(
+            name="enumerate_supervisor_domains",
+            regs={
+                "a0": 0,
+                "a1": 0,
+                "a2": 0,
+                "a3": 0,
+                "a4": 0,
+                "a5": 0,
+                "a6": SUPD_GET_ACTIVE_DOMAINS,
+                "a7": EID_SUPD_ID,
+            },
+            setup_mem_fn=None,
+            assert_fn=assert_get_active_domains,
+        )
+    )
 
     runner.add_step(
         Step(
