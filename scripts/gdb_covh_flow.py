@@ -1,5 +1,4 @@
 import gdb
-import os
 import struct
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Any
@@ -68,6 +67,10 @@ class PreBP(gdb.Breakpoint):
         step = self.runner.steps[self.step_index]
 
         # Allow step to set up memory/registers before the ECALL executes
+        if step.regs:
+            for reg, val in step.regs.items():
+                gdb.execute(f"set ${reg} = {val}")
+
         if step.setup_mem_fn is not None:
             try:
                 step.setup_mem_fn()
@@ -77,10 +80,6 @@ class PreBP(gdb.Breakpoint):
                 )
                 # stop so the user can inspect if setup failed
                 return True
-
-        if step.regs:
-            for reg, val in step.regs.items():
-                gdb.execute(f"set ${reg} = {val}")
 
         # Capture "prev" snapshot (state before ECALL executes)
         prev_snapshot = {"regs": read_regs(self.runner.regs_to_snapshot), "mem": {}}
@@ -210,7 +209,7 @@ class TestRunner:
         """
         inf = gdb.selected_inferior()
         # install step ecall words and PreBP breakpoints
-        for i, _ in enumerate(self.steps):
+        for i, step in enumerate(self.steps):
             ecall_addr = self.payload_address + 8 * i
             nop_addr = ecall_addr + 4
 
@@ -220,10 +219,10 @@ class TestRunner:
             print(f"Wrote nop at 0x{nop_addr:x}")
 
             PreBP(ecall_addr, i, self)
-            print(f"Installed PreBP (step {i}) at 0x{ecall_addr:x}")
+            print(f"Installed PreBP (step {i} - {step.name}) at 0x{ecall_addr:x}")
 
             PostBP(nop_addr, i, self)
-            print(f"Installed PostBP (step {i}) at 0x{nop_addr:x}")
+            print(f"Installed PostBP (step {i} - {step.name}) at 0x{nop_addr:x}")
 
         # write an ebreak
         ebreak_addr = self.payload_address + 8 * len(self.steps)
