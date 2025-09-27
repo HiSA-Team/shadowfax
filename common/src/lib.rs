@@ -9,7 +9,7 @@ pub mod tsm {
     #[repr(C)]
     pub struct State {
         pub info: TsmInfo,
-        pub guest: Option<Guest>,
+        pub tvm: Option<Tvm>,
         confidential_memory: Vec<(usize, usize), MAX_PAGE_BLOCKS>,
     }
 
@@ -25,7 +25,7 @@ pub mod tsm {
                     tvm_max_vcpus: 1,
                     tvm_vcpu_state_pages: 0,
                 },
-                guest: None,
+                tvm: None,
                 confidential_memory: Vec::<(usize, usize), MAX_PAGE_BLOCKS>::new(),
             }
         }
@@ -46,19 +46,49 @@ pub mod tsm {
 
             Ok(())
         }
+
+        pub fn create_tvm(
+            &mut self,
+            page_table_addr: usize,
+            state_addr: usize,
+        ) -> anyhow::Result<usize> {
+            self.tvm = Some(Tvm::new(page_table_addr, state_addr));
+
+            // TODO: init page table and init tvm state
+
+            Ok(1)
+        }
+
+        pub fn destroy_tvm(&mut self) -> anyhow::Result<()> {
+            match &self.tvm {
+                Some(tvm) => {
+                    //TODO: destroy pagetable, destroy the state
+                    // Mark page as unusable
+                    self.tvm = None;
+                    Ok(())
+                }
+                None => {
+                    todo!()
+                }
+            }
+        }
     }
 
     #[repr(C)]
-    pub struct Guest {
+    pub struct Tvm {
         pub id: usize,
         pub vcpu_state: [u64; 32],
+        pub page_table_addr: usize,
+        pub state_addr: usize,
     }
 
-    impl Guest {
-        pub fn new() -> Self {
+    impl Tvm {
+        fn new(page_table_addr: usize, state_addr: usize) -> Self {
             Self {
                 id: 1,
                 vcpu_state: [0; 32],
+                page_table_addr,
+                state_addr,
             }
         }
     }
