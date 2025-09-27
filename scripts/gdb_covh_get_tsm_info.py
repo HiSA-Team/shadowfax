@@ -44,6 +44,7 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     #     pub tsm_state: TsmState,
     #     pub tsm_impl_id: u32,
     #     pub tsm_version: u32,
+    #     _padding: u32: extra 32-bit because YES.
     #     pub tsm_capabilities: usize,
     #     pub tvm_state_pages: usize,
     #     pub tvm_max_vcpus: usize,
