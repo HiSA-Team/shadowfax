@@ -31,6 +31,7 @@ pub mod tsm {
                     tsm_state: TsmState::TsmReady,
                     tsm_impl_id: 69,
                     tsm_version: 69,
+                    _padding: 0,
                     tsm_capabilities: 0,
                     tvm_state_pages: 1,
                     tvm_max_vcpus: 1,
@@ -222,6 +223,10 @@ pub mod tsm {
          * Version number of the running TSM.
          */
         pub tsm_version: u32,
+        /*
+         * Making padding explicit.
+         */
+        _padding: u32,
         /*
          * A bitmask of CoVE features supported by the running TSM, see `TSM Capabilities`
          * table below. Every bit in this field corresponds to a capability defined by
