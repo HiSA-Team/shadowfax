@@ -56,7 +56,6 @@ mod trap;
 mod tsm;
 
 extern crate alloc;
-
 #[global_allocator]
 /// Global allocator.
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
@@ -71,19 +70,21 @@ unsafe extern "C" {
     static _fw_start: u8;
     static _fw_end: u8;
     static _fw_rw_start: u8;
+
+    // heap
+    static mut _heap_start: u8;
+    static _heap_size: u8;
+
     // Bss info
     static _start_bss: u8;
     static _end_bss: u8;
 
     // Boot stack
-    static _top_b_stack: u8;
-
-    // Heap info
-    static mut _tee_heap_start: u8;
-    static _heap_size: u8;
+    static _boot_stack_top: u8;
+    static _boot_stack_size: u8;
 
     // Start of the TEE Scratch Stack
-    pub static _tee_scratch_start: u8;
+    pub static _tee_stack_top: u8;
 
     // Space for TSM state
     pub static _tsm_state_start: u8;
@@ -96,12 +97,12 @@ unsafe extern "C" {
 #[inline(never)]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    debug!("{}", info);
+    print_raw!("{}", info);
     loop {}
 }
 
 // Stack size per HART: 8K
-const STACK_SIZE_PER_HART: usize = 4096 * 2;
+const STACK_SIZE_PER_HART: usize = 1024 * 8;
 
 /// The _start function is the first function loaded at the starting address of
 /// the linkerscript. This function:
@@ -166,7 +167,7 @@ extern "C" fn _start() -> ! {
         call {main}
         "#,
         stack_size_per_hart = const STACK_SIZE_PER_HART,
-        stack_top = sym _top_b_stack,
+        stack_top = sym _boot_stack_top,
         hang = sym hang,
         fw_platform_init = sym opensbi::fw_platform_init,
         main = sym main,
@@ -234,20 +235,24 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         );
         riscv::register::mscratch::write(0);
     }
+
+    dump_linker_symbols();
+
+    // this enables heap allocations
+    unsafe {
+        // Initialize global allocator
+        ALLOCATOR.lock().init(
+            core::ptr::addr_of_mut!(_heap_start),
+            core::ptr::addr_of!(_heap_size) as usize,
+        );
+    }
+
     // setup a temporary trap handler (just a busy loop)
     // so we can debug if there are errors
     unsafe {
         use riscv::register::mtvec::Mtvec;
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
-    }
-    // this enables heap allocations
-    unsafe {
-        // Initialize global allocator
-        ALLOCATOR.lock().init(
-            core::ptr::addr_of_mut!(_tee_heap_start),
-            core::ptr::addr_of!(_heap_size) as usize,
-        );
     }
     // prepare the next stage. If SHADOWFAX_JUMP_ADDRESS is specified, jump to that address (the
     // user will load that payload). Otherwise fallback to empty payload which does nothing
@@ -259,6 +264,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 
     let tsm_state_start = unsafe { &_tsm_state_start as *const u8 as usize };
     let tsm_state_size = unsafe { &_tsm_state_size as *const u8 as usize };
+
     // initialize shadowfax state which will be used to handle the CoVE SBI
     state::init(fdt_addr, tsm_state_start, tsm_state_size).unwrap();
 
@@ -440,6 +446,31 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
             "add sp, tp, {}", in(reg) opensbi::SBI_SCRATCH_SIZE
         );
         opensbi::sbi_init(sbi_scratch_addr)
+    }
+}
+
+// a small helper to print an address using the print_raw! macro
+fn dump_linker_symbols() {
+    // print a header
+    print_raw!("[BOOT]: Linker symbols:\n");
+
+    unsafe {
+        let symbols: &[(&str, usize)] = &[
+            ("_fw_start", &_fw_start as *const u8 as usize),
+            ("_fw_end", &_fw_end as *const u8 as usize),
+            ("_fw_rw_start", &_fw_rw_start as *const u8 as usize),
+            ("_start_bss", &_start_bss as *const u8 as usize),
+            ("_end_bss", &_end_bss as *const u8 as usize),
+            ("_boot_stack_top", &_boot_stack_top as *const u8 as usize),
+            ("_tee_stack_top", &_tee_stack_top as *const u8 as usize),
+            ("_tsm_state_start", &_tsm_state_start as *const u8 as usize),
+            ("_tsm_state_size", &_tsm_state_size as *const u8 as usize),
+        ];
+
+        for (name, addr) in symbols {
+            // use format_args via print_raw to keep code small:
+            print_raw!("  {:20} = {:#018x}\n", name, addr);
+        }
     }
 }
 

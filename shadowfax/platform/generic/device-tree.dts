@@ -102,7 +102,7 @@
 				compatible = "shadowfax,domain,instance";
 				id = <0x1>;
 				trust = <0x0>;
-				memory = <0x0 0x80A00000 0x0 0x80FFFFFF>;
+				memory = <0x0 0x81400000 0x0 0x81FFFFFF>;
 			};
 		};
 	};

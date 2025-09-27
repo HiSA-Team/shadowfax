@@ -15,7 +15,7 @@
 
 use core::mem::offset_of;
 
-use crate::{_tee_scratch_start, context::Context, opensbi, state::STATE};
+use crate::{_tee_stack_top, context::Context, opensbi, state::STATE};
 
 pub const COVH_EXT_ID: usize = 0x434F5648;
 pub const SBI_COVH_GET_TSM_INFO: usize = 0;
@@ -139,7 +139,7 @@ pub fn tee_handler_entry() -> ! {
         li a0, 1
         j {tee_handler_exit}
         ",
-        tee_stack = sym _tee_scratch_start,
+        tee_stack = sym _tee_stack_top,
         covh_ext_id = const COVH_EXT_ID,
         context_size= const size_of::<Context>(),
         scratch_size = const TEE_SCRATCH_SIZE,
@@ -165,7 +165,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let state = guard.get_mut().unwrap();
 
     // scratch context base pointer
-    let scratch_start = &raw const _tee_scratch_start as *const u8 as usize;
+    let scratch_start = &raw const _tee_stack_top as *const u8 as usize;
     let base_ctx = scratch_start - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let scratch_ctx = base_ctx as *mut Context;
 
@@ -207,8 +207,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             let eid = (*tsm_ctx).regs[16] & 0xFFFF;
             (*tsm_ctx).regs[16] = ((src_id & 0x3F) << 26) | eid;
 
-            // save the TSM state into a5
-            (*tsm_ctx).regs[15] = tsm.state_addr;
+            // save the TSM state into t0
+            (*tsm_ctx).regs[5] = tsm.state_addr;
 
             // save the caller context address into TSM context
             (*tsm_ctx).caller_ctx = caller_ctx_addr;
@@ -404,7 +404,7 @@ pub fn supd_handler_entry() -> ! {
         li a0, 0
         j {tee_handler_exit}
     ",
-        tee_stack = sym _tee_scratch_start,
+        tee_stack = sym _tee_stack_top,
         supd_ext_id = const SUPD_EXT_ID,
         context_size= const size_of::<Context>(),
         scratch_size = const TEE_SCRATCH_SIZE,
@@ -417,7 +417,7 @@ pub fn supd_handler_entry() -> ! {
 fn supd_handler(fid: usize) -> usize {
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
-    let scratch_addr = &raw const _tee_scratch_start as *const u8 as usize;
+    let scratch_addr = &raw const _tee_stack_top as *const u8 as usize;
     let dst_addr = scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let dst_ctx = dst_addr as *mut Context;
 

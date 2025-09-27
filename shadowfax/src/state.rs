@@ -47,8 +47,7 @@ use spin::mutex::Mutex;
 use crate::{context::Context, cove::TEE_SCRATCH_SIZE, tsm::Tsm};
 
 #[link_section = ".rodata"]
-static DEFAULT_TSM: &[u8] =
-    include_bytes!("../../target/riscv64imac-unknown-none-elf/debug/shadowfax_tsm");
+static DEFAULT_TSM: &[u8] = include_bytes!("../../target/riscv64imac-unknown-none-elf/debug/tsm");
 
 #[link_section = ".rodata"]
 static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../../bin/tsm.bin.signature");
@@ -84,7 +83,7 @@ pub fn init(
     let mut state = STATE.lock();
     let state = state.get_mut_or_init(|| State::new());
 
-    let tee_stack = &raw const crate::_tee_scratch_start as *const u8 as usize;
+    let tee_stack = &raw const crate::_tee_stack_top as *const u8 as usize;
 
     let mut node_iter = fdt.compatible_nodes("shadowfax,domain,instance");
     while let Some(node) = node_iter.next().unwrap() {
