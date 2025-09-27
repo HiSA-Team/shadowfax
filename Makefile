@@ -9,7 +9,7 @@ KEYS_DIR		= shadowfax/keys
 TARGET_DIR	= target/$(TARGET)/$(PROFILE)
 
 # TSM Files
-TSM_ELF							 = $(TARGET_DIR)/shadowfax_tsm
+TSM_ELF							 = $(TARGET_DIR)/tsm
 TSM_SIG							 = $(BIN_DIR)/tsm.bin.signature
 PRIVATE_KEY					 = $(KEYS_DIR)/privatekey.pem
 PUBLIC_KEY					 = $(KEYS_DIR)/publickey.pem
@@ -36,7 +36,7 @@ $(TSM_SIG): $(TSM_ELF)
 	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $@ $<
 
 $(TSM_ELF):
-	cargo build --target $(TARGET) -p shadowfax_tsm
+	cargo build --target $(TARGET) -p tsm
 
 ## test: builds and run the tests
 test: firmware

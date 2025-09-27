@@ -8,10 +8,10 @@ target remote localhost:1234
 file target/riscv64imac-unknown-none-elf/debug/shadowfax
 
 # load tsm elf file for debug symbols
-add-symbol-file target/riscv64imac-unknown-none-elf/debug/shadowfax_tsm 0x80A00000
+add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm 0x80140000
 
 # break shadowfax_core::trap::handler
-break shadowfax_tsm::main
+break tsm::main
 
 define qemu-reset
   delete breakpoint

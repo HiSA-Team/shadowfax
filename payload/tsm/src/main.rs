@@ -4,7 +4,7 @@
 
 use core::{panic::PanicInfo, ptr::NonNull};
 
-use common::tsm::{Guest, State, TsmInfo};
+use common::tsm::{State, TsmInfo, Tvm};
 
 use linked_list_allocator::LockedHeap;
 
@@ -38,27 +38,29 @@ const STACK_SIZE_PER_HART: usize = 1024 * 8;
 const SBI_COVH_GET_TSM_INFO: usize = 0;
 const SBI_COVH_CONVERT_PAGES: usize = 1;
 const SBI_COVH_CREATE_TVM: usize = 5;
+const SBI_COVH_DESTROY_TVM: usize = 8;
 const EID_COVH: usize = 0x434F5648;
 
 #[no_mangle]
 #[unsafe(naked)]
 #[link_section = "._start"]
 extern "C" fn _start() -> ! {
+    /*
+     * TSM entry point. The TSM acts as "trap handler for CoVE" so we must preserve a0-a7 registers
+     * as they contains ECALL parameters.
+     *
+     * We define a custom "ABI". TSM Expects the State Address (initialized by the TSM Driver) in
+     * t0: it must not be clobbered.
+     */
     core::arch::naked_asm!(
-        // setup up the stack
-        // a0-a4 contains TEECALL parameters. We must preserve them
         r#"
         .attribute arch, "rv64imac"
-        // Save the a5 register (state address) into s9 to allow sp computation
-        add s9, a5, zero
 
-        add a5, zero, zero
-        li t0, {stack_size_per_hart}
-        mul t1, a5, t0
+        // setup up the stack
+        li t1, {stack_size_per_hart}
         la sp, {stack_top}
         sub sp, sp, t1
 
-        add a5, s9, zero
         call {main}
         "#,
 
@@ -75,17 +77,20 @@ fn main(
     _a2: usize,
     _a3: usize,
     _a4: usize,
-    a5: usize,
+    _a5: usize,
     a6: usize,
     a7: usize,
 ) -> ! {
+    let mut state_addr: usize;
+    unsafe {
+        core::arch::asm!("add {}, t0, zero", out(reg) state_addr, options(readonly, nostack))
+    };
+
     // The TSM should be called only for CoVH
     assert_eq!(a7, EID_COVH);
 
     let fid = a6 & 0xFF;
-    let mut state = unsafe {
-        FirmwareState::from_addr(a5).expect("firmware didn't provide state pointer in a5")
-    };
+    let mut state = unsafe { FirmwareState::from_addr(state_addr).expect("Invalid state address") };
 
     let ret = match fid {
         SBI_COVH_GET_TSM_INFO => {
@@ -103,21 +108,26 @@ fn main(
         SBI_COVH_CONVERT_PAGES => {
             let state = unsafe { state.as_mut() };
 
-            state.add_confidential_pages(a0, a1).unwrap();
-
-            SbiRet { a0: 0, a1: 0 }
+            match state.add_confidential_pages(a0, a1) {
+                Ok(_) => SbiRet { a0: 0, a1: 0 },
+                Err(_) => SbiRet { a0: -1, a1: 0 },
+            }
         }
-        // assume we are going to create a single TVM for now.
         SBI_COVH_CREATE_TVM => {
             let state = unsafe { state.as_mut() };
-
-            let guest = Guest::new();
-            let id = guest.id;
-
-            state.guest = Some(guest);
-            SbiRet {
-                a0: id as isize,
-                a1: 0,
+            match state.create_tvm(a0, a1) {
+                Ok(id) => SbiRet {
+                    a0: 0,
+                    a1: id as isize,
+                },
+                Err(_) => SbiRet { a0: -1, a1: 0 },
+            }
+        }
+        SBI_COVH_DESTROY_TVM => {
+            let state = unsafe { state.as_mut() };
+            match state.destroy_tvm() {
+                Ok(_) => SbiRet { a0: 0, a1: 0 },
+                Err(_) => SbiRet { a0: -1, a1: 0 },
             }
         }
         _ => SbiRet { a0: -1, a1: 0 },

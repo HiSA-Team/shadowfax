@@ -1,5 +1,5 @@
 [package]
-name = "shadowfax_tsm"
+name = "tsm"
 version = "0.1.0"
 edition = "2021"
 
