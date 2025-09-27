@@ -115,7 +115,14 @@ fn main(
         }
         SBI_COVH_CREATE_TVM => {
             let state = unsafe { state.as_mut() };
-            match state.create_tvm(a0, a1) {
+            assert!(a1 == 16);
+            let tvm_params = unsafe {
+                let page_table_address = core::ptr::read(a0 as *const usize);
+                let state_address = core::ptr::read((a0 + 8) as *const usize);
+                (page_table_address, state_address)
+            };
+
+            match state.create_tvm(tvm_params.0, tvm_params.1) {
                 Ok(id) => SbiRet {
                     a0: 0,
                     a1: id as isize,
@@ -147,9 +154,10 @@ fn main(
         );
     };
 }
+
 /// Small typed wrapper around the firmware-provided pointer.
 ///
-/// All `unsafe` pointer casting happens in `from_a5()`; the rest of the code
+/// All `unsafe` pointer casting happens in `from_addr()`; the rest of the code
 /// uses safe methods where possible.
 pub struct FirmwareState {
     ptr: NonNull<State>,

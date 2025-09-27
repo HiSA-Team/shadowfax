@@ -69,11 +69,11 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
 
     assert tsm_state == 2, f"tsm_state must be 2; current {tsm_state}"
     assert tsm_impl_id == 69, f"tsm_impl_id must be 69; current {tsm_impl_id}"
-    assert tsm_version == 0, f"tsm_version must be 0; current  {tsm_version}"
+    assert tsm_version == 69, f"tsm_version must be 0; current  {tsm_version}"
     assert tsm_capabilities == 0, (
         f"tsm_capabilities must be 0; current {tsm_capabilities}"
     )
-    assert tvm_state_pages == 0, f"tvm_state_pages must be 0; current {tvm_state_pages}"
+    assert tvm_state_pages == 1, f"tvm_state_pages must be 0; current {tvm_state_pages}"
     assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
     assert tvm_vcpu_state_pages == 0, (
         f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
