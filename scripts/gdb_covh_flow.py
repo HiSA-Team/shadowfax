@@ -195,7 +195,7 @@ class TestRunner:
     def add_step(self, step: Step) -> None:
         self.steps.append(step)
 
-    def install_breakpoints(self) -> None:
+    def install_breakpoints(self, install_ebreak=False) -> None:
         """
         For each step:
          - write ECALL_WORD at payload_address + 8*i
@@ -225,11 +225,12 @@ class TestRunner:
             print(f"Installed PostBP (step {i} - {step.name}) at 0x{nop_addr:x}")
 
         # write an ebreak
-        ebreak_addr = self.payload_address + 8 * len(self.steps)
-        inf.write_memory(ebreak_addr, EBREAK_WORD)
-        print(f"Wrote ebreak instruction at 0x{ebreak_addr:x}")
+        if install_ebreak:
+            ebreak_addr = self.payload_address + 8 * len(self.steps)
+            inf.write_memory(ebreak_addr, EBREAK_WORD)
+            print(f"Wrote ebreak instruction at 0x{ebreak_addr:x}")
 
         # write infinite loop to ensure the program to hang
-        loop_addr = ebreak_addr + 4
+        loop_addr = self.payload_address + (8 + 1) * len(self.steps)
         inf.write_memory(loop_addr, JAL_LOOP_WORD)
         print(f"Wrote loop instruction at 0x{loop_addr:x}")
