@@ -204,7 +204,7 @@ class TestRunner:
          - install a temporary PostBP breakpoint at nop addr
 
         After all steps:
-         - write EBREAK_WORD after the ECALL/NOP "program"
+         - (optional) write EBREAK_WORD after the ECALL/NOP "program"
          - write JAL_LOOP_WORD after the EBREAK_WORD to prevent the pc growing to infinite
         """
         inf = gdb.selected_inferior()
@@ -225,12 +225,14 @@ class TestRunner:
             print(f"Installed PostBP (step {i} - {step.name}) at 0x{nop_addr:x}")
 
         # write an ebreak
+        next_addr = self.payload_address + 8 * len(self.steps)
         if install_ebreak:
-            ebreak_addr = self.payload_address + 8 * len(self.steps)
+            ebreak_addr = next_addr
             inf.write_memory(ebreak_addr, EBREAK_WORD)
             print(f"Wrote ebreak instruction at 0x{ebreak_addr:x}")
+            next_addr += 4
 
         # write infinite loop to ensure the program to hang
-        loop_addr = self.payload_address + (8 + 1) * len(self.steps)
+        loop_addr = next_addr
         inf.write_memory(loop_addr, JAL_LOOP_WORD)
         print(f"Wrote loop instruction at 0x{loop_addr:x}")
