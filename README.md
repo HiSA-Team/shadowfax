@@ -109,8 +109,8 @@ qemu-system-riscv64 -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait -nog
 ```
 
 This will stop the emulator on the first instruction. You can setup a basic teecall/teeret example
-in another terminal with a remote gdb session. For example, to test a basic program that uses `sbi_covh_get_tsm_info`
-function run:
+in another terminal with a remote gdb session. For example, to test a basic program that calls
+`sbi_covh_get_tsm_info` function run:
 
 ```sh
 gdb -x scripts/gdb_settings -x scripts/sbi_covh_get_tsm_info.py
@@ -118,6 +118,28 @@ gdb -x scripts/gdb_settings -x scripts/sbi_covh_get_tsm_info.py
 # step through multiple breakpoints
 (gdb) continue
 ```
+
+A more complicated example with a _synthetic_ TVM can be executed by running:
+```sh
+gdb -x scripts/gdb_settings -x scripts/sbi_covh_create_tvm.py
+
+# step through multiple breakpoints
+(gdb) continue
+```
+
+The `sbi_covh_create_tvm.py` script will perform the following action simulating the creation of a
+trusted virtual machine which will be performed by a CoVE-aware (untrusted) OS/Hypervisor:
+
+- perform supervisor domain enumeration
+- check TSM capabilities
+- donate some memory to the TSM (which will become confidential memory)
+- create the TVM objects
+- add TVM memory region
+- copy the src code of the TVM in the donated region
+- create the TVM vcpu
+- run the TVM vpcu
+
+The TVM code is just an infinite loop for demonstration purposes.
 
 ## Contributing
 This repository uses [pre-commit](https://pre-commit.com/). Before contributing, setup your environment
