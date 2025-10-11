@@ -27,7 +27,7 @@ all: firmware build-info
 
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm
-	cargo build --target $(TARGET) -p shadowfax
+	RUSTFLAGS="-C target-feature=+h" cargo build --target $(TARGET) -p shadowfax
 
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
 tsm: $(TSM_SIG)
@@ -36,7 +36,7 @@ $(TSM_SIG): $(TSM_ELF)
 	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $@ $<
 
 $(TSM_ELF):
-	cargo build --target $(TARGET) -p tsm
+	RUSTFLAGS="-C target-feature=+h" cargo build --target $(TARGET) -p tsm
 
 ## test: builds and run the tests
 test: firmware
