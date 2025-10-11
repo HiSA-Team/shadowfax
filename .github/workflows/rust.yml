@@ -25,7 +25,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodule: true
+        submodules: true
 
     # cache dependencies
     - uses: actions/cache@v4
