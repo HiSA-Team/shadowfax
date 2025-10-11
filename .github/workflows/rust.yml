@@ -49,7 +49,7 @@ jobs:
     - name: Setup host
       run: |
         # install packages
-        sudo apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
+        sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
         autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
         device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
         libexpat-dev libgmp-dev  libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
