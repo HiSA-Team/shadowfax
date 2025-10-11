@@ -1,7 +1,7 @@
 use core::{error::Error, fmt::Display};
 
 use alloc::vec::Vec;
-use elf::{abi::PT_LOAD, endian::AnyEndian, segment::ProgramHeader, ElfBytes};
+use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 use fdt_rs::{
     base::DevTreeNode,
     prelude::{FallibleIterator, PropReader},

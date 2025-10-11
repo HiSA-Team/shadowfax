@@ -8,7 +8,7 @@ confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC
 computing is defined in the RISC-V AP-TEE specification, also known as CoVE
 (**Co**nfidential **V**irtualization **E**xtension).
 
-This code is tested on `riscv64imac` with Privilege ISA **v1.12**.
+This code is tested on `riscv64imac` with Privilege ISA **v1.12** with OpenSBI **v1.6**.
 
 Further details can be found in the [documentation](https://granp4sso.github.io/shadowfax/).
 
@@ -20,8 +20,15 @@ The codename `shadowfax project` has the following goals:
 - Write the implementation in a memory-safe language (e.g., Rust).
 
 ### OpenSBI integration
-Shadowfax is an *M-mode* firmware which uses [**OpenSBI**](https://github.com/riscv-software-src/opensbi) as
-static library. Shadowfax registers 2 SBI extensions described in the [CoVE specification](https://github.com/riscv-non-isa/riscv-ap-tee)
+Shadowfax is an *M-mode* firmware which uses [**OpenSBI**](https://github.com/riscv-software-src/opensbi)
+as static library. OpenSBI is included as a _git submodule_ in `shadowfax/opensbi` and it will be
+built together with the firmware using `shadowfax/build.rs` script. Thus, users will need to clone:
+
+```sh
+git clone --recursive https://github.com/HiSA-Team/shadowfax
+```
+
+Shadowfax registers 2 SBI extensions described in the [CoVE specification](https://github.com/riscv-non-isa/riscv-ap-tee)
 which are:
 
 - SUPD: supervisor doamin extension to enumerate active supervisor domain and get capabilities information on them;

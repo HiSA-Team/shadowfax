@@ -20,11 +20,6 @@ print_info() { printf '%b[INFO]%b %s\n' "$GREEN" "$RESET" "$1" >&2; }
 print_export() { printf '%b[EXPORT]%b %s=%s\n' "$BLUE" "$RESET" "$1" "$2" >&2; }
 print_warn() { printf '%b[WARNING]%b %s\n' "$YELLOW" "$RESET" "$1" >&2; }
 
-if [ -z "$OPENSBI_PATH" ]; then
-  echo "you may forgot to source the scripts/environment.sh file"
-  exit 1
-fi
-
 if [ "$(id -u)" -ne 0 ]; then
   print_err "this script requires root privileges"
   exit 1
@@ -51,12 +46,13 @@ get_distro_codename() {
 # Function to install necessary build dependencies based on the distribution codename
 install_dependencies() {
   case "$DISTRO_CODENAME" in
-  # ubuntu 24.04, ubuntu 22.04, debian 12, debian 11
-  noble | jammy | bookworm | bullseye)
+  # ubuntu 24.04, ubuntu 22.04, debian 12
+  noble | jammy | bookworm)
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-      qemu-system-riscv64 gcc-riscv64-linux-gnu build-essential qemu-utils \
-      libncurses-dev bison flex libssl-dev device-tree-compiler python3 \
-      libelf-dev dwarves curl git file cpio sudo bc libclang-dev ca-certificates
+    autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
+    device-tree-compiler flex gawk git gperf libclang-dev libelf-dev \
+    libexpat-dev libgmp-dev libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
+    make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev \
     if [ "$architecture" != "riscv64" ]; then
       DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-"$LIBC_PREFIX"
     fi
@@ -88,19 +84,6 @@ install_rust() {
   else
     print_info "Running on RISC-V architecture, skipping Rust RISC-V target setup."
   fi
-}
-
-# Function to download, build, and install OpenSBI
-install_opensbi() {
-  print_info "Downloading opensbi source"
-  su $USER_NAME -c "curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz"
-
-  print_info "Extracting opensbi source"
-  mkdir -p ${OPENSBI_PATH}
-  su $USER_NAME -c "tar xf ${TEMP_DIR}/opensbi-${OPENSBI_VERSION}.tar.gz -C ${OPENSBI_PATH} --strip-components=1"
-
-  # build opensbi
-  su $USER_NAME -c "make -C ${OPENSBI_PATH} PLATFORM=${PLATFORM}"
 }
 
 # Function to download, build, and install Clang from source for musl-based systems
@@ -145,13 +128,6 @@ print_info "detected distribution dodename: ${DISTRO_CODENAME}"
 
 install_dependencies
 install_rust
-
-if [ ! -d "$OPENSBI_PATH" ]; then
-  print_info "installing opensbi in ${OPENSBI_PATH}"
-  install_opensbi
-else
-  print_warn "skipping OpenSBI installation"
-fi
 
 if [ "$LIBC_PREFIX" = "musl" ]; then
   print_warn "Building Clang from source for musl-based system. This may take some time..."

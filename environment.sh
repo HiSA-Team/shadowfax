@@ -21,24 +21,9 @@ print_export() { printf '%b[EXPORT]%b %s=%s\n' "$BLUE" "$RESET" "$1" "$2" >&2; }
 print_warn() { printf '%b[WARNING]%b %s\n' "$YELLOW" "$RESET" "$1" >&2; }
 
 # Config parameters
-OPENSBI_PATH="$1"
 LLVM_VERSION="${LLVM_VERSION:-17.0.6}"
 OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
 PLATFORM="${PLATFORM:-generic}"
-
-if [ -z "$OPENSBI_PATH" ]; then
-  print_err "missing OPENSBI_PATH"
-  return 1
-fi
-
-export OPENSBI_PATH="$(realpath ${OPENSBI_PATH})"
-print_export "OPENSBI_PATH" "${OPENSBI_PATH}"
-
-export OPENSBI_VERSION="${OPENSBI_VERSION}"
-print_export "OPENSBI_VERSION" "${OPENSBI_VERSION}"
-
-export PLATFORM="${PLATFORM}"
-print_export "PLATFORM" "${PLATFORM}"
 
 get_libc() {
   if ldd --version 2>&1 | grep -q musl; then
@@ -47,6 +32,12 @@ get_libc() {
     echo "glibc"
   fi
 }
+
+export PLATFORM="${PLATFORM}"
+print_export "PLATFORM" "${PLATFORM}"
+
+export RUSTFLAGS="-C target-feature=+h"
+print_export "RUSTFLAGS" "$RUSTFLAGS"
 
 export ARCHITECTURE=$(uname -m)
 print_export "ARCHITECTURE" "$ARCHITECTURE"

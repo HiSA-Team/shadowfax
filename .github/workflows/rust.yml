@@ -19,16 +19,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      OPENSBI_VERSION: 1.6
       PLATFORM: generic
-      SHADOWFAX_JUMP_ADDRESS: 0x81000000
+      SHADOWFAX_JUMP_ADDRESS: 0x82000000
 
     steps:
     - uses: actions/checkout@v4
-
-    # -> set OPENSBI_PATH using OPENSBI_VERSION (available via env) for later run: steps
-    - name: Set OPENSBI_PATH
-      run: echo "OPENSBI_PATH=/tmp/opensbi-${OPENSBI_VERSION}" >> $GITHUB_ENV
+      with:
+        submodule: true
 
     # cache dependencies
     - uses: actions/cache@v4
@@ -36,7 +33,7 @@ jobs:
       with:
         path: |
           /tmp/apt-cache/archives/*.deb
-          /tmp/opensbi-${{ env.OPENSBI_VERSION }}
+          /tmp/qemu-10.1.1/
         key: ${{ runner.os }}-${{ hashFiles('scripts/setup.sh') }}
         restore-keys: |
           ${{ runner.os }}-
@@ -46,27 +43,26 @@ jobs:
       run: |
         sudo mkdir -p /var/cache/apt/archives
         sudo cp -r /tmp/apt-cache/archives/* /var/cache/apt/archives/ || true
-
-    - name: Download OpenSBI
-      if: steps.cache.outputs.cache-hit != 'true'
-      run: |
-        mkdir -p "${OPENSBI_PATH}"
-        curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${OPENSBI_PATH}.tar.gz
-        tar xf ${OPENSBI_PATH}.tar.gz -C ${OPENSBI_PATH} --strip-components=1
+        sudo make -C /tmp/qemu-10.1.1 install
 
     # TODO: reuse scripts/setup.sh
-    - name: Setup host (install deps and OpenSBI)
+    - name: Setup host
       run: |
-        . environment.sh ${OPENSBI_PATH}
-
         # install packages
-        sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-        qemu-system-riscv64 gcc-riscv64-linux-gnu make libssl-dev device-tree-compiler python3 \
-        libelf-dev curl file sudo bc libclang-dev
+        sudo apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
+        autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
+        device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
+        libexpat-dev libgmp-dev  libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
+        make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev
 
-        # build opensbi
-        make -C ${OPENSBI_PATH} PLATFORM=${PLATFORM}
-
+    - name: Download, build and install QEMU
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        curl -fsSL https://download.qemu.org/qemu-10.1.1.tar.xz -o /tmp/qemu-10.1.1.tar.xz
+        tar xvJf /tmp/qemu-10.1.1.tar.xz -C /tmp/
+        cd /tmp/qemu-10.1.1 && ./configure --target-list=riscv64-softmmu
+        make -C /tmp/qemu-10.1.1 -j $(nproc)
+        sudo make -C /tmp/qemu-10.1.1 install
 
     - name: Save cache
       if: steps.cache.outputs.cache-hit != 'true'
@@ -85,6 +81,5 @@ jobs:
     - name: Build and test
       run: |
         qemu-system-riscv64 --version || true
-        . environment.sh ${OPENSBI_PATH}
-        mkdir -p bin
-        make clean info generate-keys test
+        source environment.sh
+        make generate-keys test

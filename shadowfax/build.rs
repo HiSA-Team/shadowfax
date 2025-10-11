@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::{env, fs};
 
-const PLATFORM_BASE: &str = "platform";
+const PLATFORM_BASE_DIR: &str = "platform";
 
 fn main() {
     // Ensure the bin/ folder exists.
@@ -24,23 +24,32 @@ fn main() {
     let bin_dir = PathBuf::from("../bin");
     fs::create_dir_all(&bin_dir).unwrap();
 
-    let opensbi_path = env::var("OPENSBI_PATH").map(PathBuf::from).
-        expect("OPENSBI_PATH must be set; run `source environment.sh <opensbi-path>` or set OPENSBI_PATH in your environment");
+    let opensbi_path = PathBuf::from("opensbi");
 
     // Sourcing `environment.sh` allows users to specify a PLATFORM (defaults to 'generic').
     // Retrieve platform details if exists otherwise throw an error
     let platform = env::var("PLATFORM").unwrap_or_else(|_| "generic".to_string());
 
-    let platform_dir = PathBuf::from(PLATFORM_BASE).join(&platform);
+    let platform_dir = PathBuf::from(PLATFORM_BASE_DIR).join(&platform);
 
-    // Copy the linkerscript where rust can find it and configure the linker
     // Setup linker:
-    // - links opensbi
-    // - specify linkerscript
+    // - build and link opensbi
+    // - link linkerscript
     {
+        let status = std::process::Command::new("make")
+            .args(["-C", &opensbi_path.to_string_lossy()])
+            .status()
+            .expect("failed to build opensbi");
+        if !status.success() {
+            panic!("OpenSBI build failed with status: {}", status);
+        }
+
         let linkerscript_in = platform_dir.join("memory.x");
         let linkerscript_out = out_dir.join("memory.x");
-        let libopensbi_path = opensbi_path.join(format!("build/platform/{}/lib", &platform));
+        let libopensbi_path = opensbi_path
+            .join(format!("build/platform/{}/lib", &platform))
+            .canonicalize()
+            .unwrap();
         std::fs::copy(&linkerscript_in, &linkerscript_out).unwrap();
         configure_linker(&linkerscript_out, &libopensbi_path);
 
@@ -83,10 +92,9 @@ fn main() {
             .use_core()
             // pass our `wrapper.h`
             .header("wrapper.h")
-            // this is the include directory installed from opensbi using the
-            // command `make PLATFORM=generic install I=<path-to-shadowfax>`
             .clang_arg("-I")
             .clang_arg(include_path.to_string_lossy())
+            //TODO: make the target architecture variable
             .clang_args([
                 "-mabi=lp64",
                 "-march=rv64imac",
