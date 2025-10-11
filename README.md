@@ -32,7 +32,7 @@ Shadowfax registers 2 SBI extensions described in the [CoVE specification](https
 which are:
 
 - SUPD: supervisor doamin extension to enumerate active supervisor domain and get capabilities information on them;
-- CoVE-H: cove host extension. It allows for **TVM** management for hosts;
+- CoVE-H: cove host extension. It allows **TVM** management for hosts;
 
 The CoVE specification also introduces the **CoVE-I** SBI extension. It allows to supplements CoVE-H with hardware-assisted
 interrupt virtualization using RISC-V **Advanced Interrupt Architecture**(*AIA*), if the platform supports it.
@@ -41,21 +41,19 @@ For now, shadowfax **does not** implement this part of the specification.
 ## Environment setup
 
 To export relevant environment variables, users will need to source the `environment.sh` file specifing
-an OpenSBI path. This script does not install anything but configures the current shell with correct settings for
-platform detection.
+an OpenSBI path. This script does not install anything but configures the current shell with correct
+settings for platform detection.
 
 ```
-source environment.sh <opensbi-path>
+source environment.sh
 ```
 
 ### Dependency installation
 
 Shadowfax generates automatically OpenSBI bindings using `bindgen` API in `build.rs`.
 
-> [!NOTE]
-> if you are building on a **musl** system make sure to check out the [building on musl systems](#building-on-musl-systems).
-
-The `scripts` directory contains utilities to help setup the shadowafax build environment. More information [here](/scripts/README.md).
+The `scripts` directory contains utilities to help setup the shadowafax build environment.
+More information [here](/scripts/README.md).
 
 All dependencies can be installed with the `scripts/setup.sh` script.
 
@@ -77,7 +75,8 @@ export LLVM_CONFIG_PATH=$(pwd)/scripts/llvm-config.sh
 Due to some bugs in [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#environment-variables), the `scripts/llvm-config.sh` is needed as a workaround as described [here](https://github.com/rust-lang/rust-bindgen/issues/2360).
 
 ### Unsupported distributions
-If your distribution is not supported by the script, you can install required dependencies by yourself or refer to the [Docker setup](#docker-setup). You need:
+If your distribution is not supported by the script, you can install required dependencies by
+yourself or refer to the [Docker setup](#docker-setup). You need:
 
 - a riscv64 toolchain: to compile source code and examples;
 - qemu (for riscv64): to run programs in an emulated machine;
@@ -87,12 +86,12 @@ If your distribution is not supported by the script, you can install required de
 ### Docker and devcontainer setup
 For unsupported distributions or for users that want a consistent build environment,
 a debian-based Docker image can be built and executed in container using `Dockerfile`:
+
 ```sh
 docker build -t shadowfax-build \
     --build-arg USER_ID=$(id -u) \
     --build-arg PLATFORM=generic \
-    --build-arg OPENSBI=1.6 .
-docker run -v $(pwd):/shadowfax -w /shadowfax --network=host -it shadowfax-build
+docker run -v $(pwd):/shadowfax -w /shadowfax -it shadowfax-build
 ```
 
 If using modern editors like VS-code, the repository supports [devcontainer workspaces](https://containers.dev/) and should automatically
@@ -100,9 +99,10 @@ ask you to create a new workspace when creating using the `.devcontainer/devcont
 
 ## Running on QEMU
 Users can run the firmware on QEMU using:
+
 ```sh
 qemu-system-riscv64 -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait -nographic \
-    -M virt -m 32M -smp 1\
+    -M virt -m 64M -smp 1 \
     -dtb bin/device-tree.dtb \
     -bios target/riscv64imac-unknown-none-elf/debug/shadowfax \
     -s -S
@@ -130,14 +130,14 @@ gdb -x scripts/gdb_settings -x scripts/sbi_covh_create_tvm.py
 The `sbi_covh_create_tvm.py` script will perform the following action simulating the creation of a
 trusted virtual machine which will be performed by a CoVE-aware (untrusted) OS/Hypervisor:
 
-- perform supervisor domain enumeration
+- perform supervisor domain enumeration (discovers the TSM)
 - check TSM capabilities
 - donate some memory to the TSM (which will become confidential memory)
 - create the TVM objects
 - add TVM memory region
 - copy the src code of the TVM in the donated region
-- create the TVM vcpu
-- run the TVM vpcu
+- create the TVM vCPU
+- run the TVM vCPU
 
 The TVM code is just an infinite loop for demonstration purposes.
 
