@@ -75,7 +75,7 @@ impl Tsm {
 
     pub fn verify_and_load(
         bin: &[u8],
-        start_addr: usize,
+        _start_addr: usize,
         signature: &[u8],
         public_key: &[u8],
     ) -> Result<(), anyhow::Error> {
@@ -89,10 +89,7 @@ impl Tsm {
             .map_err(TsmError::SignatureError)?;
 
         // load the tsm into the destination address
-        // unsafe {
-        //     core::ptr::copy_nonoverlapping(bin.as_ptr(), start_addr as *mut u8, bin.len());
-        // }
-        let size = Self::load_elf_from_address(bin, start_addr)?;
+        let size = Self::load_elf(bin)?;
 
         assert!(size > 0);
 
@@ -103,67 +100,59 @@ impl Tsm {
         self.trust_map & (1 << dst) != 0
     }
 
-    fn load_elf_from_address(data: &[u8], base_address: usize) -> anyhow::Result<usize> {
+    fn load_elf(data: &[u8]) -> anyhow::Result<usize> {
         let elf = ElfBytes::<AnyEndian>::minimal_parse(data).unwrap();
-        let all_load_phdrs = elf
+
+        let segments = elf
             .segments()
-            .unwrap()
-            .iter()
-            .filter(|phdr| phdr.p_type == PT_LOAD)
-            .collect::<Vec<ProgramHeader>>();
+            .ok_or_else(|| anyhow::anyhow!("ELF has no program headers"))?;
 
-        let min_vaddr = all_load_phdrs
-            .iter()
-            .map(|phdr| phdr.p_vaddr)
-            .min()
-            .unwrap();
+        // Collect only loadable segments
+        let load_segments: Vec<_> = segments.iter().filter(|ph| ph.p_type == PT_LOAD).collect();
 
-        // Calculate the offset to relocate segments to base_address
-        let relocation_offset = base_address as u64 - min_vaddr;
-        let mut max_loaded_addr = base_address;
+        if load_segments.is_empty() {
+            return Err(anyhow::anyhow!("No loadable segments found"));
+        }
 
-        // Load the ELF in memory starting from the base address
-        for segment in all_load_phdrs {
-            // Get segment details
-            let p_offset = segment.p_offset as usize;
-            let p_filesz = segment.p_filesz as usize;
-            let p_vaddr = segment.p_vaddr;
-            let p_memsz = segment.p_memsz as usize;
+        let mut max_loaded_addr = 0usize;
+        let mut min_loaded_addr = usize::MAX;
 
-            // Calculate the target address with relocation
-            let target_addr = (p_vaddr + relocation_offset) as usize;
+        // Load each PT_LOAD segment
+        for ph in &load_segments {
+            let p_offset = ph.p_offset as usize;
+            let p_filesz = ph.p_filesz as usize;
+            let p_vaddr = ph.p_vaddr as usize;
+            let p_memsz = ph.p_memsz as usize;
 
-            // Check if the segment data is within bounds
+            // Bounds check
             if p_offset + p_filesz > data.len() {
-                panic!("Segment data out of bounds");
+                return Err(anyhow::anyhow!("Segment data out of bounds"));
             }
 
-            // Copy the segment data to relocated address
+            // Copy data into memory (dangerous — assumes addresses are valid)
             if p_filesz > 0 {
-                let segment_data = &data[p_offset..p_offset + p_filesz];
+                let src = &data[p_offset..p_offset + p_filesz];
                 unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        segment_data.as_ptr(),
-                        target_addr as *mut u8,
-                        p_filesz,
-                    );
+                    core::ptr::copy_nonoverlapping(src.as_ptr(), p_vaddr as *mut u8, p_filesz);
                 }
             }
 
-            // Zero any .bss past the end of file
+            // Zero-fill .bss section
             if p_memsz > p_filesz {
-                let bss_start = (target_addr + p_filesz) as *mut u8;
+                let bss_start = (p_vaddr + p_filesz) as *mut u8;
                 let bss_len = p_memsz - p_filesz;
                 unsafe {
                     core::ptr::write_bytes(bss_start, 0, bss_len);
                 }
             }
 
-            // Track the highest loaded address
-            max_loaded_addr = max_loaded_addr.max(target_addr + p_memsz);
+            // Track memory range
+            min_loaded_addr = min_loaded_addr.min(p_vaddr);
+            max_loaded_addr = max_loaded_addr.max(p_vaddr + p_memsz);
         }
 
-        Ok(max_loaded_addr - base_address)
+        // Return total size loaded in memory
+        Ok(max_loaded_addr - min_loaded_addr)
     }
 }
 

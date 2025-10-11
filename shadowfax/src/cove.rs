@@ -260,7 +260,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     let pmpaddr = ((base >> 2) as usize) | ones;
                     let locked = false;
                     let range = riscv::register::Range::NAPOT;
-                    let permission = riscv::register::Permission::RW;
+                    let permission = riscv::register::Permission::RWX;
                     let byte =
                         (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
                     let pmpcfg = byte << (8 * slot);

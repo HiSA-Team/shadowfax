@@ -1,15 +1,96 @@
 #![no_std]
 #![no_main]
+#![feature(never_type)]
 
+mod h_extension;
 pub mod tsm {
     use heapless::Vec;
+    use riscv::register::{
+        satp, sepc,
+        sstatus::{self, FS},
+        stvec::{self, Stvec},
+    };
 
+    use crate::h_extension::{
+        csrs::{
+            VsInterruptKind,
+            hedeleg::{self, ExceptionKind},
+            hgatp, hideleg, hstatus, hvip, vsatp,
+        },
+        instruction::hfence_gvma_all,
+    };
+
+    const MAX_VCPU_PER_TVM: usize = 1;
     const MAX_PAGE_BLOCKS: usize = 4;
     const PAGE_SIZE: usize = 4096;
     const PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
     const MAX_MEMORY_REGIONS: usize = 8; // per-TVM simple limit
 
-    // Small helper types
+    const PTE_SIZE: usize = 8;
+    const PTE_V: u64 = 1 << 0;
+    const PTE_R: u64 = 1 << 1;
+    const PTE_W: u64 = 1 << 2;
+    const PTE_X: u64 = 1 << 3;
+    const PTE_U: u64 = 1 << 4;
+    const PTE_A: u64 = 1 << 6;
+    const PTE_D: u64 = 1 << 7;
+
+    // -----------------------------
+    // Helper functions for SV39
+    // -----------------------------
+
+    /// Return the 3 VPN indices [vpn2, vpn1, vpn0] for SV39.
+    #[inline(always)]
+    fn make_vpn_sv39(gpa: usize) -> [usize; 3] {
+        [
+            (gpa >> 30) & 0x1FF, // VPN[2]
+            (gpa >> 21) & 0x1FF, // VPN[1]
+            (gpa >> 12) & 0x1FF, // VPN[0]
+        ]
+    }
+
+    #[inline(always)]
+    fn pa_to_ppn(pa: usize) -> u64 {
+        (pa as u64) >> 12
+    }
+
+    /// Minimal SV39 mapper for one 4 KiB page.
+    /// Uses the 16 KiB region:
+    ///   L2=root, L1=root+4K, L0=root+8K.
+    fn map_4k_leaf(root_pt: usize, gpa: usize, pa: usize, perms: u64) {
+        assert_eq!(gpa % PAGE_SIZE, 0);
+        assert_eq!(pa % PAGE_SIZE, 0);
+
+        let [vpn2, vpn1, vpn0] = make_vpn_sv39(gpa);
+
+        // Level 2 → Level 1
+        let pte2_addr = root_pt + vpn2 * PTE_SIZE;
+        let l1_base = root_pt + 0x1000;
+        let pte = (pa_to_ppn(l1_base) << 10) | PTE_V;
+        unsafe {
+            core::ptr::write_volatile(pte2_addr as *mut u64, pte);
+        }
+
+        // Level 1 → Level 0
+        let pte1_addr = l1_base + vpn1 * PTE_SIZE;
+        let l0_base = root_pt + 0x2000;
+        let pte = (pa_to_ppn(l0_base) << 10) | PTE_V;
+        unsafe {
+            core::ptr::write_volatile(pte1_addr as *mut u64, pte);
+        }
+
+        // Level 0 (leaf)
+        let pte0_addr = l0_base + vpn0 * PTE_SIZE;
+        let leaf = (pa_to_ppn(pa) << 10) | perms | PTE_V | PTE_U;
+        unsafe {
+            core::ptr::write_volatile(pte0_addr as *mut u64, leaf);
+        }
+    }
+
+    // -----------------------------
+    // Core TSM structures
+    // -----------------------------
+
     #[repr(C)]
     #[derive(Clone, Copy, Debug)]
     pub struct MemoryRegion {
@@ -41,6 +122,7 @@ pub mod tsm {
                 confidential_memory: Vec::new(),
             }
         }
+
         pub fn add_confidential_pages(
             &mut self,
             base_page_addr: usize,
@@ -55,7 +137,6 @@ pub mod tsm {
                         c.0
                     )
                 })?;
-
             Ok(())
         }
 
@@ -68,62 +149,67 @@ pub mod tsm {
                 anyhow::bail!("already created tvm");
             }
 
-            // Sanity: page_table_addr must be aligned and confidential
             if page_table_addr % PAGE_DIRECTORY_SIZE != 0 {
                 anyhow::bail!("page table addr must be 16KB-aligned");
             }
 
-            // Sanity: the state address must not be into the TVM page table
             assert!(
                 state_addr < page_table_addr
                     || state_addr > (page_table_addr + PAGE_DIRECTORY_SIZE - 8)
             );
 
-            // Check that page_directory region is within some donated confidential block
             let pd_block_idx = self
                 .find_confidential_block_idx_covering(page_table_addr, PAGE_DIRECTORY_SIZE)
                 .ok_or_else(|| anyhow::anyhow!("page directory addr not in confidential memory"))?;
 
-            // For the state area we will accept at least one page (or tvm_state_pages if non-zero)
-            // your harness has tvm_state_pages==0, so accept a single page slot for now.
             let state_block_idx = self
                 .find_confidential_block_idx_covering(state_addr, PAGE_SIZE)
                 .ok_or_else(|| anyhow::anyhow!("state addr not in confidential memory"))?;
 
-            // mark those blocks as owned by tvm id=1 (we only support single tvm)
-            // update the Option<usize> owner inside confidential_memory
             {
-                let (base, npages, owner) = self
+                let (_base, _npages, owner) = self
                     .confidential_memory
                     .get_mut(pd_block_idx)
                     .ok_or_else(|| anyhow::anyhow!("invalid pd block idx"))?;
                 *owner = Some(1);
             }
             {
-                let (base, npages, owner) = self
+                let (_base, _npages, owner) = self
                     .confidential_memory
                     .get_mut(state_block_idx)
                     .ok_or_else(|| anyhow::anyhow!("invalid state block idx"))?;
                 *owner = Some(1);
             }
-            // Zero the page-directory region in-place
+
             unsafe {
                 let ptr = page_table_addr as *mut u8;
-                // safety: test harness writes to this memory in GDB; for a real platform you'd convert mapping
                 core::ptr::write_bytes(ptr, 0, PAGE_DIRECTORY_SIZE);
             }
 
-            // TODO: init page table and init tvm state
             let tvm = Tvm::new(page_table_addr, state_addr);
             let tvm_id = tvm.id;
             self.tvm = Some(tvm);
-
             Ok(tvm_id)
+        }
+
+        pub fn finalize_tvm(
+            &mut self,
+            _tvm_id: usize,
+            entry_sepc: usize,
+            entry_arg: usize,
+            tvm_identity_addr: usize,
+        ) -> anyhow::Result<()> {
+            if let Some(tvm) = &mut self.tvm {
+                tvm.finalize(entry_sepc, entry_arg, tvm_identity_addr);
+            } else {
+                anyhow::bail!("no tvm present");
+            }
+
+            Ok(())
         }
 
         pub fn destroy_tvm(&mut self) -> anyhow::Result<()> {
             if let Some(tvm) = &self.tvm {
-                //TODO:
                 unsafe {
                     let ptr = tvm.page_table_addr as *mut u8;
                     core::ptr::write_bytes(ptr, 0, PAGE_DIRECTORY_SIZE);
@@ -133,40 +219,158 @@ pub mod tsm {
             Ok(())
         }
 
-        // Add a simple API to register a guest memory region for the TVM
         pub fn add_tvm_memory_region(
             &mut self,
             tvm_id: usize,
-            guest_gpa_base: usize,
-            num_pages: usize,
+            tvm_gpa_addr: usize,
+            region_len_bytes: usize,
         ) -> anyhow::Result<()> {
             if self.tvm.is_none() {
                 anyhow::bail!("no tvm present");
             }
+
             let t = self.tvm.as_mut().unwrap();
             if t.id != tvm_id {
                 anyhow::bail!("tvm id mismatch");
             }
-            // avoid overlap check for simplicity or add simple overlap check:
+
+            match t.state_enum {
+                TvmState::TvmInitializing => {}
+                _ => anyhow::bail!("cannot add memory region unless TVM_INITIALIZING"),
+            }
+
+            if (tvm_gpa_addr % PAGE_SIZE) != 0
+                || (region_len_bytes % PAGE_SIZE) != 0
+                || region_len_bytes == 0
+            {
+                anyhow::bail!("tvm_gpa_addr and region_len must be 4KB-aligned and non-zero");
+            }
+
+            let num_pages = region_len_bytes / PAGE_SIZE;
+            let new_a = tvm_gpa_addr;
+            let new_b = tvm_gpa_addr + region_len_bytes;
+
             for r in t.memory_regions.iter() {
-                let a1 = r.guest_gpa_base;
-                let b1 = a1 + r.num_pages * PAGE_SIZE;
-                let a2 = guest_gpa_base;
-                let b2 = a2 + num_pages * PAGE_SIZE;
-                // overlapping if ranges intersect
-                if !(b2 <= a1 || b1 <= a2) {
+                let r_a = r.guest_gpa_base;
+                let r_b = r.guest_gpa_base + r.num_pages * PAGE_SIZE;
+                if !(new_b <= r_a || r_b <= new_a) {
                     anyhow::bail!("region overlap with existing region");
                 }
             }
 
             t.memory_regions
                 .push(MemoryRegion {
-                    guest_gpa_base,
+                    guest_gpa_base: tvm_gpa_addr,
                     num_pages,
                 })
                 .map_err(|_| anyhow::anyhow!("too many memory regions"))?;
+            Ok(())
+        }
+
+        pub fn add_tvm_measured_pages(
+            &mut self,
+            tvm_id: usize,
+            source_addr: usize,
+            dest_addr: usize,
+            tsm_page_type: usize,
+            num_pages: usize,
+            tvm_guest_gpa: usize,
+        ) -> anyhow::Result<()> {
+            if self.tvm.is_none() {
+                anyhow::bail!("no tvm present");
+            }
+
+            let t = self.tvm.as_mut().unwrap();
+            if t.id != tvm_id {
+                anyhow::bail!("tvm id mismatch");
+            }
+
+            match t.state_enum {
+                TvmState::TvmInitializing => {}
+                _ => anyhow::bail!("cannot add memory region unless TVM_INITIALIZING"),
+            }
+
+            assert_eq!(tsm_page_type, 0, "accepting 4k pages for now");
+
+            unsafe {
+                let tot_bytes = PAGE_SIZE * num_pages;
+                core::ptr::copy_nonoverlapping(
+                    source_addr as *const u8,
+                    dest_addr as *mut u8,
+                    tot_bytes,
+                );
+                // map GPA → PA in the TVM's page table
+                map_4k_leaf(
+                    t.page_table_addr,
+                    tvm_guest_gpa,
+                    dest_addr,
+                    PTE_R | PTE_X | PTE_U,
+                );
+            }
 
             Ok(())
+        }
+
+        pub fn tvm_run_vcpu(&self, _tvm_id: usize, _tvm_vcpu_id: usize) -> anyhow::Result<!> {
+            // perform the context switch
+            if let Some(tvm) = &self.tvm {
+                hvip::clear(VsInterruptKind::External);
+                hvip::clear(VsInterruptKind::Timer);
+                hvip::clear(VsInterruptKind::Software);
+
+                // disable address translation.
+                vsatp::write(0);
+
+                // specify delegation exception kinds.
+                hedeleg::write(
+                    ExceptionKind::InstructionAddressMissaligned as usize
+                        | ExceptionKind::Breakpoint as usize
+                        | ExceptionKind::EnvCallFromUorVU as usize
+                        | ExceptionKind::InstructionPageFault as usize
+                        | ExceptionKind::LoadPageFault as usize
+                        | ExceptionKind::StoreAmoPageFault as usize,
+                );
+                // specify delegation interrupt kinds.
+                hideleg::write(
+                    VsInterruptKind::External as usize
+                        | VsInterruptKind::Timer as usize
+                        | VsInterruptKind::Software as usize,
+                );
+                hgatp::set(hgatp::Mode::Sv39x4, 0, tvm.page_table_addr >> 12);
+                hfence_gvma_all();
+                unsafe {
+                    // sstatus.SUM = 1, sstatus.SPP = 0
+                    sstatus::set_sum();
+                    sstatus::set_spp(sstatus::SPP::Supervisor);
+                    // sstatus.sie = 1
+                    sstatus::set_sie();
+                    // sstatus.fs = 1
+                    sstatus::set_fs(FS::Initial);
+
+                    // hstatus.spv = 1 (enable V bit when sret executed)
+                    hstatus::set_spv();
+
+                    // set entry point
+                    sepc::write(tvm.entry_sepc);
+                    let mut stvec = stvec::read();
+                    stvec.set_address(tvm.entry_sepc);
+                    stvec.set_trap_mode(stvec::TrapMode::Direct);
+
+                    stvec::write(stvec);
+
+                    core::arch::asm!(
+                        r#"
+                            fence.i
+                            sret
+                        "#,
+
+                        in("a0") 0,
+                        in("a1") 0,
+                        options(readonly, noreturn, nostack)
+                    )
+                }
+            }
+            anyhow::bail!("no VM")
         }
 
         fn find_confidential_block_idx_covering(&self, addr: usize, size: usize) -> Option<usize> {
@@ -183,114 +387,81 @@ pub mod tsm {
     #[repr(C)]
     pub struct Tvm {
         pub id: usize,
-        pub vcpu_state: [u64; 32],
         pub page_table_addr: usize,
         pub state_addr: usize,
-        pub memory_regions: heapless::Vec<MemoryRegion, MAX_MEMORY_REGIONS>,
+        pub memory_regions: Vec<MemoryRegion, MAX_MEMORY_REGIONS>,
         pub state_enum: TvmState,
+        pub vcpus: Vec<TvmVcpuState, MAX_VCPU_PER_TVM>,
+        pub entry_sepc: usize,
+        pub entry_arg: usize,
+        pub tvm_identity_addr: usize,
     }
 
     impl Tvm {
         fn new(page_table_addr: usize, state_addr: usize) -> Self {
             Self {
                 id: 1,
-                vcpu_state: [0; 32],
                 page_table_addr,
                 state_addr,
                 memory_regions: Vec::new(),
                 state_enum: TvmState::TvmInitializing,
+                vcpus: Vec::new(),
+                entry_sepc: 0,
+                entry_arg: 0,
+                tvm_identity_addr: 0,
             }
+        }
+
+        fn finalize(&mut self, entry_sepc: usize, entry_arg: usize, tvm_identity_addr: usize) {
+            self.entry_sepc = entry_sepc;
+            self.entry_arg = entry_arg;
+            self.tvm_identity_addr = tvm_identity_addr;
+            self.state_enum = TvmState::TvmRunnable;
         }
     }
 
     #[repr(C)]
     #[derive(Clone, Debug)]
     pub struct TsmInfo {
-        /*
-         * The current state of the TSM (see `tsm_state` enum above).
-         * If the state is not `TSM_READY`, the remaining fields are invalid and
-         * will be initialized to `0`.
-         */
         pub tsm_state: TsmState,
-        /*
-         * Identifier of the TSM implementation, see `Reserved TSM Implementation IDs`
-         * table below. This identifier is intended to distinguish among different TSM
-         * implementations, potentially managed by different organizations, that might
-         * target different deployment models and, thus, implement subset of CoVE spec.
-         */
         pub tsm_impl_id: u32,
-        /*
-         * Version number of the running TSM.
-         */
         pub tsm_version: u32,
-        /*
-         * Making padding explicit.
-         */
         _padding: u32,
-        /*
-         * A bitmask of CoVE features supported by the running TSM, see `TSM Capabilities`
-         * table below. Every bit in this field corresponds to a capability defined by
-         * `COVE_TSM_CAP_*` constants. Presence of bit `i` indicates that both the TSM
-         * and hardware support the corresponding capability.
-         */
         pub tsm_capabilities: usize,
-        /*
-         * The number of 4KB pages which must be donated to the TSM for storing TVM
-         * state in sbi_covh_create_tvm_vcpu(). `0` if the TSM does not support the
-         * dynamic memory allocation capability.
-         */
         pub tvm_state_pages: usize,
-        /*
-         * The maximum number of vCPUs a TVM can support.
-         */
         pub tvm_max_vcpus: usize,
-        /*
-         * The number of 4KB pages which must be donated to the TSM when creating
-         * a new vCPU. `0` if the TSM does not support the dynamic memory allocation
-         * capability.
-         */
         pub tvm_vcpu_state_pages: usize,
     }
-    /*
-     * TsmPageType is an enumeration that defines the types of memory pages supported by the TSM.
-     * It includes options for 4 KiB, 2 MiB, 1 GiB, and 512 GiB pages, allowing for flexible memory
-     * management and allocation.
-     */
+
     pub enum TsmPageType {
-        /* 4 KiB */
         Page4k = 0,
-        /* 2 MiB */
         Page2mb = 1,
-        /* 1 GiB */
         Page1gb = 2,
-        /* 512 GiB */
         Page512gb = 3,
     }
 
-    /*
-     * TvmState is an enumeration that represents the state of a Trusted Virtual Machine (TVM).
-     * It indicates whether the TVM is in the process of initialization or is ready to run.
-     */
     #[derive(Clone)]
     pub enum TvmState {
-        /* The TVM has been created, but isn't yet ready to run */
         TvmInitializing = 0,
-        /* The TVM is in a runnable state */
         TvmRunnable = 1,
     }
 
-    /*
-     * TsmState is an enumeration that describes the current state of the Trusted Software Module (TSM).
-     * It provides information on whether the TSM is not loaded, loaded but not initialized, or fully
-     * initialized and ready to accept ECALLs (environment calls).
-     */
     #[derive(Clone, Debug)]
     pub enum TsmState {
-        /* TSM has not been loaded on this platform. */
         TsmNotLoaded = 0,
-        /* TSM has been loaded, but has not yet been initialized. */
         TsmLoaded = 1,
-        /* TSM has been loaded & initialized, and is ready to accept ECALLs.*/
         TsmReady = 2,
+    }
+
+    #[derive(Clone, Debug)]
+    #[repr(C, align(4))]
+    pub struct TvmVcpuState {
+        pub regs: [usize; 32],
+
+        sstatus: usize,
+        stvec: usize,
+        sip: usize,
+        satp: usize,
+        sepc: usize,
     }
 }

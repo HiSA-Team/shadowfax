@@ -20,11 +20,26 @@ COVH_CONVERT_PAGES: int = 1
 COVH_CREATE_TVM: int = 5
 COVH_FINALIZE_TVM: int = 6
 COVH_DESTROY_TVM: int = 8
+COVH_ADD_MEMORY_REGION: int = 9
+COVH_ADD_TVM_MEASURED_PAGES: int = 11
 COVH_CREATE_TVM_VCPU: int = 14
 COVH_RUN_TVM_VCPU: int = 15
 
 
+PAGE_DIRECTORY_SIZE: int = 0x4000  # 16kib
+GPA_BASE: int = 0x1000
+NUM_PAGES_TO_DONATE: int = 16
+JAL_LOOP_WORD = struct.pack("<I", 0x0000006F)  # jal x0, 0  -> tight infinite loop
+
 payload_address: int = int(os.environ["SHADOWFAX_JUMP_ADDRESS"], 16)
+confidential_memory_start_addr: int = payload_address + 0x4000
+tvm_source_code_addr: int = payload_address + 0x2000
+tvm_page_start_addr: int = confidential_memory_start_addr + PAGE_DIRECTORY_SIZE + 0x1000
+
+confidential_memory_size: int = tvm_page_start_addr - confidential_memory_start_addr
+assert confidential_memory_size <= NUM_PAGES_TO_DONATE * 0x1000, (
+    f"Insufficient memory region size: donated {NUM_PAGES_TO_DONATE * 0x1000} < needed {confidential_memory_size}"
+)
 
 
 def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
@@ -79,7 +94,7 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
 
     assert tsm_state == 2, f"tsm_state must be 2; current {tsm_state}"
     assert tsm_impl_id == 69, f"tsm_impl_id must be 69; current {tsm_impl_id}"
-    assert tsm_version == 69, f"tsm_version must be 0; current  {tsm_version}"
+    assert tsm_version == 69, f"tsm_version must be 69; current  {tsm_version}"
     assert tsm_capabilities == 0, (
         f"tsm_capabilities must be 0; current {tsm_capabilities}"
     )
@@ -96,45 +111,89 @@ def assert_convert_pages(prev: Optional[Dict], curr: Dict) -> None:
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
 
 
+def setup_create_tvm() -> None:
+    # ecall parameter where to store the address
+    tvm_params_addr = read_reg("a0")
+
+    tvm_directory_addr = confidential_memory_start_addr
+    tvm_state_addr = confidential_memory_start_addr + PAGE_DIRECTORY_SIZE
+
+    print(f"tvm_params is at 0x{tvm_params_addr:x}")
+    print(f"tvm_page_directory_addr (0x{tvm_params_addr:x}): 0x{tvm_directory_addr:x}")
+    print(f"tvm_state_addr (0x{(tvm_params_addr + 8):x}): 0x{(tvm_state_addr):x}")
+
+    # page table address in confidential memory
+    tvm_directory_addr = struct.pack("<Q", tvm_directory_addr)
+    tvm_state_addr = struct.pack("<Q", tvm_state_addr)
+
+    inf = gdb.selected_inferior()
+
+    inf.write_memory(tvm_params_addr, tvm_directory_addr)
+    inf.write_memory(tvm_params_addr + 8, tvm_state_addr)
+
+
 def assert_create_tvm(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
 
     # assert that the pagetable is zero
-    page_table_addr = prev["regs"]["a0"] + 0x4000
-    page_table_size = 0x4000  # 16k
-    raw = read_mem(page_table_addr, page_table_size)
+    params_addr = prev["regs"]["a0"]
 
+    # read two 64-bit words (page_table_addr, state_addr)
+    raw = read_mem(params_addr, 16)
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) < 16:
+        raise AssertionError(f"failed to read 16 bytes at {hex(params_addr)}: {raw!r}")
+
+    page_table_addr, state_addr = struct.unpack("<QQ", raw)
+
+    raw = read_mem(page_table_addr, PAGE_DIRECTORY_SIZE)
     if not isinstance(raw, (bytes, bytearray)):
         raise AssertionError(
-            f"failed to read {page_table_size} bytes at {hex(page_table_addr)}: {raw!r}"
+            f"failed to read {PAGE_DIRECTORY_SIZE} bytes at {hex(page_table_addr)}: {raw!r}"
         )
-
-    assert raw == b"\x00" * page_table_size, (
+    assert raw == b"\x00" * PAGE_DIRECTORY_SIZE, (
         "page table must be zero after TVM creation"
     )
 
 
-def setup_create_tvm_mem() -> None:
-    # ecall parameter where to store the address
-    tvm_params_addr = read_reg("a0")
+def assert_add_tvm_memory_region(prev: Optional[Dict], curr: Dict) -> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
 
-    # page table address in confidential memory
-    tvm_directory_addr = struct.pack("<Q", payload_address + 0x4000)
-    tvm_state_addr = struct.pack("<Q", payload_address + 0x4000 + 0x4000)
+
+def setup_add_tvm_measured_pages() -> None:
+    tvm_source_code_addr = read_reg("a1")
 
     inf = gdb.selected_inferior()
+    inf.write_memory(tvm_source_code_addr, JAL_LOOP_WORD)
 
-    inf.write_memory(tvm_params_addr, tvm_directory_addr)
-    inf.write_memory(tvm_params_addr + 8, tvm_state_addr)
-    print(f"tvm_params is at 0x{tvm_params_addr:x}")
-    print(
-        f"tvm_page_directory_addr (0x{tvm_params_addr:x}): 0x{(payload_address + 0x4000):x}"
+
+def assert_add_tvm_measured_pages(prev: Optional[Dict], curr: Dict) -> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
+    # assert that the "source code" has been copied successfully
+    tvm_source_code_addr = prev["regs"]["a1"]
+
+    instr_raw = read_mem(tvm_source_code_addr, 8)
+    instr = struct.unpack("<I", instr_raw)[0]
+    jal = struct.unpack("<I", JAL_LOOP_WORD)[0]
+
+    assert instr == jal, (
+        f"expected JAL_LOOP_WORD at {hex(tvm_source_code_addr)}; got {hex(instr)}"
     )
-    print(
-        f"tvm_state_addr (0x{(tvm_params_addr + 8):x}): 0x{(payload_address + 0x4000 + 0x4000):x}"
-    )
+    # TODO: assert the pagetable mapping
+
+
+def setup_create_tvm_vcpu() -> None:
+    pass
+
+
+def assert_create_tvm_vcpu(prev: Optional[Dict], curr: Dict) -> None:
+    pass
 
 
 def run() -> None:
@@ -183,8 +242,8 @@ def run() -> None:
         Step(
             name="convert_pages",
             regs={
-                "a0": payload_address + 0x4000,
-                "a1": 16,
+                "a0": confidential_memory_start_addr,
+                "a1": NUM_PAGES_TO_DONATE,
                 "a2": 0,
                 "a3": 0,
                 "a4": 0,
@@ -210,8 +269,50 @@ def run() -> None:
                 "a6": (1 << 26) | (COVH_CREATE_TVM & 0xFFFF),
                 "a7": EID_COVH_ID,
             },
-            setup_mem_fn=setup_create_tvm_mem,
+            setup_mem_fn=setup_create_tvm,
             assert_fn=assert_create_tvm,
+        )
+    )
+
+    runner.add_step(
+        Step(
+            name="add_tvm_memory_region",
+            regs={
+                "a0": 1,
+                # Guest Physical Address (GPA)
+                "a1": GPA_BASE,
+                "a2": 0x1000,
+                "a3": 0,
+                "a4": 0,
+                "a5": 0,
+                "a6": (1 << 26) | (COVH_ADD_MEMORY_REGION & 0xFFFF),
+                "a7": EID_COVH_ID,
+            },
+            setup_mem_fn=None,
+            assert_fn=assert_add_tvm_memory_region,
+        )
+    )
+
+    runner.add_step(
+        Step(
+            name="add_tvm_measured_pages",
+            regs={
+                "a0": 1,
+                # will write at this address the loop jump loop instruction
+                "a1": tvm_source_code_addr,
+                # the address of the physical confidential memory
+                # START_CONFIDENTIAL_REGION + 16 kb +
+                "a2": tvm_page_start_addr,
+                # 0 for 4kb page
+                "a3": 0,
+                # num pages just one page
+                "a4": 1,
+                "a5": GPA_BASE,
+                "a6": (1 << 26) | (COVH_ADD_TVM_MEASURED_PAGES & 0xFFFF),
+                "a7": EID_COVH_ID,
+            },
+            setup_mem_fn=setup_add_tvm_measured_pages,
+            assert_fn=None,
         )
     )
 
@@ -237,8 +338,8 @@ def run() -> None:
         Step(
             name="finalize_tvm",
             regs={
-                "a0": payload_address + 0x1000,
-                "a1": 48,
+                "a0": 1,
+                "a1": GPA_BASE,
                 "a2": 0,
                 "a3": 0,
                 "a4": 0,
@@ -250,12 +351,13 @@ def run() -> None:
             assert_fn=None,
         )
     )
+
     runner.add_step(
         Step(
             name="run_tvm_vcpu",
             regs={
-                "a0": payload_address + 0x1000,
-                "a1": 48,
+                "a0": 1,
+                "a1": 0,
                 "a2": 0,
                 "a3": 0,
                 "a4": 0,

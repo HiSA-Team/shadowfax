@@ -1,7 +1,6 @@
 MEMORY
 {
-    /* Use a generic base address - will be relocated by ELF loader */
-    RAM (rwx) : ORIGIN = 0x0, LENGTH = 1M
+    RAM (rwx) : ORIGIN = 0x81400000, LENGTH = 8M
 }
 
 REGION_ALIAS("REGION_TEXT", RAM);

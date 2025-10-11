@@ -38,7 +38,12 @@ const STACK_SIZE_PER_HART: usize = 1024 * 8;
 const SBI_COVH_GET_TSM_INFO: usize = 0;
 const SBI_COVH_CONVERT_PAGES: usize = 1;
 const SBI_COVH_CREATE_TVM: usize = 5;
+const SBI_COVH_FINALIZE_TVM: usize = 6;
 const SBI_COVH_DESTROY_TVM: usize = 8;
+const SBI_COVH_ADD_TVM_MEMORY_REGION: usize = 9;
+const SBI_COVH_ADD_TVM_MEASURED_PAGES: usize = 11;
+const SBI_COVH_CREATE_TVM_VCPU: usize = 14;
+const SBI_COVH_RUN_TVM_VCPU: usize = 15;
 const EID_COVH: usize = 0x434F5648;
 
 #[no_mangle]
@@ -74,10 +79,10 @@ extern "C" fn _start() -> ! {
 fn main(
     a0: usize,
     a1: usize,
-    _a2: usize,
-    _a3: usize,
-    _a4: usize,
-    _a5: usize,
+    a2: usize,
+    a3: usize,
+    a4: usize,
+    a5: usize,
     a6: usize,
     a7: usize,
 ) -> ! {
@@ -105,6 +110,7 @@ fn main(
                 a1: core::mem::size_of::<TsmInfo>() as isize,
             }
         }
+
         SBI_COVH_CONVERT_PAGES => {
             let state = unsafe { state.as_mut() };
 
@@ -113,6 +119,7 @@ fn main(
                 Err(_) => SbiRet { a0: -1, a1: 0 },
             }
         }
+
         SBI_COVH_CREATE_TVM => {
             let state = unsafe { state.as_mut() };
             assert!(a1 == 16);
@@ -130,8 +137,47 @@ fn main(
                 Err(_) => SbiRet { a0: -1, a1: 0 },
             }
         }
+
+        SBI_COVH_FINALIZE_TVM => {
+            let state = unsafe { state.as_mut() };
+
+            match state.finalize_tvm(a0, a1, a2, a3) {
+                Ok(_) => SbiRet { a0: 0, a1: 0 },
+                Err(_) => SbiRet { a0: -1, a1: 0 },
+            }
+        }
+
+        SBI_COVH_ADD_TVM_MEMORY_REGION => {
+            let state = unsafe { state.as_mut() };
+
+            match state.add_tvm_memory_region(a0, a1, a2) {
+                Ok(_) => SbiRet { a0: 0, a1: 0 },
+                Err(_) => SbiRet { a0: -1, a1: 0 },
+            }
+        }
+
+        SBI_COVH_ADD_TVM_MEASURED_PAGES => {
+            let state = unsafe { state.as_mut() };
+
+            match state.add_tvm_measured_pages(a0, a1, a2, a3, a4, a5) {
+                Ok(_) => SbiRet { a0: 0, a1: 0 },
+                Err(_) => SbiRet { a0: -1, a1: 0 },
+            }
+        }
+
+        SBI_COVH_CREATE_TVM_VCPU => SbiRet { a0: 0, a1: 0 },
+        SBI_COVH_RUN_TVM_VCPU => {
+            let state = state.as_ref();
+
+            match state.tvm_run_vcpu(a0, a1) {
+                Ok(_) => unreachable!(),
+                Err(_) => SbiRet { a0: -1, a1: 0 },
+            }
+        }
+
         SBI_COVH_DESTROY_TVM => {
             let state = unsafe { state.as_mut() };
+
             match state.destroy_tvm() {
                 Ok(_) => SbiRet { a0: 0, a1: 0 },
                 Err(_) => SbiRet { a0: -1, a1: 0 },
