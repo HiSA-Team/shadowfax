@@ -31,7 +31,7 @@ GPA_BASE: int = 0x1000
 NUM_PAGES_TO_DONATE: int = 16
 JAL_LOOP_WORD = struct.pack("<I", 0x0000006F)  # jal x0, 0  -> tight infinite loop
 
-payload_address: int = int(os.environ["SHADOWFAX_JUMP_ADDRESS"], 16)
+payload_address: int = int(os.environ["ROOT_DOMAIN_JUMP_ADDRESS"], 16)
 confidential_memory_start_addr: int = payload_address + 0x4000
 tvm_source_code_addr: int = payload_address + 0x2000
 tvm_page_start_addr: int = confidential_memory_start_addr + PAGE_DIRECTORY_SIZE + 0x1000
