@@ -1,4 +1,3 @@
 [submodule "shadowfax/opensbi"]
 	path = shadowfax/opensbi
 	url = https://github.com/riscv-software-src/opensbi
-	branch = v1.6
