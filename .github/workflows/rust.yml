@@ -1,0 +1,90 @@
+name: Rust build and test
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - 'docs/'
+      - 'scripts/'
+  push:
+    branches: main
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - 'docs/'
+      - 'scripts/'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      OPENSBI_VERSION: 1.6
+      PLATFORM: generic
+      SHADOWFAX_JUMP_ADDRESS: 0x81000000
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # -> set OPENSBI_PATH using OPENSBI_VERSION (available via env) for later run: steps
+    - name: Set OPENSBI_PATH
+      run: echo "OPENSBI_PATH=/tmp/opensbi-${OPENSBI_VERSION}" >> $GITHUB_ENV
+
+    # cache dependencies
+    - uses: actions/cache@v4
+      id: cache
+      with:
+        path: |
+          /tmp/apt-cache/archives/*.deb
+          /tmp/opensbi-${{ env.OPENSBI_VERSION }}
+        key: ${{ runner.os }}-${{ hashFiles('scripts/setup.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-
+
+    - name: Restore apt-cache
+      if: steps.cache.outputs.cache-hit == 'true'
+      run: |
+        sudo mkdir -p /var/cache/apt/archives
+        sudo cp -r /tmp/apt-cache/archives/* /var/cache/apt/archives/ || true
+
+    - name: Download OpenSBI
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p "${OPENSBI_PATH}"
+        curl -fsSL https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz -o ${OPENSBI_PATH}.tar.gz
+        tar xf ${OPENSBI_PATH}.tar.gz -C ${OPENSBI_PATH} --strip-components=1
+
+    # TODO: reuse scripts/setup.sh
+    - name: Setup host (install deps and OpenSBI)
+      run: |
+        . environment.sh ${OPENSBI_PATH}
+
+        # install packages
+        sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
+        qemu-system-riscv64 gcc-riscv64-linux-gnu make libssl-dev device-tree-compiler python3 \
+        libelf-dev curl file sudo bc libclang-dev
+
+        # build opensbi
+        make -C ${OPENSBI_PATH} PLATFORM=${PLATFORM}
+
+
+    - name: Save cache
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        # save packages
+        mkdir -p /tmp/apt-cache/archives
+        sudo cp -r /var/cache/apt/archives/* /tmp/apt-cache/archives/ || true
+        sudo chmod -R a+r /tmp/apt-cache/archives
+
+    - uses: mkroening/rust-toolchain-toml@main
+      name: Install rust toolchain
+      with: # Path to the toolchain file.
+      # Default: rust-toolchain.toml
+        toolchain-file: ''
+
+    - name: Build and test
+      run: |
+        qemu-system-riscv64 --version || true
+        . environment.sh ${OPENSBI_PATH}
+        mkdir -p bin
+        SHADOWFAX_JUMP_ADDRESS=0x82000000 make clean build-info generate-keys test

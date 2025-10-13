@@ -1,24 +1,41 @@
 MEMORY
 {
-  FLASH (rx) : ORIGIN = 0x0, LENGTH = 1M
-  BOOT_RAM (rw) : ORIGIN = 0x00100000, LENGTH = 1M
+    RAM (rwx) : ORIGIN = 0x81400000, LENGTH = 8M
 }
 
-REGION_ALIAS("REGION_TEXT", FLASH);
-REGION_ALIAS("REGION_STACK", BOOT_RAM);
-
-_b_stack_size = 0x2000;
+REGION_ALIAS("REGION_TEXT", RAM);
+REGION_ALIAS("REGION_DATA", RAM);
+REGION_ALIAS("REGION_BSS", RAM);
 
 SECTIONS {
+    . = ORIGIN(RAM);
 
-    .text : {
-        KEEP(*(.text.entry));
-        . = ALIGN(4K);
+    .text : ALIGN(4K) {
+        KEEP(*(._start));
         *(.text .text.*);
+        *(.rodata .rodata.*);
     } > REGION_TEXT
 
-    .boot_stack (NOLOAD) : ALIGN(4K) {
-        . += _b_stack_size;
+    .data : ALIGN(8) {
+        *(.data .data.*);
+        *(.sdata .sdata.*);
+    } > RAM
+
+    .bss : ALIGN(8) {
+        __bss_start = .;
+        *(.bss .bss.*);
+        *(.sbss .sbss.*);
+        __bss_end = .;
+    } > REGION_BSS
+
+    .stack (NOLOAD): ALIGN(4K) {
+        /* 8K stack */
+        . += 0x2000;
         _top_b_stack = .;
-    } > REGION_STACK
+    } > REGION_DATA
+
+    /* Add relocation sections */
+    .rela.text : { *(.rela.text*) }
+    .rela.data : { *(.rela.data*) }
+    .rela.bss : { *(.rela.bss*) }
 }
