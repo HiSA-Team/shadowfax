@@ -40,21 +40,25 @@ jobs:
       run: |
         sudo mkdir -p /var/cache/apt/archives
         sudo cp -r /tmp/apt-cache/archives/* /var/cache/apt/archives/ || true
-        sudo make -C /tmp/qemu-10.1.1 install
 
-    # TODO: reuse scripts/setup.sh
-    - name: Setup host
-      run: |
-        # install packages
+        # TODO: reuse scripts/setup.sh
         sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
         autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
         device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
         libexpat-dev libgmp-dev  libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
         make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev
 
+        sudo make -C /tmp/qemu-10.1.1 install
+
     - name: Download, build and install QEMU
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
+        sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
+        autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
+        device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
+        libexpat-dev libgmp-dev  libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
+        make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev
+
         curl -fsSL https://download.qemu.org/qemu-10.1.1.tar.xz -o /tmp/qemu-10.1.1.tar.xz
         tar xvJf /tmp/qemu-10.1.1.tar.xz -C /tmp/
         cd /tmp/qemu-10.1.1 && ./configure --target-list=riscv64-softmmu
