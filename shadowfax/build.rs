@@ -37,7 +37,15 @@ fn main() {
     // - link linkerscript
     {
         let status = std::process::Command::new("make")
-            .args(["-C", &opensbi_path.to_string_lossy()])
+            .args([
+                "-C",
+                &opensbi_path.to_string_lossy(),
+                &format!("PLATFORM={}", &platform),
+                &format!(
+                    "CROSS_COMPILE={}",
+                    &env::var("CROSS_COMPILE").expect("CROSS_COMPILE not set")
+                ),
+            ])
             .status()
             .expect("failed to build opensbi");
         if !status.success() {
