@@ -47,13 +47,15 @@ generate-keys:
 ## info: display build configuration
 build-info:
 	@echo "Build Configuration:"
-	@echo "  TARGET:        $(TARGET)"
-	@echo "  PROFILE:       $(PROFILE)"
-	@echo "  PLATFORM:      $(PLATFORM)"
-	@echo "  RUSTFLAGS:     $(RUSTFLAGS)"
-	@echo "  CROSS_COMPILE: $(CROSS_COMPILE)"
-	@echo "  ARCHITECTURE:  $(ARCHITECTURE)"
-	@echo "  LIBC_PREFIX:   $(LIBC_PREFIX)"
+	@echo "  TARGET:                    $(TARGET)"
+	@echo "  PROFILE:                   $(PROFILE)"
+	@echo "  PLATFORM:                  $(PLATFORM)"
+	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
+	@echo "  CROSS_COMPILE:             $(CROSS_COMPILE)"
+	@echo "  ARCHITECTURE:              $(ARCHITECTURE)"
+	@echo "  OPENSBI_VERSION:           $(OPENSBI_VERSION)"
+	@echo "  ROOT_DOMAIN_JUMP_ADDRESS:  $(ROOT_DOMAIN_JUMP_ADDRESS)"
+	@echo "  LIBC_PREFIX:               $(LIBC_PREFIX)"
 
 ## clean: removes all build artifacts
 clean:

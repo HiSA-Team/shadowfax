@@ -83,7 +83,7 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
 
 def run() -> None:
     print("=== GDB Get TSM Info Program ===")
-    payload_address: int = int(os.environ["SHADOWFAX_JUMP_ADDRESS"], 16)
+    payload_address: int = int(os.environ["ROOT_DOMAIN_JUMP_ADDRESS"], 16)
     print(f"S-Mode address 0x{payload_address:x}")
 
     runner = TestRunner(payload_address)

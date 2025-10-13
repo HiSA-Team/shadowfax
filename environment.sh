@@ -3,7 +3,7 @@
 # the current shell. Based on platform (architecture and libc), it sets up the CROSS_COMPILE
 # variable and LIBCLANG info. Usage:
 #
-# source <file> <opensbi-path>
+# source <file>
 #
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 
@@ -22,8 +22,9 @@ print_warn() { printf '%b[WARNING]%b %s\n' "$YELLOW" "$RESET" "$1" >&2; }
 
 # Config parameters
 LLVM_VERSION="${LLVM_VERSION:-17.0.6}"
-OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
+OPENSBI_VERSION="$(git -C shadowfax/opensbi describe)"
 PLATFORM="${PLATFORM:-generic}"
+ROOT_DOMAIN_JUMP_ADDRESS="0x82000000"
 
 get_libc() {
   if ldd --version 2>&1 | grep -q musl; then
@@ -32,6 +33,12 @@ get_libc() {
     echo "glibc"
   fi
 }
+
+export OPENSBI_VERSION="${OPENSBI_VERSION}"
+print_export "OPENSBI_VERSION" "${OPENSBI_VERSION}"
+
+export ROOT_DOMAIN_JUMP_ADDRESS="${ROOT_DOMAIN_JUMP_ADDRESS}"
+print_export "ROOT_DOMAIN_JUMP_ADDRESS" "${ROOT_DOMAIN_JUMP_ADDRESS}"
 
 export PLATFORM="${PLATFORM}"
 print_export "PLATFORM" "${PLATFORM}"
