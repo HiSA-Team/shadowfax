@@ -7,6 +7,8 @@
 #
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
+set -e
+
 # Colors
 RED='\033[31m'
 GREEN='\033[32m'
@@ -50,16 +52,17 @@ install_dependencies() {
   noble | jammy | bookworm)
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
     autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
-    device-tree-compiler flex gawk git gperf libclang-dev libelf-dev \
+    device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
     libexpat-dev libgmp-dev libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
-    make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev \
+    make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev
     if [ "$architecture" != "riscv64" ]; then
       DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-"$LIBC_PREFIX"
     fi
     ;;
   void)
-    xbps-install -Sy qemu make base-devel bison flex openssl-devel libelf \
-      elfutils-devel libdwarf-devel curl git file cpio clang cmake ninja python3
+    xbps-install -Sy gawk bc gperf autoconf automake bison make base-devel bison flex \
+      openssl-devel libelf elfutils-devel libdwarf-devel curl git file cpio clang cmake ninja \
+      python3 python3-tomli ninja sudo texinfo lzlib-devel
     if [ "$architecture" != "riscv64" ]; then
       xbps-install -Sy cross-riscv64-linux-"$LIBC_PREFIX"
     fi
@@ -78,12 +81,6 @@ install_rust() {
     su $USER_NAME -c "echo PATH=~/.cargo/bin:${PATH} >> ~/.bashrc"
   fi
   su $USER_NAME -c "~/.cargo/bin/rustup show"
-  su $USER_NAME -c "~/.cargo/bin/rustup component add rust-analyzer clippy"
-  if [ "$ARCHITECTURE" != "riscv64" ]; then
-    su $USER_NAME -c "~/.cargo/bin/rustup target add riscv64imac-unknown-none-elf"
-  else
-    print_info "Running on RISC-V architecture, skipping Rust RISC-V target setup."
-  fi
 }
 
 # Function to download, build, and install Clang from source for musl-based systems
@@ -127,12 +124,17 @@ print_info "detected libc: ${LIBC}"
 print_info "detected distribution dodename: ${DISTRO_CODENAME}"
 
 install_dependencies
-install_rust
 
+# install rust if not present
+if ! command -v cargo &> /dev/null; then
+  install_rust
+fi
+
+# build Clang if on musl
 if [ "$LIBC_PREFIX" = "musl" ]; then
-  print_warn "Building Clang from source for musl-based system. This may take some time..."
+  print_warn "building Clang from source for musl-based system. This may take some time..."
   build_clang_from_source
 fi
 
-print_info "Removing ${TEMP_DIR}..."
+print_info "removing ${TEMP_DIR}..."
 rm -rf ${TEMP_DIR}
