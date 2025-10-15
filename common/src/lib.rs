@@ -39,6 +39,9 @@ pub mod tsm {
 }
 
 pub mod sbi {
+    // CoVH constants
+    pub const SBI_COVH_EXT_ID: usize = 0x434F5648;
+
     pub const SBI_COVH_GET_TSM_INFO: usize = 0;
     pub const SBI_COVH_CONVERT_PAGES: usize = 1;
     pub const SBI_COVH_CREATE_TVM: usize = 5;
@@ -48,7 +51,10 @@ pub mod sbi {
     pub const SBI_COVH_ADD_TVM_MEASURED_PAGES: usize = 11;
     pub const SBI_COVH_CREATE_TVM_VCPU: usize = 14;
     pub const SBI_COVH_RUN_TVM_VCPU: usize = 15;
-    pub const EID_COVH: usize = 0x434F5648;
+
+    // SUPD constants
+    pub const SBI_SUPD_EXT_ID: usize = 0x53555044;
+    pub const SBI_EXT_SUPD_GET_ACTIVE_DOMAINS: usize = 0;
 
     #[repr(C)]
     pub struct SbiRet {

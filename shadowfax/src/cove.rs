@@ -15,14 +15,12 @@
 
 use core::mem::offset_of;
 
+use common::sbi::{
+    SBI_COVH_CONVERT_PAGES, SBI_COVH_EXT_ID, SBI_COVH_GET_TSM_INFO,
+    SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
+};
+
 use crate::{_tee_stack_top, context::Context, opensbi, state::STATE};
-
-pub const COVH_EXT_ID: usize = 0x434F5648;
-pub const SBI_COVH_GET_TSM_INFO: usize = 0;
-pub const SBI_COVH_CONVERT_PAGES: usize = 1;
-
-pub const SUPD_EXT_ID: usize = 0x53555044;
-pub const SBI_EXT_SUPD_GET_ACTIVE_DOMAINS: usize = 0;
 
 macro_rules! cove_unpack_fid {
     ($fid:expr) => {
@@ -140,7 +138,7 @@ pub fn tee_handler_entry() -> ! {
         j {tee_handler_exit}
         ",
         tee_stack = sym _tee_stack_top,
-        covh_ext_id = const COVH_EXT_ID,
+        covh_ext_id = const SBI_COVH_EXT_ID,
         context_size= const size_of::<Context>(),
         scratch_size = const TEE_SCRATCH_SIZE,
         sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
@@ -405,7 +403,7 @@ pub fn supd_handler_entry() -> ! {
         j {tee_handler_exit}
     ",
         tee_stack = sym _tee_stack_top,
-        supd_ext_id = const SUPD_EXT_ID,
+        supd_ext_id = const SBI_SUPD_EXT_ID,
         context_size= const size_of::<Context>(),
         scratch_size = const TEE_SCRATCH_SIZE,
         sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
