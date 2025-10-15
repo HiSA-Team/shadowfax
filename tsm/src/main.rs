@@ -7,9 +7,10 @@ use core::{cell::OnceCell, panic::PanicInfo, ptr::NonNull};
 
 use common::{
     sbi::{
-        SbiRet, EID_COVH, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
+        SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
         SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU,
-        SBI_COVH_DESTROY_TVM, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RUN_TVM_VCPU,
+        SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO,
+        SBI_COVH_RUN_TVM_VCPU,
     },
     tsm::{TsmInfo, TsmState, TsmStateData},
 };
@@ -105,7 +106,7 @@ fn main(
 ) -> ! {
     // The TSM should be called only for CoVH.
     // TODO: the TSM will be invoked also for the CoVG SBI
-    assert_eq!(a7, EID_COVH);
+    assert_eq!(a7, SBI_COVH_EXT_ID);
     let mut state_addr: usize;
 
     unsafe {
@@ -194,7 +195,7 @@ fn main(
             in("a0") ret.a0,
             in("a1") ret.a1,
             in("a6") a6,
-            in("a7") EID_COVH,
+            in("a7") SBI_COVH_EXT_ID,
             options(noreturn)
         );
     };
