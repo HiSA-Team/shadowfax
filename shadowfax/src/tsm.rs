@@ -14,7 +14,7 @@ use rsa::{
 use sha2::Sha256;
 
 #[derive(Clone)]
-pub struct Tsm {
+pub struct TsmDomain {
     pub id: usize,
     pub trust_map: usize,
     pub start_region_addr: usize,
@@ -25,7 +25,7 @@ pub struct Tsm {
     pub next_pmp_slot: usize,
 }
 
-impl Tsm {
+impl TsmDomain {
     fn empty() -> Self {
         Self {
             id: 0,
@@ -39,11 +39,11 @@ impl Tsm {
     }
 
     pub fn from_fdt_node(node: &DevTreeNode) -> Self {
-        let mut tsm = Tsm::empty();
+        let mut tsm = TsmDomain::empty();
         for prop in node.props().iterator() {
             if let Ok(prop) = prop {
-                let name = prop.name().unwrap_or("");
-                match name {
+                let prop_name = prop.name().unwrap_or("");
+                match prop_name {
                     "id" => tsm.id = prop.u32(0).unwrap() as usize,
                     "memory" => {
                         tsm.start_region_addr = prop.u64(0).unwrap() as usize;
@@ -69,10 +69,10 @@ impl Tsm {
                 }
             }
         }
-
         tsm
     }
 
+    /// Loads the TSM elf, verify it's signature
     pub fn verify_and_load(
         bin: &[u8],
         _start_addr: usize,
