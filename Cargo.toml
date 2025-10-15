@@ -2,8 +2,7 @@
 resolver = "3"
 members = [
   "common",
-  "payload/hypervisor",
-  "payload/tsm",
   "shadowfax",
   "test",
+  "tsm",
 ]

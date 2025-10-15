@@ -46,8 +46,8 @@ print_export "PLATFORM" "${PLATFORM}"
 export RUSTFLAGS="-C target-feature=+h"
 print_export "RUSTFLAGS" "$RUSTFLAGS"
 
-export ARCHITECTURE=$(uname -m)
-print_export "ARCHITECTURE" "$ARCHITECTURE"
+export HOST_ARCHITECTURE=$(uname -m)
+print_export "HOST_ARCHITECTURE" "$HOST_ARCHITECTURE"
 
 export LIBC=$(get_libc)
 print_export "LIBC" "$LIBC"
@@ -56,13 +56,10 @@ export LIBC_PREFIX=$([ "$LIBC" = "glibc" ] && echo "gnu" || echo "$LIBC")
 print_export "LIBC_PREFIX" "$LIBC_PREFIX"
 
 # Export CROSS_COMPILE if not on riscv64
-if [ "$ARCHITECTURE" != "riscv64" ]; then
+if [ "$HOST_ARCHITECTURE" != "riscv64" ]; then
   CROSS_COMPILE="riscv64-linux-${LIBC_PREFIX}-"
   export CROSS_COMPILE
   print_export "CROSS_COMPILE" "${CROSS_COMPILE}"
-
-  export ARCH=riscv
-  print_export "ARCH" "${ARCH}"
 fi
 
 if [ "$LIBC_PREFIX" = "musl" ]; then
