@@ -152,3 +152,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pre-commit install
 ```
+
+If you have `uv` you can use the [tool API](https://docs.astral.sh/uv/concepts/tools/#the-bin-directory).
+```sh
+uv tool install pre-commit
+```
