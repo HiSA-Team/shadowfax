@@ -214,8 +214,8 @@ pub fn handler() -> ! {
 
         sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
         ecall_code = const Exception::SupervisorEnvCall as usize,
-        covh_ext_id = const cove::COVH_EXT_ID,
-        supd_ext_id = const cove::SUPD_EXT_ID,
+        covh_ext_id = const common::sbi::SBI_COVH_EXT_ID,
+        supd_ext_id = const common::sbi::SBI_SUPD_EXT_ID,
         tee_handler = sym cove::tee_handler_entry,
         supd_handler = sym cove::supd_handler_entry,
 

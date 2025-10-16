@@ -22,10 +22,10 @@
 !/environment.sh
 !/LICENSE
 !/Makefile
-!/payload
 !/README.md
 !/requirements.txt
 !/rust-toolchain.toml
 !/scripts
 !/shadowfax
 !/test
+!/tsm

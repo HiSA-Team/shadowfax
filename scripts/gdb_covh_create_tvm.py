@@ -31,7 +31,7 @@ GPA_BASE: int = 0x1000
 NUM_PAGES_TO_DONATE: int = 16
 JAL_LOOP_WORD = struct.pack("<I", 0x0000006F)  # jal x0, 0  -> tight infinite loop
 
-payload_address: int = int(os.environ["SHADOWFAX_JUMP_ADDRESS"], 16)
+payload_address: int = int(os.environ["ROOT_DOMAIN_JUMP_ADDRESS"], 16)
 confidential_memory_start_addr: int = payload_address + 0x4000
 tvm_source_code_addr: int = payload_address + 0x2000
 tvm_page_start_addr: int = confidential_memory_start_addr + PAGE_DIRECTORY_SIZE + 0x1000
@@ -98,10 +98,10 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     assert tsm_capabilities == 0, (
         f"tsm_capabilities must be 0; current {tsm_capabilities}"
     )
-    assert tvm_state_pages == 1, f"tvm_state_pages must be 0; current {tvm_state_pages}"
+    assert tvm_state_pages == 1, f"tvm_state_pages must be 1; current {tvm_state_pages}"
     assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
-    assert tvm_vcpu_state_pages == 0, (
-        f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
+    assert tvm_vcpu_state_pages == 1, (
+        f"tvm_vcpu_state_pages must be 1; current {tvm_vcpu_state_pages}"
     )
 
 

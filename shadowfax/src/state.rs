@@ -19,18 +19,10 @@
        shadowfax-domains {
            compatible = "shadowfax,domain,config";
 
-           untrusted-domain {
-               compatible = "shadowfax,domain,instance";
-               id = <0x0>
-               trust = <0x1>;
-               tsm-type = "none";
-           };
-
            trusted-domain {
                compatible = "shadowfax,domain,instance";
                id = <0x1>;
                memory = <0x0 0x81000000 0x0 0x82000000>;
-               tsm-type = "default";
            };
        };
 * `
@@ -40,11 +32,11 @@
 use core::cell::OnceCell;
 
 use alloc::vec::Vec;
-use common::tsm;
+use common::tsm::{TSM_IMPL_ID, TSM_VERSION};
 use fdt_rs::{base::DevTree, prelude::FallibleIterator};
 use spin::mutex::Mutex;
 
-use crate::{context::Context, cove::TEE_SCRATCH_SIZE, tsm::Tsm};
+use crate::{context::Context, cove::TEE_SCRATCH_SIZE, tsm::TsmDomain};
 
 #[link_section = ".rodata"]
 static DEFAULT_TSM: &[u8] = include_bytes!("../../target/riscv64imac-unknown-none-elf/debug/tsm");
@@ -58,7 +50,7 @@ static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey.pem");
 pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
 pub struct State {
-    pub tsms: Vec<Tsm>,
+    pub tsms: Vec<TsmDomain>,
     pub current_id: usize,
 }
 
@@ -87,14 +79,15 @@ pub fn init(
 
     let mut node_iter = fdt.compatible_nodes("shadowfax,domain,instance");
     while let Some(node) = node_iter.next().unwrap() {
-        let mut tsm = Tsm::from_fdt_node(&node);
+        let mut tsm = TsmDomain::from_fdt_node(&node);
 
-        Tsm::verify_and_load(
+        TsmDomain::verify_and_load(
             DEFAULT_TSM,
             tsm.start_region_addr,
             DEFAULT_TSM_SIGN,
             DEFAULT_TSM_PUBKEY,
         )?;
+
         let context_addr = tee_stack
             - (TEE_SCRATCH_SIZE + size_of::<Context>())
             - (tsm.id + 1) * size_of::<Context>();
@@ -104,14 +97,30 @@ pub fn init(
         tsm.context_addr = context_addr;
         tsm.state_addr = tsm_state_addr;
 
-        // init the TSM state
+        // for now assume we have 1 TSM
         assert!(
-            core::mem::size_of::<tsm::State>() < tsm_state_size,
+            core::mem::size_of::<common::tsm::TsmStateData>() < tsm_state_size,
             "Unsufficient memory for TSM State"
         );
-        // for now assume we have 1 TSM
+
+        // init the TSM state
+        let tsm_initial_state = common::tsm::TsmStateData {
+            info: common::tsm::TsmInfo {
+                tsm_state: common::tsm::TsmState::TsmNotLoaded,
+                tsm_impl_id: TSM_IMPL_ID,
+                tsm_version: TSM_VERSION,
+                _padding: 0,
+                tsm_capabilities: 0,
+                tvm_state_pages: 1,
+                tvm_vcpu_state_pages: 1,
+                tvm_max_vcpus: 1,
+            },
+        };
         unsafe {
-            core::ptr::write(tsm_state_addr as *mut tsm::State, tsm::State::new());
+            core::ptr::write(
+                tsm_state_addr as *mut common::tsm::TsmStateData,
+                tsm_initial_state,
+            );
         }
 
         // Setup PMP entries for the memory region
@@ -148,7 +157,7 @@ pub fn init(
 
         // Setup PMP entries for the state
         let start_addr = tsm.state_addr;
-        let end_addr = tsm_state_addr + core::mem::size_of::<tsm::State>();
+        let end_addr = tsm_state_addr + core::mem::size_of::<common::tsm::TsmStateData>();
         let size = (end_addr - start_addr).next_power_of_two();
         let base = start_addr & !(size - 1);
 

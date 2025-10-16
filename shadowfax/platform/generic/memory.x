@@ -95,7 +95,4 @@ SECTIONS {
   /* Mark the end of the RAM. TSM-driver can start loading the TSM */
   . = ALIGN(16K);
   _ram_end = .;
-
-
-
 }
