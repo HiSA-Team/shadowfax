@@ -31,7 +31,10 @@
 use core::{ffi, panic::PanicInfo};
 
 use linked_list_allocator::LockedHeap;
-use riscv::asm::wfi;
+use riscv::{
+    asm::wfi,
+    register::{mhartid, misa},
+};
 
 #[macro_use]
 mod debug;
@@ -236,8 +239,6 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         riscv::register::mscratch::write(0);
     }
 
-    dump_linker_symbols();
-
     // this enables heap allocations
     unsafe {
         // Initialize global allocator
@@ -261,6 +262,8 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         usize::from_str_radix(address, 16)
             .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
     };
+
+    dump_linker_symbols(next_stage_address);
 
     let tsm_state_start = unsafe { &_tsm_state_start as *const u8 as usize };
     let tsm_state_size = unsafe { &_tsm_state_size as *const u8 as usize };
@@ -297,22 +300,22 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
      * -|    |   Firmware Code & Data                        |    |
      * -|    |                                               |    |
      * -|    |   (Includes the read/write (R/W) section,     |    |
-     * -|    |    beginning at _fw_rw_start)                   |    |
+     * -|    |    beginning at _fw_rw_start)                 |    |
      * -|    +-----------------------------------------------+    |
      * -|  _fw_end                                                |
      * -+---------------------------------------------------------+
-     * -| HART Stacks (for all HARTs, total size = s7 * s8)        |
+     * -| HART Stacks (for all HARTs, total size = s7 * s8)       |
      * -|                                                         |
      * -|  Hart 0 Stack:                                          |
      * -|    +---------------------------+                        |
      * -|    |  (Stack space)            |                        |
      * -|    |                           |                        |
-     * -|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE    |
-     * -|    |    (holds various fields: |    (e.g., fw_start,     |
-     * -|    |     fw_start, fw_size,     |     fw_size, RW offset,  |
-     * -|    |     fw_rw_offset,         |     heap offset/size,    |
-     * -|    |     heap offset/size,     |     boot parameters,     |
-     * -|    |     boot addresses, etc.) |     etc.)                |
+     * -|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE   |
+     * -|    |    (holds various fields: |    (e.g., fw_start,    |
+     * -|    |     fw_start, fw_size,     |     fw_size, RW offset|
+     * -|    |     fw_rw_offset,         |     heap offset/size,  |
+     * -|    |     heap offset/size,     |     boot parameters,   |
+     * -|    |     boot addresses, etc.) |     etc.)              |
      * -|    +---------------------------+                        |
      * -+---------------------------------------------------------+
      * -| Heap Region                                             |
@@ -450,28 +453,59 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 }
 
 // a small helper to print an address using the print_raw! macro
-fn dump_linker_symbols() {
-    // print a header
-    print_raw!("[BOOT]: Linker symbols:\n");
+fn dump_linker_symbols(next_stage_address: usize) {
+    // print header
+    print_raw!("\nSHADOWFAX Firmware v0.1\n");
+    print_raw!("========================\n");
 
     unsafe {
-        let symbols: &[(&str, usize)] = &[
-            ("_fw_start", &_fw_start as *const u8 as usize),
-            ("_fw_end", &_fw_end as *const u8 as usize),
-            ("_fw_rw_start", &_fw_rw_start as *const u8 as usize),
-            ("_start_bss", &_start_bss as *const u8 as usize),
-            ("_end_bss", &_end_bss as *const u8 as usize),
-            ("_boot_stack_top", &_boot_stack_top as *const u8 as usize),
-            ("_tee_stack_top", &_tee_stack_top as *const u8 as usize),
-            ("_tsm_state_start", &_tsm_state_start as *const u8 as usize),
-            ("_tsm_state_size", &_tsm_state_size as *const u8 as usize),
-        ];
+        let fw_start = &_fw_start as *const u8 as usize;
+        let fw_end = &_fw_end as *const u8 as usize;
+        let fw_size = (fw_end - fw_start) / 1024;
 
-        for (name, addr) in symbols {
-            // use format_args via print_raw to keep code small:
-            print_raw!("  {:20} = {:#018x}\n", name, addr);
-        }
+        print_raw!("Firmware Base     : {:#018x}\n", fw_start);
+        print_raw!("Firmware Size     : {} KB\n", fw_size);
+
+        let rw_start = &_fw_rw_start as *const u8 as usize;
+        let bss_start = &_start_bss as *const u8 as usize;
+        let bss_end = &_end_bss as *const u8 as usize;
+        let bss_size = (bss_end - bss_start) / 1024;
+        print_raw!("Firmware RW Start : {:#018x}\n", rw_start);
+        print_raw!("BSS Size          : {} KB\n", bss_size);
+
+        print_raw!(
+            "Boot Stack Top    : {:#018x}\n",
+            &_boot_stack_top as *const u8 as usize
+        );
+        print_raw!(
+            "TEE Stack Top     : {:#018x}\n",
+            &_tee_stack_top as *const u8 as usize
+        );
+        print_raw!(
+            "TSM State Start   : {:#018x}\n",
+            &_tsm_state_start as *const u8 as usize
+        );
+        print_raw!(
+            "TSM State Size    : {:#018x}\n",
+            &_tsm_state_size as *const u8 as usize
+        );
+
+        print_raw!("Root Domain Address    : {:#018x}\n", next_stage_address);
     }
+
+    // hart and ISA info
+    let hart_id = mhartid::read();
+    print_raw!("Boot HART ID      : {}\n", hart_id);
+
+    let misa = misa::read();
+    let xlen = match misa.mxl() {
+        misa::XLEN::XLEN32 => 32,
+        misa::XLEN::XLEN64 => 64,
+        misa::XLEN::XLEN128 => 128,
+    };
+    // TODO build feature string
+    print_raw!("Boot HART ISA     : rv{}\n", xlen);
+    print_raw!("========================\n\n");
 }
 
 /// Calculates the starting address of the scratch space for a given HART (Hardware Thread).

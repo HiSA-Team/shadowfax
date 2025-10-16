@@ -133,7 +133,6 @@ fn configure_linker(linkerscript_path: &PathBuf, libopensbi_path: &PathBuf) {
     println!("cargo:rustc-link-arg=-T{}", linkerscript_path.display());
     println!("cargo:rustc-link-arg=-static");
     println!("cargo:rustc-link-arg=-nostdlib");
-    // println!("cargo:rustc-link-arg=-melf64lriscv");
     println!("cargo:rustc-link-search={}", libopensbi_path.display());
 
     // Opensbi installs the static library in `./lib64/lp64/opensbi/generic/lib/`
