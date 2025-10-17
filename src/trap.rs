@@ -196,7 +196,7 @@ pub fn handler() -> ! {
             ld t4, {sbi_trap_regs_offset_t4}(a0)
             ld t5, {sbi_trap_regs_offset_t5}(a0)
             ld t6, {sbi_trap_regs_offset_t6}(a0)
-            ",
+        ",
 
         /*
          * Restores the machine status (MSTATUS) and machine exception program counter (MEPC)
@@ -465,61 +465,75 @@ extern "C" fn tee_handler(fid: usize) -> ! {
                 dst_addr
             }
             _ => {
-                // We need to store the calling context into the right structure
-                let src_ctx = (scratch_addr
-                    - (TEE_SCRATCH_SIZE + size_of::<Context>())
-                    - (active_domain_id + 1) * size_of::<Context>())
-                    as *mut Context;
-                unsafe {
-                    core::ptr::copy_nonoverlapping(scratch_ctx, src_ctx, 1);
-                }
-                let dst_addr = scratch_addr
-                    - (TEE_SCRATCH_SIZE + size_of::<Context>())
-                    - (dst_domain_id + 1) * size_of::<Context>();
+                // first check if there is a trust relationship between the two domains
+                if !active_domain.is_trusted(dst_domain_id) {
+                    let dst_addr = scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>());
 
-                let dst_ctx = dst_addr as *mut Context;
-                unsafe {
-                    // we need to preserve all a0-a7 registers.
-                    // Easier (maybe to help prefetch to store everything and to delete a5)
-                    for i in 10..18 {
-                        (*dst_ctx).regs[i] = (*src_ctx).regs[i];
+                    let dst_ctx = dst_addr as *mut Context;
+                    unsafe {
+                        (*dst_ctx).regs[10] = usize::MAX;
+                        (*dst_ctx).regs[11] = 0;
+                        // increment mepc to avoid loop
+                        (*dst_ctx).mepc += 4;
                     }
-                }
+                    dst_addr
+                } else {
+                    // We need to store the calling context into the right structure
+                    let src_ctx = (scratch_addr
+                        - (TEE_SCRATCH_SIZE + size_of::<Context>())
+                        - (active_domain_id + 1) * size_of::<Context>())
+                        as *mut Context;
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(scratch_ctx, src_ctx, 1);
+                    }
+                    let dst_addr = scratch_addr
+                        - (TEE_SCRATCH_SIZE + size_of::<Context>())
+                        - (dst_domain_id + 1) * size_of::<Context>();
 
-                state.domains[active_domain_id].active = 0;
-                state.domains[dst_domain_id].active =
-                    (1 << active_domain_id) | (1 << dst_domain_id);
-
-                // Perform operations to allow the specific functionality
-                match fid {
-                    // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
-                    // where he will write the tsm_info struct (a0) for the necessary size (a1).
-                    cove::SBI_COVH_GET_TSM_INFO => {
-                        let addr = unsafe { (*dst_ctx).regs[10] };
-                        let size = unsafe { (*dst_ctx).regs[11] };
-
-                        let slot = 2;
-
-                        // Build the CFG byte for TOR + RW (not locked)
-                        let range = riscv::register::Range::TOR as usize;
-                        let perm = riscv::register::Permission::RW as usize;
-                        let locked = false as usize;
-                        let cfg_byte = (locked << 7) | (range << 3) | (perm);
-
-                        // Mask out old byte for slot 1 in pmpcfg0
-                        let byte_mask = 0xff << (slot * 8);
-
-                        unsafe {
-                            (*dst_ctx).pmpaddr[slot - 1] = addr >> 2;
-                            (*dst_ctx).pmpaddr[slot] = (addr + size) >> 2;
-
-                            (*dst_ctx).pmpcfg &= !byte_mask;
-                            (*dst_ctx).pmpcfg |= cfg_byte << (slot * 8);
+                    let dst_ctx = dst_addr as *mut Context;
+                    unsafe {
+                        // we need to preserve all a0-a7 registers.
+                        // Easier (maybe to help prefetch to store everything and to delete a5)
+                        for i in 10..18 {
+                            (*dst_ctx).regs[i] = (*src_ctx).regs[i];
                         }
                     }
-                    _ => {}
+
+                    state.domains[active_domain_id].active = 0;
+                    state.domains[dst_domain_id].active =
+                        (1 << active_domain_id) | (1 << dst_domain_id);
+
+                    // Perform operations to allow the specific functionality
+                    match fid {
+                        // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
+                        // where he will write the tsm_info struct (a0) for the necessary size (a1).
+                        cove::SBI_COVH_GET_TSM_INFO => {
+                            let addr = unsafe { (*dst_ctx).regs[10] };
+                            let size = unsafe { (*dst_ctx).regs[11] };
+
+                            let slot = 2;
+
+                            // Build the CFG byte for TOR + RW (not locked)
+                            let range = riscv::register::Range::TOR as usize;
+                            let perm = riscv::register::Permission::RW as usize;
+                            let locked = false as usize;
+                            let cfg_byte = (locked << 7) | (range << 3) | (perm);
+
+                            // Mask out old byte for slot 1 in pmpcfg0
+                            let byte_mask = 0xff << (slot * 8);
+
+                            unsafe {
+                                (*dst_ctx).pmpaddr[slot - 1] = addr >> 2;
+                                (*dst_ctx).pmpaddr[slot] = (addr + size) >> 2;
+
+                                (*dst_ctx).pmpcfg &= !byte_mask;
+                                (*dst_ctx).pmpcfg |= cfg_byte << (slot * 8);
+                            }
+                        }
+                        _ => {}
+                    }
+                    dst_addr
                 }
-                dst_addr
             }
         }
     };
@@ -616,9 +630,6 @@ fn tee_handler_exit() -> ! {
             csrw pmpaddr6, t0
             ld t0, 49*8(sp)
             csrw pmpaddr7, t0
-
-            fence
-            fence.i
 
             ld t0, 41*8(sp)
             csrw pmpcfg0, t0
@@ -737,7 +748,6 @@ fn supd_handler(fid: usize) -> ! {
         "
         mv sp, {target_domain}
         j {tee_handler_exit}
-
         ",
         target_domain  = in(reg) dst_addr,
         tee_handler_exit = sym supd_handler_exit,

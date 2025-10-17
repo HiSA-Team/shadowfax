@@ -267,7 +267,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     };
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
-    shadowfax_core::state::init(fdt_addr, next_stage_address).unwrap();
+    shadowfax_core::state::init(fdt_addr).unwrap();
 
     /*
      * This code initializes the scratch space, which is a per-HART data structure
