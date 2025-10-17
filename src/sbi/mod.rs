@@ -8,3 +8,5 @@ pub struct SbiRet {
     pub error: isize,
     pub value: isize,
 }
+
+pub const SBI_COVH_GET_TSM_INFO: usize = 0;

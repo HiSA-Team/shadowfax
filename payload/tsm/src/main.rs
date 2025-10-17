@@ -45,7 +45,7 @@ extern "C" fn entry() -> ! {
             stack_size_per_hart = const STACK_SIZE_PER_HART,
             stack_top = sym _top_b_stack,
             main = sym main,
-            options(noreturn)
+            options(noreturn, nostack)
         )
     }
 }
@@ -56,24 +56,13 @@ const COVE_TSM_CAP_PROMOTE_TVM: usize = 0x0;
 const COVE_TSM_CAP_ATTESTATION_LOCAL: usize = 0x1;
 
 // Since this is a TSM with non reentrant model, an ECALL should be a TEERET
-fn main() -> ! {
+fn main(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> ! {
     let mut a6: usize;
     unsafe { core::arch::asm!("add {}, a6, zero", out(reg) a6, options(nomem)) };
     let (_sdid, fid) = cove_unpack_fid!(a6);
     match fid {
         SBI_COVH_GET_TSM_INFO => {
-            let mut tsm_info_addr: usize;
-            let mut tsm_info_size: usize;
-            unsafe {
-                core::arch::asm!(
-                "add {}, a0, zero",
-                "add {}, a1, zero",
-                out(reg) tsm_info_addr,
-                out(reg)tsm_info_size,
-                options(nomem, nostack)
-                )
-            };
-            let tsm_info_ptr = tsm_info_addr as *mut TsmInfo;
+            let tsm_info_ptr = a0 as *mut TsmInfo;
             let state = TsmInfo {
                 tsm_state: TsmState::TsmReady,
                 tsm_impl_id: 69,
@@ -86,8 +75,7 @@ fn main() -> ! {
             };
 
             unsafe { tsm_info_ptr.write(state) }
-
-            assert_eq!(tsm_info_size, core::mem::size_of::<TsmInfo>());
+            assert_eq!(a1, core::mem::size_of::<TsmInfo>());
         }
         _ => {}
     }

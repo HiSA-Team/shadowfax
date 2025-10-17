@@ -90,7 +90,7 @@ SECTIONS {
     /* Heap used by tsm-driver */
     _tee_heap_start = .;
     . += _heap_size;
-    . = ALIGN(4K);
+
     /* Scratch memory for CoVE interrupt handling and interrupt handling*/
     . = ALIGN(4K);
     . += _tee_stack_size;
