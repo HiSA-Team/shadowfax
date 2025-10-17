@@ -29,6 +29,6 @@ define p_context
   end
 end
 
-break shadowfax::trap::tee_handler
-# break shadowfax::trap::handler
+break shadowfax::cove::covh_handler
+break shadowfax::trap::handler
 break tsm::entry
