@@ -4,7 +4,6 @@
 # - installs rust toolchain with riscv target;
 # - builds and install opensbi libraries and header files;
 # - builds a custom clang with static linking from llvm (only for musl systems)
-#
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
 # Colors

@@ -27,11 +27,11 @@
 #![feature(fn_align)]
 #![feature(once_cell_get_mut)]
 #![feature(naked_functions_rustic_abi)]
-
 use core::{ffi, panic::PanicInfo};
 
 use linked_list_allocator::LockedHeap;
 use riscv::asm::wfi;
+use sbi::cove::supd_extension::SBI_SUPD_EXTENSION;
 
 #[macro_use]
 mod debug;
