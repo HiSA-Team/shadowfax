@@ -3,7 +3,7 @@
 #![feature(never_type)]
 #![feature(fn_align)]
 
-use core::{cell::OnceCell, panic::PanicInfo, ptr::NonNull};
+use core::{panic::PanicInfo, ptr::NonNull};
 
 use common::{
     sbi::{
@@ -14,24 +14,25 @@ use common::{
     },
     tsm::{TsmInfo, TsmState, TsmStateData},
 };
-use linked_list_allocator::LockedHeap;
 
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::hyper::HypervisorState;
 
+mod allocator;
+mod guest_page_table;
 mod h_extension;
 mod hyper;
 mod log;
 
-#[global_allocator]
-/// Global allocator.
-static ALLOCATOR: LockedHeap = LockedHeap::empty();
+extern crate alloc;
 
 unsafe extern "C" {
     /// boot stack top (defined in `memory.x`)
     static _top_b_stack: u8;
+    static mut __heap_start: u8;
+    static mut __heap_end: u8;
 }
 
 /*
@@ -79,16 +80,18 @@ extern "C" fn _start() -> ! {
 static mut HYPER_STATE: MaybeUninit<HypervisorState> = MaybeUninit::uninit();
 static INIT_DONE: AtomicBool = AtomicBool::new(false);
 
+// Init the state of the hypervisor, the heap and the mark the TSM ready
 fn get_or_init_state(state_addr: usize) -> &'static mut HypervisorState {
     if !INIT_DONE.load(Ordering::Acquire) {
         unsafe {
-            let mut state = unsafe { State::from_addr(state_addr).expect("Invalid state address") };
+            let mut state = State::from_addr(state_addr).expect("Invalid state address");
             let tsm_state_data = state.as_mut();
             (*tsm_state_data).info.tsm_state = TsmState::TsmReady;
 
             HYPER_STATE.write(HypervisorState::new());
         }
         INIT_DONE.store(true, Ordering::Release);
+        allocator::GLOBAL_ALLOCATOR.init(&raw mut __heap_start, &raw mut __heap_end);
     }
     unsafe { &mut *HYPER_STATE.as_mut_ptr() }
 }

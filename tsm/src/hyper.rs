@@ -5,12 +5,15 @@ use riscv::register::{
     stvec::{self, Stvec},
 };
 
-use crate::h_extension::{
-    csrs::{
-        hedeleg::{self, ExceptionKind},
-        hgatp, hideleg, hstatus, hvip, vsatp, VsInterruptKind,
+use crate::{
+    guest_page_table::GuestPageTable,
+    h_extension::{
+        csrs::{
+            hedeleg::{self, ExceptionKind},
+            hgatp, hideleg, hstatus, hvip, vsatp, VsInterruptKind,
+        },
+        instruction::hfence_gvma_all,
     },
-    instruction::hfence_gvma_all,
 };
 
 const MAX_VCPU_PER_TVM: usize = 1;
@@ -162,6 +165,8 @@ impl HypervisorState {
             *owner = Some(1);
         }
 
+        // init the page table
+        let table = GuestPageTable::new();
         unsafe {
             let ptr = page_table_addr as *mut u8;
             core::ptr::write_bytes(ptr, 0, PAGE_DIRECTORY_SIZE);
@@ -268,7 +273,7 @@ impl HypervisorState {
 
         match t.state_enum {
             TvmState::TvmInitializing => {}
-            _ => anyhow::bail!("cannot add memory region unless TVM_INITIALIZING"),
+            _ => anyhow::bail!("cannot alter TVM unless TVM_INITIALIZING"),
         }
 
         assert_eq!(tsm_page_type, 0, "accepting 4k pages for now");
@@ -292,65 +297,14 @@ impl HypervisorState {
         Ok(())
     }
 
-    pub fn tvm_run_vcpu(&self, _tvm_id: usize, _tvm_vcpu_id: usize) -> anyhow::Result<!> {
-        // perform the context switch
+    pub fn tvm_run_vcpu(&self, tvm_id: usize, tvm_vcpu_id: usize) -> anyhow::Result<!> {
         if let Some(tvm) = &self.tvm {
-            hvip::clear(VsInterruptKind::External);
-            hvip::clear(VsInterruptKind::Timer);
-            hvip::clear(VsInterruptKind::Software);
-
-            // disable address translation.
-            vsatp::write(0);
-
-            // specify delegation exception kinds.
-            hedeleg::write(
-                ExceptionKind::InstructionAddressMissaligned as usize
-                    | ExceptionKind::Breakpoint as usize
-                    | ExceptionKind::EnvCallFromUorVU as usize
-                    | ExceptionKind::InstructionPageFault as usize
-                    | ExceptionKind::LoadPageFault as usize
-                    | ExceptionKind::StoreAmoPageFault as usize,
-            );
-            // specify delegation interrupt kinds.
-            hideleg::write(
-                VsInterruptKind::External as usize
-                    | VsInterruptKind::Timer as usize
-                    | VsInterruptKind::Software as usize,
-            );
-            hgatp::set(hgatp::Mode::Sv39x4, 0, tvm.page_table_addr >> 12);
-            hfence_gvma_all();
-            unsafe {
-                // sstatus.SUM = 1, sstatus.SPP = 0
-                sstatus::set_sum();
-                sstatus::set_spp(sstatus::SPP::Supervisor);
-                // sstatus.sie = 1
-                sstatus::set_sie();
-                // sstatus.fs = 1
-                sstatus::set_fs(FS::Initial);
-
-                // hstatus.spv = 1 (enable V bit when sret executed)
-                hstatus::set_spv();
-
-                // set entry point
-                sepc::write(tvm.entry_sepc);
-                let mut stvec = stvec::read();
-                stvec.set_address(tvm.entry_sepc);
-                stvec.set_trap_mode(stvec::TrapMode::Direct);
-
-                stvec::write(stvec);
-
-                core::arch::asm!(
-                    r#"
-                            fence.i
-                            sret
-                        "#,
-
-                    in("a0") 0,
-                    in("a1") 0,
-                    options(readonly, noreturn, nostack)
-                )
+            if tvm.id != tvm_id {
+                return Err(anyhow::Error::msg("no VM"));
             }
+            tvm.run_vcpu(tvm_vcpu_id)?
         }
+
         anyhow::bail!("no VM")
     }
 
@@ -398,6 +352,70 @@ impl Tvm {
         self.entry_arg = entry_arg;
         self.tvm_identity_addr = tvm_identity_addr;
         self.state_enum = TvmState::TvmRunnable;
+    }
+
+    /// This function actually performs the context switch into VS-mode starting the guest
+    fn run_vcpu(&self, vcpu_id: usize) -> anyhow::Result<!> {
+        let vcpu = self
+            .vcpus
+            .iter()
+            .enumerate()
+            .find(|(id, _)| *id == vcpu_id)
+            .ok_or_else(|| anyhow::anyhow!("no vcpu"))?;
+
+        hvip::clear(VsInterruptKind::External);
+        hvip::clear(VsInterruptKind::Timer);
+        hvip::clear(VsInterruptKind::Software);
+
+        // disable address translation.
+        vsatp::write(0);
+
+        // specify delegation exception kinds.
+        hedeleg::write(
+            ExceptionKind::InstructionAddressMissaligned as usize
+                | ExceptionKind::Breakpoint as usize
+                | ExceptionKind::EnvCallFromUorVU as usize
+                | ExceptionKind::InstructionPageFault as usize
+                | ExceptionKind::LoadPageFault as usize
+                | ExceptionKind::StoreAmoPageFault as usize,
+        );
+
+        // specify delegation interrupt kinds.
+        hideleg::write(
+            VsInterruptKind::External as usize
+                | VsInterruptKind::Timer as usize
+                | VsInterruptKind::Software as usize,
+        );
+
+        // configure the root page table address, VMID and specify SV39 pagination mode
+        // finally issue the hfence_gvma_all to flush the TLB
+        hgatp::set(hgatp::Mode::Sv39x4, self.id, self.page_table_addr >> 12);
+        hfence_gvma_all();
+
+        unsafe {
+            // sstatus.SUM = 1, sstatus.SPP = 0
+            sstatus::set_sum();
+            sstatus::set_spp(sstatus::SPP::Supervisor);
+            // sstatus.sie = 1
+            sstatus::set_sie();
+
+            // hstatus.spv = 1 (enable V bit when sret executed)
+            hstatus::set_spv();
+
+            // set entry point
+            sepc::write(self.entry_sepc);
+
+            core::arch::asm!(
+                r#"
+                    fence.i
+                    sret
+                "#,
+
+                in("a0") vcpu.0,
+                in("a1") 0,
+                options(nomem, noreturn, nostack)
+            )
+        }
     }
 }
 

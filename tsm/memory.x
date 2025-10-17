@@ -6,7 +6,9 @@ MEMORY
 REGION_ALIAS("REGION_TEXT", RAM);
 REGION_ALIAS("REGION_DATA", RAM);
 REGION_ALIAS("REGION_BSS", RAM);
+REGION_ALIAS("REGION_HEAP", RAM);
 
+__head
 SECTIONS {
     . = ORIGIN(RAM);
 
@@ -34,8 +36,9 @@ SECTIONS {
         _top_b_stack = .;
     } > REGION_DATA
 
-    /* Add relocation sections */
-    .rela.text : { *(.rela.text*) }
-    .rela.data : { *(.rela.data*) }
-    .rela.bss : { *(.rela.bss*) }
+    .heap : ALIGN(8) {
+        __heap_start = .;
+        . += 1 * 1024 * 1024
+        __heap_end = .;
+    } > REGION_HEAP
 }
