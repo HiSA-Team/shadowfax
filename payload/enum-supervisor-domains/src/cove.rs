@@ -9,7 +9,7 @@
  * It includes the current state of the TSM, its implementation identifier, version, supported
  * capabilities, and memory requirements for managing Trusted Virtual Machines (TVMs).
  */
-#[repr(C)]
+#[repr(C, align(4))]
 #[derive(Clone, Debug)]
 pub struct TsmInfo {
     /*

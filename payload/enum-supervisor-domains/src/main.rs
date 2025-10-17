@@ -83,6 +83,11 @@ fn main() -> ! {
 
     sbi_call(COVEH_EXT_ID as usize, fid, &sbi_args);
 
+    println!(
+        "[SHADOWFAX-HYPERVISOR] TSM has impl id: {}",
+        domain.tsm_impl_id
+    );
+
     loop {
         riscv::asm::wfi();
     }

@@ -11,8 +11,7 @@
 use riscv::interrupt::supervisor::Exception;
 
 use crate::{
-    _tee_scratch_start, opensbi,
-    sbi::SBI_COVH_GET_TSM_INFO,
+    _tee_scratch_start, cove, opensbi,
     shadowfax_core::state::{Context, TsmType, STATE},
 };
 use core::mem::offset_of;
@@ -28,9 +27,9 @@ pub const TEE_SCRATCH_SIZE: usize = 0xF000;
 /// The main trap handler function that orchestrates the saving and restoring of registers.
 /// The handler verifies if the trap is a TEECALL/TEERESUME or a TEERET and handles it with custom
 /// logic.
-#[align(4)]
+#[rustc_align(4)]
 #[unsafe(naked)]
-pub unsafe extern "C" fn handler() -> ! {
+pub fn handler() -> ! {
     core::arch::naked_asm!(
         /*
          * Check if the trap is a TEECALL/TEERET and perform the context switch to the tsm
@@ -44,10 +43,10 @@ pub unsafe extern "C" fn handler() -> ! {
             bnez t0, 1f
             li t0, {covh_ext_id}
             sub t0, a7, t0
-            bnez t0, 1f
-            ld t0, {sbi_scratch_tmp0_offset}(tp)
-            csrrw tp, mscratch, tp
-            j {tee_handler}
+            beqz t0, {tee_handler}
+            li t0, {supd_ext_id}
+            sub t0, a7, t0
+            beqz t0, {supd_handler}
             1:
         ",
         /*
@@ -226,8 +225,10 @@ pub unsafe extern "C" fn handler() -> ! {
 
         sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
         ecall_code = const Exception::SupervisorEnvCall as usize,
-        covh_ext_id = const 0x434F5648 as usize,
+        covh_ext_id = const cove::COVH_EXT_ID,
+        supd_ext_id = const cove::SUPD_EXT_ID,
         tee_handler = sym tee_handler_entry,
+        supd_handler = sym supd_handler_entry,
 
         mstatus_mpp_shift = const opensbi::MSTATUS_MPP_SHIFT,
         sbi_trap_context_size = const (size_of::<opensbi::sbi_trap_regs>() + size_of::<opensbi::sbi_trap_info>() ) ,
@@ -289,8 +290,6 @@ fn tee_handler_entry() -> ! {
     // - a7 as base pointer as we assume it as CoVE ID
     // - t0 as arithemtic register to calculate the offset
     "
-        csrrw tp, mscratch, tp
-        sd t0, {sbi_scratch_tmp0_offset}(tp)
         la a7, {tee_stack}
         li t0, {scratch_size}
         add t0, t0, {context_size}
@@ -301,7 +300,7 @@ fn tee_handler_entry() -> ! {
         la a7, {covh_ext_id}
         ld t0, {sbi_scratch_tmp0_offset}(tp)
         csrrw tp, mscratch, tp
-        ",
+    ",
     // save gprs
     "
         sd x0, 8 * 0 (sp)
@@ -356,7 +355,7 @@ fn tee_handler_entry() -> ! {
         // csrr scontext, t0
         csrr t0, mepc
         sd t0, 40*8(sp)
-        ",
+    ",
     // save pmp config
     "
         csrr t0, pmpcfg0
@@ -377,28 +376,12 @@ fn tee_handler_entry() -> ! {
         sd t0, 48*8(sp)
         csrr t0, pmpaddr7
         sd t0, 49*8(sp)
-        csrr t0, pmpaddr8
-        sd t0, 50*8(sp)
-        csrr t0, pmpaddr9
-        sd t0, 51*8(sp)
-        csrr t0, pmpaddr10
-        sd t0, 52*8(sp)
-        csrr t0, pmpaddr11
-        sd t0, 53*8(sp)
-        csrr t0, pmpaddr12
-        sd t0, 54*8(sp)
-        csrr t0, pmpaddr13
-        sd t0, 55*8(sp)
-        csrr t0, pmpaddr14
-        sd t0, 56*8(sp)
-        csrr t0, pmpaddr15
-        sd t0, 57*8(sp)
         la sp, {tee_stack}
         add a0, a6, zero
         call {tee_handler}
         ",
         tee_stack = sym _tee_scratch_start,
-        covh_ext_id = const 0x434F5648 as usize,
+        covh_ext_id = const cove::COVH_EXT_ID,
         context_size= const size_of::<Context>(),
         scratch_size = const TEE_SCRATCH_SIZE,
         sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
@@ -445,7 +428,7 @@ extern "C" fn tee_handler(fid: usize) -> ! {
         // Perform operations to cleanup specific to the functionality
         match fid {
             // Reset the PMP address to the shared memory
-            SBI_COVH_GET_TSM_INFO => {
+            cove::SBI_COVH_GET_TSM_INFO => {
                 let tsm_ctx = (scratch_addr
                     - (TEE_SCRATCH_SIZE + size_of::<Context>())
                     - (dst_domain_id + 1) * size_of::<Context>())
@@ -511,7 +494,7 @@ extern "C" fn tee_handler(fid: usize) -> ! {
                 match fid {
                     // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
                     // where he will write the tsm_info struct (a0) for the necessary size (a1).
-                    SBI_COVH_GET_TSM_INFO => {
+                    cove::SBI_COVH_GET_TSM_INFO => {
                         let addr = unsafe { (*dst_ctx).regs[10] };
                         let size = unsafe { (*dst_ctx).regs[11] };
 
@@ -567,7 +550,6 @@ fn tee_handler_exit() -> ! {
             ld ra, 1*8(sp)
             ld gp, 3*8(sp)
             ld tp, 4*8(sp)
-            ld t0, 5*8(sp)
             ld t1, 6*8(sp)
             ld t2, 7*8(sp)
             ld s0, 8*8(sp)
@@ -594,7 +576,7 @@ fn tee_handler_exit() -> ! {
             ld t4, 29*8(sp)
             ld t5, 30*8(sp)
             ld t6, 31*8(sp)
-            ",
+        ",
         // restore CSRs
         "
             ld t0, 32*8(sp)
@@ -615,7 +597,7 @@ fn tee_handler_exit() -> ! {
             // csrw scontext, t0
             ld t0, 40*8(sp)
             csrw mepc, t0
-            ",
+        ",
         // restore pmp
         "
             ld t0, 42*8(sp)
@@ -634,15 +616,183 @@ fn tee_handler_exit() -> ! {
             csrw pmpaddr6, t0
             ld t0, 49*8(sp)
             csrw pmpaddr7, t0
+
             fence
             fence.i
+
             ld t0, 41*8(sp)
             csrw pmpcfg0, t0
-        ",
-        "
+
+            fence
+            fence.i
+
             // restore t0 and sp
             ld t0, 5*8(sp)
             ld sp, 2*8(sp)
+        ",
+        "
+            mret
+        ",
+    )
+}
+
+#[unsafe(naked)]
+fn supd_handler_entry() -> ! {
+    core::arch::naked_asm!(
+    "
+        la a7, {tee_stack}
+        li t0, {scratch_size}
+        add t0, t0, {context_size}
+        sub a7, a7, t0
+        sd sp, 8*2(a7)
+        add sp, a7, zero
+        // restore a7 and t0 and swap back the mscratch
+        la a7, {supd_ext_id}
+        ld t0, {sbi_scratch_tmp0_offset}(tp)
+        csrrw tp, mscratch, tp
+    ",
+    // save gprs
+    "
+        sd x0, 8 * 0 (sp)
+        sd x1, 8 * 1 (sp)
+        sd x3, 8 * 3 (sp)
+        sd x4, 8 * 4 (sp)
+        sd x5, 8 * 5 (sp)
+        sd x6, 8 * 6 (sp)
+        sd x7, 8 * 7 (sp)
+        sd x8, 8 * 8 (sp)
+        sd x9, 8 * 9 (sp)
+        sd x10, 8 * 10 (sp)
+        sd x11, 8 * 11 (sp)
+        sd x12, 8 * 12 (sp)
+        sd x13, 8 * 13 (sp)
+        sd x14, 8 * 14 (sp)
+        sd x15, 8 * 15 (sp)
+        sd x16, 8 * 16 (sp)
+        sd x17, 8 * 17 (sp)
+        sd x18, 8 * 18 (sp)
+        sd x19, 8 * 19 (sp)
+        sd x20, 8 * 20 (sp)
+        sd x21, 8 * 21 (sp)
+        sd x22, 8 * 22 (sp)
+        sd x23, 8 * 23 (sp)
+        sd x24, 8 * 24 (sp)
+        sd x25, 8 * 25 (sp)
+        sd x26, 8 * 26 (sp)
+        sd x27, 8 * 27 (sp)
+        sd x28, 8 * 28 (sp)
+        sd x29, 8 * 29 (sp)
+        sd x30, 8 * 30 (sp)
+        sd x31, 8 * 31 (sp)
+    ",
+    // save csrs
+    "
+        csrr t0, mstatus
+        sd t0, 32*8(sp)
+        csrr t0, mepc
+        sd t0, 40*8(sp)
+    ",
+    "
+        la sp, {tee_stack}
+        mv a0, a6
+        call {handler}
+    ",
+        tee_stack = sym _tee_scratch_start,
+        supd_ext_id = const cove::SUPD_EXT_ID,
+        context_size= const size_of::<Context>(),
+        scratch_size = const TEE_SCRATCH_SIZE,
+        sbi_scratch_tmp0_offset = const offset_of!(opensbi::sbi_scratch, tmp0),
+        handler = sym supd_handler
+    )
+}
+
+fn supd_handler(fid: usize) -> ! {
+    let mut state_guard = STATE.lock();
+    let state = state_guard.get_mut().unwrap();
+    let scratch_addr = &raw const _tee_scratch_start as *const u8 as usize;
+    let dst_addr = scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>());
+    let dst_ctx = dst_addr as *mut Context;
+    match fid {
+        cove::SBI_EXT_SUPD_GET_ACTIVE_DOMAINS => {
+            let mut ret: usize = 0;
+            for d in state.domains.iter() {
+                ret |= 1 << d.id;
+            }
+            unsafe {
+                (*dst_ctx).regs[10] = 0;
+                (*dst_ctx).regs[11] = ret;
+            }
+        }
+        _ => unsafe {
+            (*dst_ctx).regs[10] = usize::MAX - 1;
+            (*dst_ctx).regs[11] = 0;
+        },
+    }
+
+    drop(state_guard);
+
+    // restore target domain context
+    unsafe {
+        core::arch::asm!(
+        "
+        mv sp, {target_domain}
+        j {tee_handler_exit}
+
+        ",
+        target_domain  = in(reg) dst_addr,
+        tee_handler_exit = sym supd_handler_exit,
+        options(nostack, noreturn)
+        )
+    }
+}
+
+#[unsafe(naked)]
+fn supd_handler_exit() -> ! {
+    core::arch::naked_asm!(
+        "
+            ld zero, 0(sp)
+            ld ra, 1*8(sp)
+            ld gp, 3*8(sp)
+            ld tp, 4*8(sp)
+            ld t1, 6*8(sp)
+            ld t2, 7*8(sp)
+            ld s0, 8*8(sp)
+            ld s1, 9*8(sp)
+            ld a0, 10*8(sp)
+            ld a1, 11*8(sp)
+            ld a2, 12*8(sp)
+            ld a3, 13*8(sp)
+            ld a4, 14*8(sp)
+            ld a5, 15*8(sp)
+            ld a6, 16*8(sp)
+            ld a7, 17*8(sp)
+            ld s2, 18*8(sp)
+            ld s3, 19*8(sp)
+            ld s4, 20*8(sp)
+            ld s5, 21*8(sp)
+            ld s6, 22*8(sp)
+            ld s7, 23*8(sp)
+            ld s8, 24*8(sp)
+            ld s9, 25*8(sp)
+            ld s10, 26*8(sp)
+            ld s11, 27*8(sp)
+            ld t3, 28*8(sp)
+            ld t4, 29*8(sp)
+            ld t5, 30*8(sp)
+            ld t6, 31*8(sp)
+        ",
+        // restore CSRs
+        "
+            ld t0, 32*8(sp)
+            csrw mstatus, t0
+            ld t0, 40*8(sp)
+            add t0, t0, 4
+            csrw mepc, t0
+            ld t0, 5*8(sp)
+            // restore sp
+            ld sp, 2*8(sp)
+        ",
+        "
             mret
         ",
     )

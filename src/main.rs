@@ -33,11 +33,10 @@ use core::{ffi, panic::PanicInfo};
 
 use linked_list_allocator::LockedHeap;
 use riscv::asm::wfi;
-use sbi::cove::supd_extension::SBI_SUPD_EXTENSION;
 
 #[macro_use]
 mod debug;
-mod sbi;
+mod cove;
 
 /// This module includes the `bindings.rs` generated
 /// using `build.rs` which translates opensbi C definitions
@@ -271,13 +270,6 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     // initialize shadowfax state which will be used to handle the CoVE SBI
     shadowfax_core::state::init(fdt_addr, next_stage_address).unwrap();
 
-    // register the supd extension leveraging the existing opensbi extension ecosystem.
-    // we could make this independent from opensbi, but this is ok for now since it
-    // is trivial to implement.
-    unsafe {
-        opensbi::sbi_ecall_register_extension(&raw mut SBI_SUPD_EXTENSION);
-    }
-
     /*
      * This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
@@ -307,22 +299,22 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
      * -|    |   Firmware Code & Data                        |    |
      * -|    |                                               |    |
      * -|    |   (Includes the read/write (R/W) section,     |    |
-     * -|    |    beginning at _fw_rw_start)                   |    |
+     * -|    |    beginning at _fw_rw_start)                 |    |
      * -|    +-----------------------------------------------+    |
      * -|  _fw_end                                                |
      * -+---------------------------------------------------------+
-     * -| HART Stacks (for all HARTs, total size = s7 * s8)        |
+     * -| HART Stacks (for all HARTs, total size = s7 * s8)       |
      * -|                                                         |
      * -|  Hart 0 Stack:                                          |
      * -|    +---------------------------+                        |
      * -|    |  (Stack space)            |                        |
      * -|    |                           |                        |
-     * -|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE    |
-     * -|    |    (holds various fields: |    (e.g., fw_start,     |
+     * -|    |  Scratch Area             | <-- SBI_SCRATCH_SIZE   |
+     * -|    |    (holds various fields: |    (e.g., fw_start,    |
      * -|    |     fw_start, fw_size,     |     fw_size, RW offset,  |
-     * -|    |     fw_rw_offset,         |     heap offset/size,    |
-     * -|    |     heap offset/size,     |     boot parameters,     |
-     * -|    |     boot addresses, etc.) |     etc.)                |
+     * -|    |     fw_rw_offset,         |     heap offset/size,  |
+     * -|    |     heap offset/size,     |     boot parameters,   |
+     * -|    |     boot addresses, etc.) |     etc.)              |
      * -|    +---------------------------+                        |
      * -+---------------------------------------------------------+
      * -| Heap Region                                             |
@@ -557,7 +549,7 @@ fn _trap_handler() {}
 
 /// This function causes the processor to enter an infinite loop, effectively halting execution.
 /// It is typically used as a placeholder or to indicate a state where further execution should not proceed.
-#[align(4)]
+#[rustc_align(4)]
 fn hang() {
     loop {
         wfi()
