@@ -75,6 +75,7 @@ fn main(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> ! {
             };
 
             unsafe { tsm_info_ptr.write(state) }
+
             assert_eq!(a1, core::mem::size_of::<TsmInfo>());
         }
         _ => {}

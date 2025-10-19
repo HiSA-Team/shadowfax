@@ -18,15 +18,17 @@ use std::{env, fs};
 const PLATFORM_BASE: &str = "platform";
 
 fn main() {
-    // output directory
+    // Ensure the bin/ folder exists.
+    fs::create_dir_all("bin").unwrap();
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let opensbi_path = env::var("OPENSBI_PATH").map(PathBuf::from).expect("OPENSBI_PATH must be set; run `source environment.sh <opensbi-path>` or set OPENSBI_PATH in your environment");
 
     // Sourcing `scripts/environment.sh` allow users to specify a PLATFORM (defaults to 'generic').
     // Retrieve platform details if exists otherwise throw an error
     let platform = env::var("PLATFORM").unwrap_or_else(|_| "generic".to_string());
 
     // write the selected linkerscript where the rust can find it
-    let platform_dir = PathBuf::from(PLATFORM_BASE).join(platform);
+    let platform_dir = PathBuf::from(PLATFORM_BASE).join(&platform);
     let content = fs::read(platform_dir.join("memory.x")).unwrap();
 
     // save linkerscript where we can find it.
@@ -58,12 +60,17 @@ fn main() {
     println!("cargo:rustc-link-arg=-T{}", out_path.join("memory.x").display());
     println!("cargo:rustc-link-arg=-static");
     println!("cargo:rustc-link-arg=-nostdlib");
+    println!("cargo:rustc-link-arg=-melf64lriscv");
+    println!("cargo:rustc-link-arg=-Map=linker.map");
 
     // Link the openbsi platform library. We specify the opensbi installation path
     // (by default this is obtained from `make PLATFORM=generic install I=<path-to-shadowfax>`)
-    let libdir_path = PathBuf::from("./lib64/lp64/opensbi/generic/lib/")
+    let libdir_path = opensbi_path
+        .join(format!("build/platform/{}/lib", &platform))
         .canonicalize()
         .unwrap();
+
+    let include_path = opensbi_path.join("include").canonicalize().unwrap();
 
     println!("cargo:rustc-link-search={}", libdir_path.to_str().unwrap());
 
@@ -83,7 +90,8 @@ fn main() {
         .header("wrapper.h")
         // this is the include directory installed from opensbi using the
         // command `make PLATFORM=generic install I=<path-to-shadowfax>`
-        .clang_arg("-Iinclude/")
+        .clang_arg("-I")
+        .clang_arg(include_path.to_string_lossy())
         .derive_debug(true)
         .derive_default(true)
         .ctypes_prefix("::core::ffi")

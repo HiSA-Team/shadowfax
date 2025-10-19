@@ -1,8 +1,24 @@
 {
-  "name": "shadowfax-build",
+  "name": "shadowfax-dev",
   "build": {
-     "dockerfile": "../scripts/Dockerfile.setup",
-     "context": "../",
+    "dockerfile": "../Dockerfile",
+    "context": "../",
+    "args": {
+      "USER_ID": "1000",
+      "PLATFORM": "generic",
+      "OPENSBI_VERSION": "1.6"
+    }
   },
-  "mounts": ["source=${localWorkspaceFolder},target=/shadowfax,type=bind"]
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/shadowfax,type=bind"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "ms-vscode.cpptools",
+        "tamasfe.even-better-toml"
+      ]
+    }
+  }
 }
