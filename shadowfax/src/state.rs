@@ -36,151 +36,74 @@ use common::tsm::{TSM_IMPL_ID, TSM_VERSION};
 use fdt_rs::{base::DevTree, prelude::FallibleIterator};
 use spin::mutex::Mutex;
 
-use crate::{context::Context, cove::TEE_SCRATCH_SIZE, tsm::TsmDomain};
-
-#[link_section = ".rodata"]
-static DEFAULT_TSM: &[u8] = include_bytes!("../../target/riscv64imac-unknown-none-elf/debug/tsm");
-
-#[link_section = ".rodata"]
-static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../../bin/tsm.bin.signature");
-
-#[link_section = ".rodata"]
-static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey.pem");
+use crate::{
+    context::Context,
+    cove::TEE_SCRATCH_SIZE,
+    domain::{create_confidential_domain, Domain, MemoryRegion},
+};
 
 pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
 pub struct State {
-    pub tsms: Vec<TsmDomain>,
-    pub current_id: usize,
+    pub domains: Vec<Domain>,
 }
 
 impl State {
     fn new() -> Self {
         Self {
-            tsms: Vec::new(),
-            current_id: 0,
+            domains: Vec::new(),
         }
     }
 }
 
+// TODO: parse domains dynamically from the device tree
+// Assumption: the domain id matches with its position in the domain array
 pub fn init(
-    fdt_addr: usize,
+    _fdt_addr: usize,
     tsm_state_addr: usize,
     tsm_state_size: usize,
 ) -> Result<(), anyhow::Error> {
-    let fdt = unsafe {
-        let address = fdt_addr as *const u8;
-        DevTree::from_raw_pointer(address).unwrap()
-    };
     let mut state = STATE.lock();
     let state = state.get_mut_or_init(|| State::new());
 
     let tee_stack = &raw const crate::_tee_stack_top as *const u8 as usize;
+    // Create the root domain. The root domain id is always zero, so it has to be the first
 
-    let mut node_iter = fdt.compatible_nodes("shadowfax,domain,instance");
-    while let Some(node) = node_iter.next().unwrap() {
-        let mut tsm = TsmDomain::from_fdt_node(&node);
+    let root_domain = Domain {
+        memory_regions: Vec::from([MemoryRegion {
+            base_address: 0x0,
+            order: usize::MAX,
+            mmio: false,
+            permissions: 0x3F,
+        }]),
+        // The root domain should not be involved in Confidential call
+        trust_map: 0,
+        context_addr: 0,
+        state_addr: None,
+    };
+    state.domains.push(root_domain);
 
-        TsmDomain::verify_and_load(
-            DEFAULT_TSM,
-            tsm.start_region_addr,
-            DEFAULT_TSM_SIGN,
-            DEFAULT_TSM_PUBKEY,
-        )?;
+    // Create and add the confidential_domain
+    // TODO: make this dynamic
+    let context_addr = tee_stack - (TEE_SCRATCH_SIZE + size_of::<Context>()) - size_of::<Context>();
+    let confidential_domain = create_confidential_domain(context_addr, tsm_state_addr);
 
-        let context_addr = tee_stack
-            - (TEE_SCRATCH_SIZE + size_of::<Context>())
-            - (tsm.id + 1) * size_of::<Context>();
-        let tsm_ctx = context_addr as *mut Context;
+    state.domains.push(confidential_domain);
 
-        // Save the context address and the state address
-        tsm.context_addr = context_addr;
-        tsm.state_addr = tsm_state_addr;
-
-        // for now assume we have 1 TSM
-        assert!(
-            core::mem::size_of::<common::tsm::TsmStateData>() < tsm_state_size,
-            "Unsufficient memory for TSM State"
-        );
-
-        // init the TSM state
-        let tsm_initial_state = common::tsm::TsmStateData {
-            info: common::tsm::TsmInfo {
-                tsm_state: common::tsm::TsmState::TsmNotLoaded,
-                tsm_impl_id: TSM_IMPL_ID,
-                tsm_version: TSM_VERSION,
-                _padding: 0,
-                tsm_capabilities: 0,
-                tvm_state_pages: 1,
-                tvm_vcpu_state_pages: 1,
-                tvm_max_vcpus: 1,
-            },
-        };
-        unsafe {
-            core::ptr::write(
-                tsm_state_addr as *mut common::tsm::TsmStateData,
-                tsm_initial_state,
-            );
-        }
-
-        // Setup PMP entries for the memory region
-        let start_addr = tsm.start_region_addr;
-        let end_addr = tsm.end_region_addr;
-
-        let size = (end_addr - start_addr).next_power_of_two();
-        let base = start_addr & !(size - 1);
-
-        let k = size.trailing_zeros() as usize;
-        let ones = (1 << (k - 3)) - 1;
-
-        // Source: https://www.five-embeddev.com/riscv-priv-isa-manual/latest-adoc/machine.html#pmp
-        let pmpaddr = ((base >> 2) as usize) | ones;
-        let locked = false;
-        let range = riscv::register::Range::NAPOT;
-        let permission = riscv::register::Permission::RWX;
-        let index = 0;
-        let byte = (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
-        let pmpcfg = byte << (8 * index);
-
-        // zero out the tsm supervisor state area
-        // setup basic registers for first context switch
-        unsafe {
-            // zero out memory
-            core::ptr::write_bytes(tsm_ctx, 0, 1);
-
-            // init values
-            (*tsm_ctx).stvec = start_addr;
-            (*tsm_ctx).mepc = start_addr;
-            (*tsm_ctx).pmpcfg = pmpcfg;
-            (*tsm_ctx).pmpaddr[0] = pmpaddr;
-        }
-
-        // Setup PMP entries for the state
-        let start_addr = tsm.state_addr;
-        let end_addr = tsm_state_addr + core::mem::size_of::<common::tsm::TsmStateData>();
-        let size = (end_addr - start_addr).next_power_of_two();
-        let base = start_addr & !(size - 1);
-
-        let k = size.trailing_zeros() as usize;
-        let ones = (1 << (k - 3)) - 1;
-
-        let pmpaddr = ((base >> 2) as usize) | ones;
-        let locked = false;
-        let range = riscv::register::Range::NAPOT;
-        let permission = riscv::register::Permission::RW;
-        let index = 1;
-        let byte = (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
-        let pmpcfg = byte << (8 * index);
-
-        unsafe {
-            (*tsm_ctx).pmpcfg |= pmpcfg;
-            (*tsm_ctx).pmpaddr[1] = pmpaddr;
-        }
-
-        tsm.next_pmp_slot = 2;
-
-        state.tsms.push(tsm);
-    }
+    // Create the untrusted domain
+    let context_addr = context_addr - size_of::<Context>();
+    let untrusted_domain = Domain {
+        memory_regions: Vec::from([MemoryRegion {
+            base_address: 0x824000000,
+            order: 24,
+            mmio: false,
+            permissions: 0x3F,
+        }]),
+        trust_map: 1 << 1,
+        context_addr: context_addr,
+        state_addr: None,
+    };
+    state.domains.push(untrusted_domain);
 
     Ok(())
 }

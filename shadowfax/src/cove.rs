@@ -20,7 +20,10 @@ use common::sbi::{
     SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
 
-use crate::{_tee_stack_top, context::Context, opensbi, state::STATE};
+use crate::{
+    _tee_stack_top, context::Context, domain::build_pmp_configuration_registers, opensbi,
+    state::STATE,
+};
 
 macro_rules! cove_unpack_fid {
     ($fid:expr) => {
@@ -162,19 +165,34 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
 
-    // scratch context base pointer
+    let (dst_id, fid) = cove_unpack_fid!(fid);
+    let domain = state.domains.get_mut(dst_id);
+
+    // Scratch space
     let scratch_start = &raw const _tee_stack_top as *const u8 as usize;
     let base_ctx = scratch_start - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let scratch_ctx = base_ctx as *mut Context;
 
-    let (dst_id, fid) = cove_unpack_fid!(fid);
-    let tsm = state.tsms.iter_mut().find(|d| d.id == dst_id);
+    // Invalid domain id, go back with an error
+    if domain.is_none() {
+        unsafe {
+            (*scratch_ctx).regs[10] = usize::MAX;
+            (*scratch_ctx).regs[11] = 0;
+            // increment mepc to avoid loop
+            (*scratch_ctx).mepc += 4;
+        }
+        return base_ctx;
+    }
+
+    // Get destination domain
+    let domain = domain.unwrap();
+    let domain_ctx = domain.context_addr as *mut Context;
 
     // TEECALL
-    if let Some(tsm) = tsm {
-        let src_id = state.current_id;
+    if domain.state_addr.is_some() {
+        let src_id = 2;
         // check if the domain is trusted. If not just return an error to the caller
-        if !tsm.is_trusted(src_id) {
+        if !domain.is_trusted(src_id) {
             unsafe {
                 (*scratch_ctx).regs[10] = usize::MAX;
                 (*scratch_ctx).regs[11] = 0;
@@ -184,45 +202,44 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             return base_ctx;
         }
         // We need to store the calling context into the right structure
-        let caller_ctx_addr = base_ctx - (src_id + 1) * size_of::<Context>();
+        let caller_ctx_addr = base_ctx - (src_id) * size_of::<Context>();
         let caller_ctx = caller_ctx_addr as *mut Context;
         unsafe {
             core::ptr::copy_nonoverlapping(scratch_ctx, caller_ctx, 1);
         }
 
-        let tsm_ctx = tsm.context_addr as *mut Context;
-
-        // we need to preserve all a0-a4 and a6--a7 registers.
+        // we need to preserve all a0-a4 and a6-a7 registers.
         unsafe {
             // a0 is the 10th general purpose register
             // a7 is the 17th general purpose register
             for i in 10..18 {
-                (*tsm_ctx).regs[i] = (*caller_ctx).regs[i];
+                (*domain_ctx).regs[i] = (*caller_ctx).regs[i];
             }
 
             // save the caller into a6 register, but we must preserve the EID.
             // The caller id must be saved in bits [31:26]
-            let eid = (*tsm_ctx).regs[16] & 0xFFFF;
-            (*tsm_ctx).regs[16] = ((src_id & 0x3F) << 26) | eid;
+            let eid = (*domain_ctx).regs[16] & 0xFFFF;
+            (*domain_ctx).regs[16] = ((src_id & 0x3F) << 26) | eid;
 
-            // save the TSM state into t0
-            (*tsm_ctx).regs[5] = tsm.state_addr;
+            // save the domain state into t0
+            (*domain_ctx).regs[5] = domain.state_addr.unwrap();
 
-            // save the caller context address into TSM context
-            (*tsm_ctx).caller_ctx = caller_ctx_addr;
+            // save the caller context address into domain context
+            (*domain_ctx).caller_ctx = caller_ctx_addr;
         }
 
         // Perform operations to allow the specific functionality
         match fid {
-            // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
-            // where he will write the tsm_info struct (a0) for the necessary size (a1).
+            // For sbi_covh_get_domain_info we need to give the TSM access to the memory space
+            // where he will write the domain_info struct (a0) for the necessary size (a1).
             SBI_COVH_GET_TSM_INFO => {
-                let addr = unsafe { (*tsm_ctx).regs[10] };
-                let size = unsafe { (*tsm_ctx).regs[11] };
+                let addr = unsafe { (*domain_ctx).regs[10] };
+                let size = unsafe { (*domain_ctx).regs[11] };
 
                 let slot = 7;
 
                 // Build the CFG byte for TOR + RW (not locked)
+                // TODO: use the  build_pmp_configuration_registers function
                 let range = riscv::register::Range::TOR as usize;
                 let perm = riscv::register::Permission::RW as usize;
                 let locked = false as usize;
@@ -232,80 +249,62 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let byte_mask = 0xFF << (slot * 8);
 
                 unsafe {
-                    (*tsm_ctx).pmpaddr[slot - 1] = addr >> 2;
-                    (*tsm_ctx).pmpaddr[slot] = (addr + size) >> 2;
+                    (*domain_ctx).pmpaddr[slot - 1] = addr >> 2;
+                    (*domain_ctx).pmpaddr[slot] = (addr + size) >> 2;
 
-                    (*tsm_ctx).pmpcfg &= !byte_mask;
-                    (*tsm_ctx).pmpcfg |= cfg_byte << (slot * 8);
+                    (*domain_ctx).pmpcfg &= !byte_mask;
+                    (*domain_ctx).pmpcfg |= cfg_byte << (slot * 8);
                 }
             }
             SBI_COVH_CONVERT_PAGES => {
-                let start_addr = unsafe { (*tsm_ctx).regs[10] };
-                let num_pages = unsafe { (*tsm_ctx).regs[11] };
-                let slot = tsm.next_pmp_slot;
+                let start_addr = unsafe { (*domain_ctx).regs[10] };
+                let num_pages = unsafe { (*domain_ctx).regs[11] };
+                let slot = domain.memory_regions.len();
 
-                if slot < 6 {
-                    // TODO: remove these pages from the caller PMP
-                    // setup pmp entry for the block of pages requested
-                    let end_addr = start_addr + num_pages * 4096;
-
-                    let size = (end_addr - start_addr).next_power_of_two();
-                    let base = start_addr & !(size - 1);
-
-                    let k = size.trailing_zeros() as usize;
-                    let ones = (1 << (k - 3)) - 1;
-
-                    let pmpaddr = ((base >> 2) as usize) | ones;
-                    let locked = false;
-                    let range = riscv::register::Range::NAPOT;
-                    let permission = riscv::register::Permission::RWX;
-                    let byte =
-                        (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
-                    let pmpcfg = byte << (8 * slot);
-
-                    unsafe {
-                        (*tsm_ctx).pmpcfg |= pmpcfg;
-                        (*tsm_ctx).pmpaddr[slot] = pmpaddr;
-                    }
-
-                    tsm.next_pmp_slot += 1;
-                } else {
-                    // no more pmp slot available, return an error
+                // We only hsve 8 slot on the PMP
+                if slot >= 7 {
                     unsafe {
                         (*scratch_ctx).regs[10] = usize::MAX;
                         (*scratch_ctx).regs[11] = 0;
                         // increment mepc to avoid loop
                         (*scratch_ctx).mepc += 4;
                     }
-                    return base_ctx;
                 }
+                let (pmpaddr, pmpcfg) = build_pmp_configuration_registers(
+                    slot,
+                    start_addr,
+                    num_pages * 4096,
+                    riscv::register::Permission::RWX,
+                    riscv::register::Range::NAPOT,
+                );
+
+                unsafe {
+                    (*domain_ctx).pmpcfg |= pmpcfg;
+                    (*domain_ctx).pmpaddr[slot] = pmpaddr;
+                }
+
+                // no more pmp slot available, return an error
+                return base_ctx;
             }
             _ => {}
         }
-        // mark the new tsm as the current domain
-        state.current_id = tsm.id;
-        return tsm.context_addr;
+        unsafe {
+            let ret = opensbi::sbi_domain_change_active(dst_id as u32);
+            assert!(ret == 0);
+        }
+        return domain.context_addr;
     }
 
     // TEERET
-    // Retrive the TSM ID as the current running
     // We don't need to store the calling context since we are implementing the
-    // non interruptible TSM. We need a0 and a1 registers to deliver the result
-    let tsm = state
-        .tsms
-        .iter()
-        .find(|t| t.id == state.current_id)
-        .unwrap();
-
-    let tsm_ctx = tsm.context_addr as *mut Context;
-    let caller_ctx = unsafe { (*tsm_ctx).caller_ctx as *mut Context };
+    // non reentrant TSM. We need a0 and a1 registers to deliver the result
 
     unsafe {
-        (*caller_ctx).regs[10] = (*scratch_ctx).regs[10];
-        (*caller_ctx).regs[11] = (*scratch_ctx).regs[11];
-        (*caller_ctx).regs[16] = (*scratch_ctx).regs[16];
+        (*domain_ctx).regs[10] = (*scratch_ctx).regs[10];
+        (*domain_ctx).regs[11] = (*scratch_ctx).regs[11];
+        (*domain_ctx).regs[16] = (*scratch_ctx).regs[16];
         // increment mepc to avoid loop
-        (*caller_ctx).mepc += 4;
+        (*domain_ctx).mepc += 4;
     }
     // Perform operations to cleanup specific to the functionality
     match fid {
@@ -313,14 +312,17 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         SBI_COVH_GET_TSM_INFO => unsafe {
             let slot = 7;
             let byte_mask = 0xFF << (slot * 8);
-            (*tsm_ctx).pmpaddr[slot - 1] = 0;
-            (*tsm_ctx).pmpaddr[slot] = 0;
-            (*tsm_ctx).pmpcfg &= !byte_mask;
+            (*domain_ctx).pmpaddr[slot - 1] = 0;
+            (*domain_ctx).pmpaddr[slot] = 0;
+            (*domain_ctx).pmpcfg &= !byte_mask;
         },
         _ => {}
     }
-    state.current_id = dst_id;
-    return unsafe { (*tsm_ctx).caller_ctx };
+    unsafe {
+        let ret = opensbi::sbi_domain_change_active(dst_id as u32);
+        assert!(ret == 0);
+    }
+    return domain.context_addr;
 }
 
 #[unsafe(naked)]
@@ -422,8 +424,8 @@ fn supd_handler(fid: usize) -> usize {
     if fid == SBI_EXT_SUPD_GET_ACTIVE_DOMAINS {
         // root supervisor domain is mandatory
         let mut ret: usize = 1;
-        for d in state.tsms.iter() {
-            ret |= 1 << d.id;
+        for i in 0..state.domains.len() {
+            ret |= 1 << i;
         }
         unsafe {
             (*dst_ctx).regs[10] = 0;
