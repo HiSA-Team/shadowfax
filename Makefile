@@ -1,5 +1,3 @@
-include config.mk
-
 TARGET  ?= riscv64imac-unknown-none-elf
 PROFILE ?= debug
 
