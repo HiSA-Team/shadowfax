@@ -39,6 +39,7 @@ pub mod tsm {
 }
 
 pub mod sbi {
+    pub const COVH_DEFAULT_PAGE_SIZE: usize = 4096;
     // CoVH constants
     pub const SBI_COVH_EXT_ID: usize = 0x434F5648;
 

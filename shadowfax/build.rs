@@ -17,10 +17,10 @@ use std::process::Command;
 use std::{env, fs};
 
 const PLATFORM_BASE_DIR: &str = "platform";
+const LINKERSCRIPT_PATH: &str = "memory.x";
 
 fn main() {
     // Ensure the bin/ folder exists.
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let bin_dir = PathBuf::from("../bin");
     fs::create_dir_all(&bin_dir).unwrap();
 
@@ -52,17 +52,16 @@ fn main() {
             panic!("OpenSBI build failed with status: {}", status);
         }
 
-        let linkerscript_in = platform_dir.join("memory.x");
-        let linkerscript_out = out_dir.join("memory.x");
+        let linkerscript_path = PathBuf::from(LINKERSCRIPT_PATH).canonicalize().unwrap();
         let libopensbi_path = opensbi_path
             .join(format!("build/platform/{}/lib", &platform))
             .canonicalize()
             .unwrap();
-        std::fs::copy(&linkerscript_in, &linkerscript_out).unwrap();
-        configure_linker(&linkerscript_out, &libopensbi_path);
+
+        configure_linker(&linkerscript_path, &libopensbi_path);
 
         // recompile if linkerscript changes
-        println!("cargo::rerun-if-changed={}", linkerscript_in.display());
+        println!("cargo::rerun-if-changed={}", &libopensbi_path.display());
     }
 
     // Compile the device tree

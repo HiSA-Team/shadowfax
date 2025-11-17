@@ -51,6 +51,7 @@
 			riscv,isa-base = "rv64i";
 			riscv,isa = "rv64imafdch_zic64b_zicbom_zicbop_zicboz_ziccamoa_ziccif_zicclsm_ziccrse_zicntr_zicsr_zifencei_zihintntl_zihintpause_zihpm_zmmul_za64rs_zaamo_zalrsc_zawrs_zfa_zca_zcd_zba_zbb_zbc_zbs_ssccptr_sscounterenw_sstc_sstvala_sstvecd_svadu_svvptc";
 			mmu-type = "riscv,sv57";
+			opensbi-domain = <&udomain>;
 
 			interrupt-controller {
 				#interrupt-cells = <0x01>;
@@ -95,15 +96,40 @@
 		linux,initrd-start = <0x80820000>;
 		linux,initrd-end = <0x8093f7c0>;
 
-		shadowfax-domains {
-			compatible = "shadowfax,domain,config";
+		opensbi-domains {
+			compatible = "opensbi,domain,config";
 
-			trusted-domain {
-				compatible = "shadowfax,domain,instance";
-				id = <0x1>;
-				trust = <0x0>;
-				memory = <0x0 0x81400000 0x0 0x81FFFFFF>;
+			umem: umem {
+				compatible = "opensbi,domain,memregion";
+				base = <0x0 0x82400000>;
+				order = <24>;
 			};
+
+			tmem: tmem {
+				compatible = "opensbi,domain,memregion";
+				base = <0x0 0x81400000>;
+				order = <23>;
+			};
+
+			tdomain: trusted-domain {
+				compatible = "opensbi,domain,instance";
+				possible-harts = <&cpu0>;
+				regions = <&tmem 0x3f>;
+				next-arg1 = <0x0 0x0>;
+				next-addr = <0x0 0x81400000>;
+				next-mode = <0x1>;
+			};
+
+			udomain: untrusted-domain {
+				compatible = "opensbi,domain,instance";
+				possible-harts = <&cpu0>;
+				boot-hartid = <&cpu0>;
+				regions = <&umem 0x3f>;
+				next-arg1 = <0x0 0x0>;
+				next-addr = <0x0 0x82400000>;
+				next-mode = <0x1>;
+			};
+
 		};
 	};
 

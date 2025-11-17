@@ -1,4 +1,3 @@
-#!/bin/sh
 # This script is meant to be sourced by the user to ensure correct settings are applied to
 # the current shell. Based on platform (architecture and libc), it sets up the CROSS_COMPILE
 # variable and LIBCLANG info. Usage:
@@ -24,7 +23,7 @@ print_warn() { printf '%b[WARNING]%b %s\n' "$YELLOW" "$RESET" "$1" >&2; }
 LLVM_VERSION="${LLVM_VERSION:-17.0.6}"
 OPENSBI_VERSION="$(git -C shadowfax/opensbi describe)"
 PLATFORM="${PLATFORM:-generic}"
-ROOT_DOMAIN_JUMP_ADDRESS="0x82000000"
+ROOT_DOMAIN_JUMP_ADDRESS="0x82400000"
 
 get_libc() {
   if ldd --version 2>&1 | grep -q musl; then
@@ -55,12 +54,9 @@ print_export "LIBC" "$LIBC"
 export LIBC_PREFIX=$([ "$LIBC" = "glibc" ] && echo "gnu" || echo "$LIBC")
 print_export "LIBC_PREFIX" "$LIBC_PREFIX"
 
-# Export CROSS_COMPILE if not on riscv64
-if [ "$HOST_ARCHITECTURE" != "riscv64" ]; then
-  CROSS_COMPILE="riscv64-linux-${LIBC_PREFIX}-"
-  export CROSS_COMPILE
-  print_export "CROSS_COMPILE" "${CROSS_COMPILE}"
-fi
+CROSS_COMPILE="riscv64-unknown-linux-${LIBC_PREFIX}-"
+export CROSS_COMPILE
+print_export "CROSS_COMPILE" "${CROSS_COMPILE}"
 
 if [ "$LIBC_PREFIX" = "musl" ]; then
   export LLVM_VERSION="${LLVM_VERSION}"

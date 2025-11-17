@@ -22,7 +22,6 @@ MEMORY
 REGION_ALIAS("REGION_TEXT", FLASH);
 REGION_ALIAS("REGION_RODATA", FLASH);
 REGION_ALIAS("REGION_DATA", RAM);
-REGION_ALIAS("REGION_BOOT_STACK", RAM);
 REGION_ALIAS("REGION_TEE_MEM", RAM);
 
 /* variables */
@@ -32,6 +31,7 @@ _tee_stack_size      = 0x10000;  /* 64k */
 _tsm_state_size      = 0x10000;  /* 64k */
 
 _fw_start = ORIGIN(FLASH);
+_boot_stack_top = ORIGIN(RAM) + LENGTH(RAM);
 
 SECTIONS {
 
@@ -72,12 +72,6 @@ SECTIONS {
     _fw_end = .;
   } > REGION_DATA
 
-  /* Stack reserved for boot and initialization firmware pre sbi_init */
-  .boot_stack (NOLOAD): ALIGN(4K) {
-    . += _boot_stack_size;
-    _boot_stack_top = .;
-  } > REGION_BOOT_STACK
-
   /* Place where to store TEE state and context */
   .tee_ram (NOLOAD): ALIGN(4K) {
     /* Scratch memory for CoVE interrupt handling and interrupt handling*/
@@ -92,7 +86,4 @@ SECTIONS {
 
   } > REGION_TEE_MEM
 
-  /* Mark the end of the RAM. TSM-driver can start loading the TSM */
-  . = ALIGN(16K);
-  _ram_end = .;
 }
