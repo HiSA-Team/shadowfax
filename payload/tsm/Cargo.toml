@@ -4,6 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-common = { path = "../../common/" }
-linked_list_allocator = "0.10.5"
 riscv = "0.13.0"
