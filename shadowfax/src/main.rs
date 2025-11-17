@@ -262,12 +262,10 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
             .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
     };
 
-    let tsm_state_start = unsafe { &_tsm_state_start as *const u8 as usize };
     let tsm_state_size = unsafe { &_tsm_state_size as *const u8 as usize };
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
     state::init(fdt_addr, tsm_state_start, tsm_state_size).unwrap();
-
     /*
      * This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related

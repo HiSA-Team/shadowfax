@@ -6,6 +6,7 @@
 /**/keys
 /**/__pycache__
 
+<<<<<<< HEAD
 # Exclude everything except these folders in root
 /*
 !/.devcontainer
@@ -29,3 +30,36 @@
 !/scripts
 !/shadowfax
 !/test
+=======
+
+# Added by cargo
+
+/target
+payload/tsm/target/
+
+# Exclude everything except these folders in root
+/*
+!/.cargo
+!/.github
+!/.gitignore
+!/.devcontainer
+!/.dockerignore
+!/.pre-commit-config.yaml
+!/docs
+!/payload
+!/README.md
+!/payload
+!/platform
+!/src
+!/scripts
+!/Dockerfile
+!/Cargo.lock
+!/Cargo.toml
+!/LICENSE
+!/Dockerfile
+!/build.rs
+!/requirements.txt
+!/rust-toolchain.toml
+!/wrapper.h
+!/environment.sh
+>>>>>>> main

@@ -1,0 +1,31 @@
+set confirm off
+set breakpoint pending on
+set pagination off
+set arch riscv:rv64
+
+target remote localhost:1234
+
+restore bin/tsm.bin binary 0x81000000
+add-symbol-file bin/tsm.elf 0x81000000
+
+restore bin/enum-supervisor-domains.bin binary 0x80A00000
+add-symbol-file bin/enum-supervisor-domains.elf 0x80A00000
+
+file target/riscv64imac-unknown-none-elf/debug/shadowfax
+
+#------------------------------------------------------------------------------
+# Print a shadowfax Context at a given address:
+#   Usage: p_context 0xADDRESS
+#------------------------------------------------------------------------------
+define p_context
+  if $argc != 1
+    printf "Usage: p_context ADDRESS\n"
+  else
+    # cast the arg as a Context* then deref and print in hex
+    p/x *($arg0 as *mut shadowfax::shadowfax_core::state::Context)
+  end
+end
+
+break shadowfax::cove::covh_handler
+break shadowfax::trap::handler
+break tsm::entry
