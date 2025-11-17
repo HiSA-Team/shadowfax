@@ -162,10 +162,11 @@ extern "C" fn covh_handler(fid: usize) -> usize {
 
     // Get destination domain
     let domain = domain.unwrap();
-    let domain_ctx = domain.context_addr as *mut Context;
 
     // TEECALL
     if domain.state_addr.is_some() {
+        let domain_ctx = domain.context_addr as *mut Context;
+        // TODO: get current domain
         let src_id = 2;
         // check if the domain is trusted. If not just return an error to the caller
         if !domain.is_trusted(src_id) {
@@ -186,10 +187,11 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 (*domain_ctx).regs[i] = (*caller_ctx).regs[i];
             }
 
-            // save the caller into a6 register, but we must preserve the EID.
+            // Save the caller id into a6 register, but we must preserve the EID. This is used for
+            // the TEERET
             // The caller id must be saved in bits [31:26]
             let eid = (*domain_ctx).regs[16] & 0xFFFF;
-            (*domain_ctx).regs[16] = ((src_id & 0x3F) << 26) | eid;
+            (*domain_ctx).regs[16] = ((src_id) << 26) | eid;
 
             // save the domain state into t0
             (*domain_ctx).regs[5] = domain.state_addr.unwrap();
@@ -257,10 +259,16 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // We don't need to store the calling context since we are implementing the
     // non reentrant TSM. We need a0 and a1 registers to deliver the result
 
+    // Restore the original TSM id
+    // TODO make this dynamic
+    let tsmid = 1;
+
     unsafe {
+        let domain_ctx = domain.context_addr as *mut Context;
+        let eid = (*scratch_ctx).regs[16] & 0xFFFF;
         (*domain_ctx).regs[10] = (*scratch_ctx).regs[10];
         (*domain_ctx).regs[11] = (*scratch_ctx).regs[11];
-        (*domain_ctx).regs[16] = (*scratch_ctx).regs[16];
+        (*domain_ctx).regs[16] = (tsmid << 26) | eid;
         // increment mepc to avoid loop
         (*domain_ctx).mepc += 4;
     }
@@ -269,6 +277,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     match fid {
         // Remove the last memory region
         SBI_COVH_GET_TSM_INFO => {}
+        SBI_COVH_CONVERT_PAGES => {}
         _ => {}
     }
     unsafe {
