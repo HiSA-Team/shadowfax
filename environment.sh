@@ -3,7 +3,7 @@
 # the current shell. Based on platform (architecture and libc), it sets up the CROSS_COMPILE
 # variable and LIBCLANG info. Usage:
 #
-# source <file> <opensbi-path>
+# source <file>
 #
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 
@@ -21,24 +21,10 @@ print_export() { printf '%b[EXPORT]%b %s=%s\n' "$BLUE" "$RESET" "$1" "$2" >&2; }
 print_warn() { printf '%b[WARNING]%b %s\n' "$YELLOW" "$RESET" "$1" >&2; }
 
 # Config parameters
-OPENSBI_PATH="$1"
 LLVM_VERSION="${LLVM_VERSION:-17.0.6}"
-OPENSBI_VERSION="${OPENSBI_VERSION:-1.6}"
+OPENSBI_VERSION="$(git -C shadowfax/opensbi describe)"
 PLATFORM="${PLATFORM:-generic}"
-
-if [ -z "$OPENSBI_PATH" ]; then
-  print_err "missing OPENSBI_PATH"
-  return 1
-fi
-
-export OPENSBI_PATH="${OPENSBI_PATH}"
-print_export "OPENSBI_PATH" "${OPENSBI_PATH}"
-
-export OPENSBI_VERSION="${OPENSBI_VERSION}"
-print_export "OPENSBI_VERSION" "${OPENSBI_VERSION}"
-
-export PLATFORM="${PLATFORM}"
-print_export "PLATFORM" "${PLATFORM}"
+ROOT_DOMAIN_JUMP_ADDRESS="0x82000000"
 
 get_libc() {
   if ldd --version 2>&1 | grep -q musl; then
@@ -48,8 +34,20 @@ get_libc() {
   fi
 }
 
-export ARCHITECTURE=$(uname -m)
-print_export "ARCHITECTURE" "$ARCHITECTURE"
+export OPENSBI_VERSION="${OPENSBI_VERSION}"
+print_export "OPENSBI_VERSION" "${OPENSBI_VERSION}"
+
+export ROOT_DOMAIN_JUMP_ADDRESS="${ROOT_DOMAIN_JUMP_ADDRESS}"
+print_export "ROOT_DOMAIN_JUMP_ADDRESS" "${ROOT_DOMAIN_JUMP_ADDRESS}"
+
+export PLATFORM="${PLATFORM}"
+print_export "PLATFORM" "${PLATFORM}"
+
+export RUSTFLAGS="-C target-feature=+h"
+print_export "RUSTFLAGS" "$RUSTFLAGS"
+
+export HOST_ARCHITECTURE=$(uname -m)
+print_export "HOST_ARCHITECTURE" "$HOST_ARCHITECTURE"
 
 export LIBC=$(get_libc)
 print_export "LIBC" "$LIBC"
@@ -58,13 +56,10 @@ export LIBC_PREFIX=$([ "$LIBC" = "glibc" ] && echo "gnu" || echo "$LIBC")
 print_export "LIBC_PREFIX" "$LIBC_PREFIX"
 
 # Export CROSS_COMPILE if not on riscv64
-if [ "$ARCHITECTURE" != "riscv64" ]; then
+if [ "$HOST_ARCHITECTURE" != "riscv64" ]; then
   CROSS_COMPILE="riscv64-linux-${LIBC_PREFIX}-"
   export CROSS_COMPILE
   print_export "CROSS_COMPILE" "${CROSS_COMPILE}"
-
-  export ARCH=riscv
-  print_export "ARCH" "${ARCH}"
 fi
 
 if [ "$LIBC_PREFIX" = "musl" ]; then

@@ -97,6 +97,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "common"
+version = "0.1.0"
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -616,6 +620,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bindgen",
+ "clang-sys",
+ "common",
  "digest",
  "elf",
  "fdt-rs",
@@ -721,6 +727,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "test"
+version = "0.1.0"
+
+[[package]]
+name = "tsm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "common",
+ "heapless",
+ "linked_list_allocator",
+ "riscv",
 ]
 
 [[package]]
