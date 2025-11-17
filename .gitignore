@@ -3,34 +3,7 @@
 *.elf
 *.bin
 *.o
-/**/keys
-/**/__pycache__
 
-<<<<<<< HEAD
-# Exclude everything except these folders in root
-/*
-!/.devcontainer
-!/.dockerignore
-!/.github
-!/.gitignore
-!/.pre-commit-config.yaml
-!/common
-!/config.mk
-!/Cargo.lock
-!/Cargo.toml
-!/docs
-!/Dockerfile
-!/environment.sh
-!/LICENSE
-!/Makefile
-!/payload
-!/README.md
-!/requirements.txt
-!/rust-toolchain.toml
-!/scripts
-!/shadowfax
-!/test
-=======
 
 # Added by cargo
 
@@ -62,4 +35,3 @@ payload/tsm/target/
 !/rust-toolchain.toml
 !/wrapper.h
 !/environment.sh
->>>>>>> main

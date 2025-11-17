@@ -8,7 +8,7 @@ confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC
 computing is defined in the RISC-V AP-TEE specification, also known as CoVE
 (**Co**nfidential **V**irtualization **E**xtension).
 
-This code is tested on `riscv64imac` with Privilege ISA **v1.12**.
+This code is tested on `riscv64imac` with Privilege ISA **v1.10**.
 
 Further details can be found in the [documentation](https://granp4sso.github.io/shadowfax/).
 
@@ -55,8 +55,6 @@ All dependencies can be installed with the `scripts/setup.sh` script.
 ```sh
 sudo ./scripts/setup.sh
 ```
-<<<<<<< HEAD
-=======
 
 #### Builing on musl systems
 Musl is a security and safety oriented libc implementation which requires static linking. Building on
@@ -79,7 +77,6 @@ bindgen = { version = "0.71.1", default-features = false, features = ["logging",
 version = "1.8.1"
 features = ["static"]
 ```
->>>>>>> main
 
 > [!TIP]
 > everything related to `build-dependencies` and `build.rs` affect the host building system and not the `ŧarget` itself.
@@ -116,30 +113,6 @@ docker run -v $(pwd):/shadowfax -w /shadowfax --network=host -it shadowfax-build
 If using modern editors like VS-code, the repository supports [devcontainer workspaces](https://containers.dev/) and should automatically
 ask you to create a new workspace when creating using the `.devcontainer/devcontainer.json` file.
 
-<<<<<<< HEAD
-## Running on QEMU
-Users can run the firmware on QEMU using:
-```sh
-qemu-system-riscv64 -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait -nographic \
-    -M virt -m 32M -smp 1\
-    -dtb bin/device-tree.dtb \
-    -bios target/riscv64imac-unknown-none-elf/debug/shadowfax \
-    -s -S
-```
-
-This will stop the emulator on the first instruction. You can setup a basic teecall/teeret example
-in another terminal with a remote gdb session. For example, to test a basic program that uses `sbi_covh_get_tsm_info`
-function run:
-
-```sh
-gdb -x scripts/gdb_settings -x scripts/sbi_covh_get_tsm_info.py
-
-# step through multiple breakpoints
-(gdb) continue
-```
-
-=======
->>>>>>> main
 ## Contributing
 This repository uses [pre-commit](https://pre-commit.com/). Before contributing, setup your environment
 with the correct hooks. Create a virtual environment for Python using `.python-version` file.

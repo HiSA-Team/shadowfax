@@ -31,7 +31,7 @@ if [ -z "$OPENSBI_PATH" ]; then
   return 1
 fi
 
-export OPENSBI_PATH="$(realpath ${OPENSBI_PATH})"
+export OPENSBI_PATH="${OPENSBI_PATH}"
 print_export "OPENSBI_PATH" "${OPENSBI_PATH}"
 
 export OPENSBI_VERSION="${OPENSBI_VERSION}"
