@@ -30,8 +30,8 @@ mod tsm {
 
 #[derive(Clone)]
 pub struct MemoryRegion {
-    pub base_address: usize,
-    pub order: usize,
+    pub base_addr: usize,
+    pub order: u32,
     pub mmio: bool,
     pub permissions: u8,
 }
@@ -150,14 +150,14 @@ pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Dom
     // Hardcoded memory regions for now
     domain.memory_regions = [
         MemoryRegion {
-            base_address: 0x8140_0000,
-            order: 1 << 24,
+            base_addr: 0x8140_0000,
+            order: 24,
             permissions: 0x3f,
             mmio: false,
         },
         MemoryRegion {
-            base_address: 0x1000_0000,
-            order: 1 << 12,
+            base_addr: 0x1000_0000,
+            order: 12,
             permissions: 0x3f,
             mmio: true,
         },
@@ -192,22 +192,6 @@ pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Dom
     // Configure PMP entry for TMem
     let tmem_region = &domain.memory_regions[0];
 
-    let (pmpaddr0, pmpcfg0) = build_pmp_configuration_registers(
-        0,
-        tmem_region.base_address,
-        tmem_region.order,
-        riscv::register::Permission::RWX,
-        riscv::register::Range::NAPOT,
-    );
-
-    let (pmpaddr1, pmpcfg1) = build_pmp_configuration_registers(
-        1,
-        state_addr,
-        size_of::<common::tsm::TsmStateData>(),
-        riscv::register::Permission::RW,
-        riscv::register::Range::NAPOT,
-    );
-
     // zero out the tsm supervisor state area
     // setup basic registers for first context switch
     unsafe {
@@ -215,10 +199,7 @@ pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Dom
         core::ptr::write_bytes(tsm_ctx, 0, 1);
 
         // init values
-        (*tsm_ctx).mepc = tmem_region.base_address;
-        (*tsm_ctx).pmpcfg = pmpcfg1 | pmpcfg0;
-        (*tsm_ctx).pmpaddr[0] = pmpaddr0;
-        (*tsm_ctx).pmpaddr[1] = pmpaddr1;
+        (*tsm_ctx).mepc = tmem_region.base_addr;
     }
 
     Domain::verify_and_load_tsm(

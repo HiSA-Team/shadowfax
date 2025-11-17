@@ -16,15 +16,41 @@
 *
 * Examples:
 * `
-       shadowfax-domains {
-           compatible = "shadowfax,domain,config";
+        opensbi-domains {
+            compatible = "opensbi,domain,config";
 
-           trusted-domain {
-               compatible = "shadowfax,domain,instance";
-               id = <0x1>;
-               memory = <0x0 0x81000000 0x0 0x82000000>;
-           };
-       };
+            umem: umem {
+                compatible = "opensbi,domain,memregion";
+                base = <0x0 0x82400000>;
+                order = <24>;
+            };
+
+            tmem: tmem {
+                compatible = "opensbi,domain,memregion";
+                base = <0x0 0x81400000>;
+                order = <23>;
+            };
+
+            tdomain: trusted-domain {
+                compatible = "opensbi,domain,instance";
+                possible-harts = <&cpu0>;
+                regions = <&tmem 0x3f>;
+                next-arg1 = <0x0 0x0>;
+                next-addr = <0x0 0x81400000>;
+                next-mode = <0x1>;
+            };
+
+            udomain: untrusted-domain {
+                compatible = "opensbi,domain,instance";
+                possible-harts = <&cpu0>;
+                boot-hartid = <&cpu0>;
+                regions = <&umem 0x3f>;
+                next-arg1 = <0x0 0x0>;
+                next-addr = <0x0 0x82400000>;
+                next-mode = <0x1>;
+            };
+
+        };
 * `
 * Author: Giuseppe Capasso <capassog97@gmail.com>
 */
@@ -71,8 +97,8 @@ pub fn init(
 
     let root_domain = Domain {
         memory_regions: Vec::from([MemoryRegion {
-            base_address: 0x0,
-            order: usize::MAX,
+            base_addr: 0x0,
+            order: 64,
             mmio: false,
             permissions: 0x3F,
         }]),
@@ -94,7 +120,7 @@ pub fn init(
     let context_addr = context_addr - size_of::<Context>();
     let untrusted_domain = Domain {
         memory_regions: Vec::from([MemoryRegion {
-            base_address: 0x824000000,
+            base_addr: 0x824000000,
             order: 24,
             mmio: false,
             permissions: 0x3F,
