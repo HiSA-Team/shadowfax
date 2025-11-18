@@ -1,10 +1,11 @@
-TARGET  ?= riscv64imac-unknown-none-elf
+TARGET_TRIPLET  ?= riscv64imac-unknown-none-elf
 PROFILE ?= debug
+HOST_TRIPLET := $(shell rustc -vV | grep '^host:' | awk '{print $$2}')
 
 # General Directories
 BIN_DIR			= bin
 KEYS_DIR		= shadowfax/keys
-TARGET_DIR	= target/$(TARGET)/$(PROFILE)
+TARGET_DIR	= target/$(TARGET_TRIPLET)/$(PROFILE)
 
 # TSM Files
 TSM_ELF							 = $(TARGET_DIR)/tsm
@@ -21,7 +22,7 @@ all: firmware build-info
 
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm
-	 cargo build --target $(TARGET) -p shadowfax
+	 cargo build --target $(TARGET_TRIPLET) -p shadowfax
 
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
 tsm: $(TSM_SIG)
@@ -30,11 +31,12 @@ $(TSM_SIG): $(TSM_ELF)
 	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $@ $<
 
 $(TSM_ELF):
-	 cargo build --target $(TARGET) -p tsm
+	 cargo build --target $(TARGET_TRIPLET) -p tsm
 
 ## test: builds and run the tests
 test: firmware
-	RUSTFLAGS="" cargo test -p test
+	cargo test --manifest-path test/Cargo.toml --target $(HOST_TRIPLET)
+
 
 ## generate-keys: generates a couple of RSA keys 2048 bit in shadowfax-core/keys/
 generate-keys:
@@ -45,7 +47,7 @@ generate-keys:
 ## info: display build configuration
 build-info:
 	@echo "Build Configuration:"
-	@echo "  TARGET:                    $(TARGET)"
+	@echo "  TARGET_TRIPLET:            $(TARGET_TRIPLET)"
 	@echo "  PROFILE:                   $(PROFILE)"
 	@echo "  PLATFORM:                  $(PLATFORM)"
 	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
@@ -54,6 +56,7 @@ build-info:
 	@echo "  ROOT_DOMAIN_JUMP_ADDRESS:  $(ROOT_DOMAIN_JUMP_ADDRESS)"
 	@echo "  HOST_ARCHITECTURE:         $(HOST_ARCHITECTURE)"
 	@echo "  HOST_LIBC_PREFIX:          $(LIBC_PREFIX)"
+	@echo "  HOST_TARGET_TRIPLET:       $(HOST_TARGET_TRIPLET)"
 
 ## clean: removes all build artifacts
 clean:
