@@ -4,7 +4,6 @@
 #![feature(fn_align)]
 
 use core::{
-    cell::OnceCell,
     panic::PanicInfo,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -27,6 +26,7 @@ mod hyper;
 mod log;
 mod state;
 
+extern crate alloc;
 #[global_allocator]
 /// Global allocator.
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
@@ -34,6 +34,10 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
 unsafe extern "C" {
     /// boot stack top (defined in `memory.x`)
     static _stack_top: u8;
+
+    // Heap
+    static mut _heap_start: u8;
+    static _heap_end: u8;
 }
 
 /*
@@ -108,6 +112,13 @@ fn ensure_init() -> spin::MutexGuard<'static, Option<TsmState>> {
     let mut guard = STATE.lock();
 
     if !INIT.load(Ordering::Acquire) {
+        // this enables heap allocations
+        unsafe {
+            // Initialize global alloca
+            let heap_start = (&raw const _heap_start as *const u8) as usize;
+            let heap_size = ((&raw const _heap_end as *const u8) as usize) - heap_start;
+            ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
+        }
         let state = TsmState::new(); // heavy init allowed here
         *guard = Some(state);
         INIT.store(true, Ordering::Release);
@@ -195,8 +206,12 @@ fn main(
             }
         }
 
-        SBI_COVH_CREATE_TVM_VCPU => SbiRet { a0: 0, a1: 0 },
-        SBI_COVH_RUN_TVM_VCPU => match state.hypervisor.tvm_run_vcpu(a0, a1) {
+        SBI_COVH_CREATE_TVM_VCPU => match state.hypervisor.create_tvm_vcpu(a0, a1, a2) {
+            Ok(_) => SbiRet { a0: 0, a1: 0 },
+            Err(_) => SbiRet { a0: -1, a1: 0 },
+        },
+
+        SBI_COVH_RUN_TVM_VCPU => match state.hypervisor.run_tvm_vcpu(a0, a1) {
             Ok(_) => unreachable!(),
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
@@ -208,6 +223,7 @@ fn main(
         _ => SbiRet { a0: -1, a1: 0 },
     };
 
+    // Needed because this function does not end gracefully, but with an ECALL
     drop(lock);
 
     // Issue the TEERET

@@ -1,9 +1,11 @@
-use heapless::Vec;
+use core::slice::from_raw_parts;
+
+use alloc::vec::Vec;
 use riscv::register::{
-    satp, sepc,
-    sstatus::{self, FS},
-    stvec::{self, Stvec},
+    sepc,
+    sstatus::{self, FS, SPP},
 };
+use sha2::{Digest, Sha384};
 
 use crate::h_extension::{
     csrs::{
@@ -14,7 +16,6 @@ use crate::h_extension::{
 };
 
 const MAX_VCPU_PER_TVM: usize = 1;
-const MAX_PAGE_BLOCKS: usize = 4;
 const PAGE_SIZE: usize = 4096;
 const PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
 const MAX_MEMORY_REGIONS: usize = 8; // per-TVM simple limit
@@ -140,7 +141,7 @@ pub struct MemoryRegion {
 
 pub struct HypervisorState {
     pub tvm: Option<Tvm>,
-    confidential_memory: Vec<(usize, usize, Option<usize>), MAX_PAGE_BLOCKS>,
+    confidential_memory: Vec<(usize, usize, Option<usize>)>,
 }
 
 impl HypervisorState {
@@ -156,14 +157,7 @@ impl HypervisorState {
         num_pages: usize,
     ) -> anyhow::Result<()> {
         self.confidential_memory
-            .push((base_page_addr, num_pages, None))
-            .map_err(|c| {
-                anyhow::anyhow!(
-                    "out of confidential memory; failed to insert {} pages from {}",
-                    c.1,
-                    c.0
-                )
-            })?;
+            .push((base_page_addr, num_pages, None));
         Ok(())
     }
 
@@ -285,12 +279,10 @@ impl HypervisorState {
             }
         }
 
-        t.memory_regions
-            .push(MemoryRegion {
-                guest_gpa_base: tvm_gpa_addr,
-                num_pages,
-            })
-            .map_err(|_| anyhow::anyhow!("too many memory regions"))?;
+        t.memory_regions.push(MemoryRegion {
+            guest_gpa_base: tvm_gpa_addr,
+            num_pages,
+        });
         Ok(())
     }
 
@@ -307,12 +299,12 @@ impl HypervisorState {
             anyhow::bail!("no tvm present");
         }
 
-        let t = self.tvm.as_mut().unwrap();
-        if t.id != tvm_id {
+        let tvm = self.tvm.as_mut().unwrap();
+        if tvm.id != tvm_id {
             anyhow::bail!("tvm id mismatch");
         }
 
-        match t.state_enum {
+        match tvm.state_enum {
             TvmState::TvmInitializing => {}
             _ => anyhow::bail!("cannot add memory region unless TVM_INITIALIZING"),
         }
@@ -330,7 +322,7 @@ impl HypervisorState {
         let gpa_end = tvm_guest_gpa + num_pages * PAGE_SIZE;
         let mut found_region = false;
 
-        for r in t.memory_regions.iter() {
+        for r in tvm.memory_regions.iter() {
             let r_start = r.guest_gpa_base;
             let r_end = r.guest_gpa_base + r.num_pages * PAGE_SIZE;
 
@@ -370,18 +362,20 @@ impl HypervisorState {
             anyhow::bail!("dest_addr not in confidential memory");
         }
 
+        // Copy the data in confidential memory and extend the measurement
         unsafe {
-            let tot_bytes = PAGE_SIZE * num_pages;
-            core::ptr::copy_nonoverlapping(
-                source_addr as *const u8,
-                dest_addr as *mut u8,
-                tot_bytes,
-            );
+            let src_ptr = source_addr as *const u8;
+            let dst_ptr = dest_addr as *mut u8;
+            let bytes = num_pages * PAGE_SIZE;
+            core::ptr::copy_nonoverlapping(src_ptr, dst_ptr, bytes);
+
+            let content = from_raw_parts(src_ptr, bytes);
+            tvm.extend_measure(content);
         }
 
         // Map each page in the TVM's page table
         map_region(
-            t.page_table_addr,
+            tvm.page_table_addr,
             tvm_guest_gpa,
             dest_addr,
             num_pages,
@@ -391,66 +385,84 @@ impl HypervisorState {
         Ok(())
     }
 
-    pub fn tvm_run_vcpu(&self, _tvm_id: usize, _tvm_vcpu_id: usize) -> anyhow::Result<!> {
-        // perform the context switch
-        if let Some(tvm) = &self.tvm {
-            hvip::clear(VsInterruptKind::External);
-            hvip::clear(VsInterruptKind::Timer);
-            hvip::clear(VsInterruptKind::Software);
-
-            // disable address translation.
-            vsatp::write(0);
-
-            // specify delegation exception kinds.
-            hedeleg::write(
-                ExceptionKind::InstructionAddressMissaligned as usize
-                    | ExceptionKind::Breakpoint as usize
-                    | ExceptionKind::EnvCallFromUorVU as usize
-                    | ExceptionKind::InstructionPageFault as usize
-                    | ExceptionKind::LoadPageFault as usize
-                    | ExceptionKind::StoreAmoPageFault as usize,
-            );
-            // specify delegation interrupt kinds.
-            hideleg::write(
-                VsInterruptKind::External as usize
-                    | VsInterruptKind::Timer as usize
-                    | VsInterruptKind::Software as usize,
-            );
-            hgatp::set(hgatp::Mode::Sv39x4, 0, tvm.page_table_addr >> 12);
-            hfence_gvma_all();
-            unsafe {
-                // sstatus.SUM = 1, sstatus.SPP = 0
-                sstatus::set_sum();
-                sstatus::set_spp(sstatus::SPP::Supervisor);
-                // sstatus.sie = 1
-                sstatus::set_sie();
-                // sstatus.fs = 1
-                sstatus::set_fs(FS::Initial);
-
-                // hstatus.spv = 1 (enable V bit when sret executed)
-                hstatus::set_spv();
-
-                // set entry point
-                sepc::write(tvm.entry_sepc);
-                let mut stvec = stvec::read();
-                stvec.set_address(tvm.entry_sepc);
-                stvec.set_trap_mode(stvec::TrapMode::Direct);
-
-                stvec::write(stvec);
-
-                core::arch::asm!(
-                    r#"
-                            fence.i
-                            sret
-                        "#,
-
-                    in("a0") 0,
-                    in("a1") 0,
-                    options(readonly, noreturn, nostack)
-                )
-            }
+    pub fn create_tvm_vcpu(
+        &mut self,
+        tvm_id: usize,
+        tvm_vcpu_id: usize,
+        _tvm_state_page_addr: usize,
+    ) -> anyhow::Result<()> {
+        if self.tvm.is_none() {
+            anyhow::bail!("no tvm present");
         }
-        anyhow::bail!("no VM")
+
+        let tvm = self.tvm.as_mut().unwrap();
+        if tvm.id != tvm_id {
+            anyhow::bail!("tvm id mismatch");
+        }
+
+        tvm.vcpu = Some(TvmVcpuState::new());
+        Ok(())
+    }
+
+    pub fn run_tvm_vcpu(&self, tvm_id: usize, vcpu_id: usize) -> anyhow::Result<!> {
+        if self.tvm.is_none() {
+            anyhow::bail!("no tvm present");
+        }
+
+        let tvm = self.tvm.as_ref().unwrap();
+        if tvm.id != tvm_id {
+            anyhow::bail!("tvm id mismatch");
+        }
+
+        if tvm.vcpu.is_none() {
+            anyhow::bail!("no vcpu present");
+        }
+        let vcpu = tvm.vcpu.as_ref().unwrap();
+
+        match tvm.state_enum {
+            TvmState::TvmRunnable => {}
+            _ => anyhow::bail!("TVM must be in runnable state"),
+        }
+
+        // Setup H-extension for guest execution
+        self.setup_h_extension(&tvm)?;
+
+        unsafe { vcpu.enter(tvm.entry_sepc, tvm.entry_arg) }
+    }
+
+    /// Setup H-extension CSRs for guest execution
+    fn setup_h_extension(&self, tvm: &Tvm) -> anyhow::Result<()> {
+        // Clear pending interrupts
+        hvip::clear(VsInterruptKind::External);
+        hvip::clear(VsInterruptKind::Timer);
+        hvip::clear(VsInterruptKind::Software);
+
+        // Disable VS-mode address translation (guest manages its own)
+        vsatp::write(0);
+
+        // Delegate exceptions to VS-mode
+        hedeleg::write(
+            ExceptionKind::InstructionAddressMissaligned as usize
+                | ExceptionKind::Breakpoint as usize
+                | ExceptionKind::EnvCallFromUorVU as usize
+                | ExceptionKind::InstructionPageFault as usize
+                | ExceptionKind::LoadPageFault as usize
+                | ExceptionKind::StoreAmoPageFault as usize,
+        );
+
+        // Delegate interrupts to VS-mode
+        hideleg::write(
+            VsInterruptKind::External as usize
+                | VsInterruptKind::Timer as usize
+                | VsInterruptKind::Software as usize,
+        );
+
+        // Setup guest physical address translation (G-stage)
+        hgatp::set(hgatp::Mode::Sv39x4, 0, tvm.page_table_addr >> 12);
+
+        hfence_gvma_all();
+
+        Ok(())
     }
 
     /// Helper to find which confidential memory block contains an address range
@@ -474,12 +486,14 @@ pub struct Tvm {
     pub id: usize,
     pub page_table_addr: usize,
     pub state_addr: usize,
-    pub memory_regions: Vec<MemoryRegion, MAX_MEMORY_REGIONS>,
+    pub memory_regions: Vec<MemoryRegion>,
     pub state_enum: TvmState,
-    pub vcpus: Vec<TvmVcpuState, MAX_VCPU_PER_TVM>,
+    pub vcpu: Option<TvmVcpuState>,
     pub entry_sepc: usize,
     pub entry_arg: usize,
     pub tvm_identity_addr: usize,
+    pub hasher: sha2::Sha384,
+    pub measure: Vec<u8>,
 }
 
 impl Tvm {
@@ -490,18 +504,31 @@ impl Tvm {
             state_addr,
             memory_regions: Vec::new(),
             state_enum: TvmState::TvmInitializing,
-            vcpus: Vec::new(),
+            vcpu: None,
             entry_sepc: 0,
             entry_arg: 0,
             tvm_identity_addr: 0,
+            hasher: Sha384::new(),
+            measure: Vec::new(),
         }
     }
 
     fn finalize(&mut self, entry_sepc: usize, entry_arg: usize, tvm_identity_addr: usize) {
+        // Save entry point
         self.entry_sepc = entry_sepc;
         self.entry_arg = entry_arg;
         self.tvm_identity_addr = tvm_identity_addr;
+        // Mark the TVM in a runnable state
         self.state_enum = TvmState::TvmRunnable;
+
+        // Finalize the Measurement
+        let old_hasher = core::mem::take(&mut self.hasher);
+        self.measure = old_hasher.finalize().to_vec();
+        self.hasher = Sha384::new();
+    }
+
+    fn extend_measure(&mut self, data: &[u8]) {
+        self.hasher.update(data);
     }
 }
 
@@ -515,10 +542,56 @@ pub enum TvmState {
 #[repr(C, align(4))]
 pub struct TvmVcpuState {
     pub regs: [usize; 32],
+    pub sstatus: usize,
+    pub stvec: usize,
+    pub sip: usize,
+    pub satp: usize,
+    pub sepc: usize,
+    pub scause: usize,
+    pub stval: usize,
+}
 
-    sstatus: usize,
-    stvec: usize,
-    sip: usize,
-    satp: usize,
-    sepc: usize,
+impl TvmVcpuState {
+    pub fn new() -> Self {
+        Self {
+            regs: [0; 32],
+            sstatus: 0,
+            stvec: 0,
+            sip: 0,
+            satp: 0,
+            sepc: 0,
+            scause: 0,
+            stval: 0,
+        }
+    }
+
+    pub fn init(&mut self, sepc: usize, arg: usize) {
+        self.stvec = sepc;
+        self.sepc = sepc;
+        // a1 reg
+        self.regs[11] = arg;
+    }
+
+    pub unsafe fn enter(&self, entry_sepc: usize, entry_arg: usize) -> ! {
+        sstatus::set_sum(); // Allow supervisor to access user pages
+        sstatus::set_spp(SPP::Supervisor); // Return to S-mode (VS-mode with SPV=1)
+        sstatus::set_sie(); // Enable interrupts
+        sstatus::set_fs(FS::Initial); // Enable FP state
+
+        // Enable virtualization (SPV=1 means we enter VS-mode on sret)
+        hstatus::set_spv();
+
+        // Set guest PC
+        sepc::write(entry_sepc);
+
+        // TODO: restore vCPU context
+
+        core::arch::asm!(
+            r#"
+                fence.i
+                sret
+            "#,
+            options(readonly, noreturn, nostack)
+        )
+    }
 }
