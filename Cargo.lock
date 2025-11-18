@@ -742,6 +742,7 @@ dependencies = [
  "heapless",
  "linked_list_allocator",
  "riscv",
+ "spin 0.10.0",
 ]
 
 [[package]]
