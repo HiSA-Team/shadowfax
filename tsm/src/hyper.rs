@@ -15,10 +15,8 @@ use crate::h_extension::{
     instruction::hfence_gvma_all,
 };
 
-const MAX_VCPU_PER_TVM: usize = 1;
 const PAGE_SIZE: usize = 4096;
 const PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
-const MAX_MEMORY_REGIONS: usize = 8; // per-TVM simple limit
 
 const PTE_SIZE: usize = 8;
 const PTE_V: u64 = 1 << 0;
