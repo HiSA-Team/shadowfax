@@ -28,9 +28,8 @@ REGION_ALIAS("REGION_TEE_MEM", RAM);
 _stack_size          = 0x4000;   /* 16k */
 _heap_size           = 0x10000;  /* 64k */
 _tee_stack_size      = 0x10000;  /* 64k */
-_tsm_state_size      = 0x10000;  /* 64k */
 
-_fw_start = ORIGIN(FLASH);
+_fw_start  = ORIGIN(FLASH);
 _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 
 SECTIONS {
@@ -60,6 +59,7 @@ SECTIONS {
     _heap_start = .;
     . += _heap_size;
     . = ALIGN(4K);
+    _heap_end = .;
   } > REGION_DATA
 
   /* store bss_data */
@@ -78,7 +78,6 @@ SECTIONS {
     . = ALIGN(4K);
     . += _tee_stack_size;
     _tee_stack_top = .;
-
   } > REGION_TEE_MEM
 
 }

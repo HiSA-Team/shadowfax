@@ -75,15 +75,15 @@ unsafe extern "C" {
     static _fw_end: u8;
     static _fw_rw_start: u8;
 
-    // heap
+    // Heap
     static mut _heap_start: u8;
-    static _heap_size: u8;
+    static _heap_end: u8;
 
     // Bss info
     static _start_bss: u8;
     static _end_bss: u8;
 
-    // Boot stack
+    // Stack
     static _stack_top: u8;
 
     // Start of the TEE Scratch Stack
@@ -238,11 +238,10 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 
     // this enables heap allocations
     unsafe {
-        // Initialize global allocator
-        ALLOCATOR.lock().init(
-            core::ptr::addr_of_mut!(_heap_start),
-            core::ptr::addr_of!(_heap_size) as usize,
-        );
+        // Initialize global alloca
+        let heap_start = (&raw const _heap_start as *const u8) as usize;
+        let heap_size = ((&raw const _heap_end as *const u8) as usize) - heap_start;
+        ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
     }
 
     // setup a temporary trap handler (just a busy loop)
