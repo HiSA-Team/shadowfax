@@ -58,8 +58,6 @@
 use core::cell::OnceCell;
 
 use alloc::vec::Vec;
-use common::tsm::{TSM_IMPL_ID, TSM_VERSION};
-use fdt_rs::{base::DevTree, prelude::FallibleIterator};
 use spin::mutex::Mutex;
 
 use crate::{
@@ -84,11 +82,7 @@ impl State {
 
 // TODO: parse domains dynamically from the device tree
 // Assumption: the domain id matches with its position in the domain array
-pub fn init(
-    _fdt_addr: usize,
-    tsm_state_addr: usize,
-    tsm_state_size: usize,
-) -> Result<(), anyhow::Error> {
+pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     let mut state = STATE.lock();
     let state = state.get_mut_or_init(|| State::new());
 
@@ -97,7 +91,7 @@ pub fn init(
 
     let root_domain = Domain {
         memory_regions: Vec::from([MemoryRegion {
-            base_addr: 0x0,
+            base_addr: 0,
             order: 64,
             mmio: false,
             permissions: 0x3F,
@@ -105,14 +99,14 @@ pub fn init(
         // The root domain should not be involved in Confidential call
         trust_map: 0,
         context_addr: 0,
-        state_addr: None,
+        security_context: None,
     };
     state.domains.push(root_domain);
 
     // Create and add the confidential_domain
     // TODO: make this dynamic
     let context_addr = tee_stack - (TEE_SCRATCH_SIZE + size_of::<Context>()) - size_of::<Context>();
-    let confidential_domain = create_confidential_domain(context_addr, tsm_state_addr);
+    let confidential_domain = create_confidential_domain(context_addr);
 
     state.domains.push(confidential_domain);
 
@@ -120,14 +114,14 @@ pub fn init(
     let context_addr = context_addr - size_of::<Context>();
     let untrusted_domain = Domain {
         memory_regions: Vec::from([MemoryRegion {
-            base_addr: 0x824000000,
+            base_addr: 0x82800_0000,
             order: 24,
             mmio: false,
             permissions: 0x3F,
         }]),
         trust_map: 1 << 1,
-        context_addr: context_addr,
-        state_addr: None,
+        context_addr,
+        security_context: None,
     };
     state.domains.push(untrusted_domain);
 

@@ -84,15 +84,11 @@ unsafe extern "C" {
     static _end_bss: u8;
 
     // Boot stack
-    static _boot_stack_top: u8;
-    static _boot_stack_size: u8;
+    static _stack_top: u8;
 
     // Start of the TEE Scratch Stack
     pub static _tee_stack_top: u8;
 
-    // Space for TSM state
-    pub static _tsm_state_start: u8;
-    pub static _tsm_state_size: u8;
 }
 
 /*
@@ -171,7 +167,7 @@ extern "C" fn _start() -> ! {
         call {main}
         "#,
         stack_size_per_hart = const STACK_SIZE_PER_HART,
-        stack_top = sym _boot_stack_top,
+        stack_top = sym _stack_top,
         hang = sym hang,
         fw_platform_init = sym opensbi::fw_platform_init,
         main = sym main,
@@ -266,11 +262,8 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 
     dump_linker_symbols(next_stage_address);
 
-    let tsm_state_start = unsafe { &_tsm_state_start as *const u8 as usize };
-    let tsm_state_size = unsafe { &_tsm_state_size as *const u8 as usize };
-
     // initialize shadowfax state which will be used to handle the CoVE SBI
-    state::init(fdt_addr, tsm_state_start, tsm_state_size).unwrap();
+    state::init(fdt_addr).unwrap();
 
     /*
      * This code initializes the scratch space, which is a per-HART data structure
@@ -476,19 +469,11 @@ fn dump_linker_symbols(next_stage_address: usize) {
 
         print_raw!(
             "Boot Stack Top    : {:#018x}\n",
-            &_boot_stack_top as *const u8 as usize
+            &_stack_top as *const u8 as usize
         );
         print_raw!(
             "TEE Stack Top     : {:#018x}\n",
             &_tee_stack_top as *const u8 as usize
-        );
-        print_raw!(
-            "TSM State Start   : {:#018x}\n",
-            &_tsm_state_start as *const u8 as usize
-        );
-        print_raw!(
-            "TSM State Size    : {:#018x}\n",
-            &_tsm_state_size as *const u8 as usize
         );
 
         print_raw!("Root Domain Address    : {:#018x}\n", next_stage_address);

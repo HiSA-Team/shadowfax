@@ -1,6 +1,6 @@
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x81400000, LENGTH = 8M
+    RAM (rwx) : ORIGIN = 0x82000000, LENGTH = 8M
 }
 
 REGION_ALIAS("REGION_TEXT", RAM);
@@ -31,7 +31,7 @@ SECTIONS {
     .stack (NOLOAD): ALIGN(4K) {
         /* 8K stack */
         . += 0x2000;
-        _top_b_stack = .;
+        _stack_top = .;
     } > REGION_DATA
 
     /* Add relocation sections */

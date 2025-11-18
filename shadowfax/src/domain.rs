@@ -1,12 +1,5 @@
-use core::{error::Error, fmt::Display};
-
 use alloc::vec::Vec;
-use common::tsm::{TSM_IMPL_ID, TSM_VERSION};
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
-use fdt_rs::{
-    base::{DevTree, DevTreeNode},
-    prelude::{FallibleIterator, PropReader},
-};
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
     pkcs1v15::{Signature, VerifyingKey},
@@ -42,7 +35,7 @@ pub struct Domain {
     pub memory_regions: Vec<MemoryRegion>,
 
     pub context_addr: usize,
-    pub state_addr: Option<usize>,
+    pub security_context: Option<[u8; 256]>,
 }
 
 impl Domain {
@@ -51,7 +44,7 @@ impl Domain {
             trust_map: 0,
             memory_regions: Vec::new(),
             context_addr: 0,
-            state_addr: None,
+            security_context: None,
         }
     }
 
@@ -138,7 +131,7 @@ impl Domain {
     }
 }
 
-pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Domain {
+pub fn create_confidential_domain(context_addr: usize) -> Domain {
     // Assume that the specified domain is a trusted domain -> need to load the TSM in it
     // TODO: parse domain from FDT
     let tsm_ctx = context_addr as *mut Context;
@@ -150,7 +143,7 @@ pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Dom
     // Hardcoded memory regions for now
     domain.memory_regions = [
         MemoryRegion {
-            base_addr: 0x8140_0000,
+            base_addr: 0x8200_0000,
             order: 24,
             permissions: 0x3f,
             mmio: false,
@@ -166,28 +159,7 @@ pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Dom
 
     // Save the context address and the state address
     domain.context_addr = context_addr;
-    domain.state_addr = Some(state_addr);
-
-    // init the TSM state
-    let tsm_initial_state = common::tsm::TsmStateData {
-        info: common::tsm::TsmInfo {
-            tsm_state: common::tsm::TsmState::TsmNotLoaded,
-            tsm_impl_id: TSM_IMPL_ID,
-            tsm_version: TSM_VERSION,
-            _padding: 0,
-            tsm_capabilities: 0,
-            tvm_state_pages: 1,
-            tvm_vcpu_state_pages: 1,
-            tvm_max_vcpus: 1,
-        },
-    };
-
-    unsafe {
-        core::ptr::write(
-            state_addr as *mut common::tsm::TsmStateData,
-            tsm_initial_state,
-        );
-    }
+    domain.security_context = Some([0; 256]);
 
     // Configure PMP entry for TMem
     let tmem_region = &domain.memory_regions[0];
@@ -210,29 +182,4 @@ pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Dom
     .unwrap();
 
     return domain;
-}
-
-// TODO expand this to support TOR address mode
-// Source: https://www.five-embeddev.com/riscv-priv-isa-manual/latest-adoc/machine.html#pmp
-pub fn build_pmp_configuration_registers(
-    index: usize,
-    base_address: usize,
-    size: usize,
-    permission: riscv::register::Permission,
-    range: riscv::register::Range,
-) -> (usize, usize) {
-    let start_addr = base_address;
-
-    let size = size.next_power_of_two();
-    let base = start_addr & !(size - 1);
-
-    let k = size.trailing_zeros() as usize;
-    let ones = (1 << (k - 3)) - 1;
-
-    let pmpaddr = ((base >> 2) as usize) | ones;
-    let locked = false;
-    let byte = (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
-    let pmpcfg = byte << (8 * index);
-
-    return (pmpaddr, pmpcfg);
 }

@@ -47,30 +47,69 @@ fn pa_to_ppn(pa: usize) -> u64 {
     (pa as u64) >> 12
 }
 
-/// Minimal SV39 mapper for one 4 KiB page.
-/// Uses the 16 KiB region:
-///   L2=root, L1=root+4K, L0=root+8K.
+#[inline(always)]
+fn ppn_to_pa(ppn: u64) -> usize {
+    (ppn << 12) as usize
+}
+
+/// Map a single 4 KiB page in SV39 page tables.
+/// Dynamically allocates page tables within the 16KB region as needed.
+///
+/// Memory layout:
+///   root_pt + 0x0000: L2 table (root)
+///   root_pt + 0x1000: L1 table (shared for all VPN[2]=0)
+///   root_pt + 0x2000: First L0 table
+///   root_pt + 0x3000: Second L0 table (if needed for different VPN[1])
+///
+/// Note: This assumes all mappings use VPN[2]=0 (addresses < 1GB)
 fn map_4k_leaf(root_pt: usize, gpa: usize, pa: usize, perms: u64) {
-    assert_eq!(gpa % PAGE_SIZE, 0);
-    assert_eq!(pa % PAGE_SIZE, 0);
+    assert_eq!(gpa % PAGE_SIZE, 0, "GPA must be page-aligned");
+    assert_eq!(pa % PAGE_SIZE, 0, "PA must be page-aligned");
 
     let [vpn2, vpn1, vpn0] = make_vpn_sv39(gpa);
 
-    // Level 2 → Level 1
+    // Level 2 -> Level 1
     let pte2_addr = root_pt + vpn2 * PTE_SIZE;
-    let l1_base = root_pt + 0x1000;
-    let pte = (pa_to_ppn(l1_base) << 10) | PTE_V;
-    unsafe {
-        core::ptr::write_volatile(pte2_addr as *mut u64, pte);
-    }
+    let pte2 = unsafe { core::ptr::read_volatile(pte2_addr as *const u64) };
 
-    // Level 1 → Level 0
+    let l1_base = if pte2 & PTE_V == 0 {
+        // L1 table doesn't exist, create it
+        let l1_base = root_pt + 0x1000;
+        let pte = (pa_to_ppn(l1_base) << 10) | PTE_V;
+        unsafe {
+            core::ptr::write_volatile(pte2_addr as *mut u64, pte);
+        }
+        l1_base
+    } else {
+        // L1 already exists, extract its address
+        ppn_to_pa(pte2 >> 10)
+    };
+
+    // Level 1 -> Level 0
     let pte1_addr = l1_base + vpn1 * PTE_SIZE;
-    let l0_base = root_pt + 0x2000;
-    let pte = (pa_to_ppn(l0_base) << 10) | PTE_V;
-    unsafe {
-        core::ptr::write_volatile(pte1_addr as *mut u64, pte);
-    }
+    let pte1 = unsafe { core::ptr::read_volatile(pte1_addr as *const u64) };
+
+    let l0_base = if pte1 & PTE_V == 0 {
+        // L0 table doesn't exist, allocate it
+        // For simplicity: L0 for VPN[1]=0 at root+0x2000, VPN[1]=1 at root+0x3000
+        let l0_base = root_pt + 0x2000 + (vpn1 * PAGE_SIZE);
+
+        // Check we don't exceed our 16KB region
+        assert!(
+            l0_base + PAGE_SIZE <= root_pt + PAGE_DIRECTORY_SIZE,
+            "Insufficient space for L0 table at VPN[1]={}",
+            vpn1
+        );
+
+        let pte = (pa_to_ppn(l0_base) << 10) | PTE_V;
+        unsafe {
+            core::ptr::write_volatile(pte1_addr as *mut u64, pte);
+        }
+        l0_base
+    } else {
+        // L0 already exists
+        ppn_to_pa(pte1 >> 10)
+    };
 
     // Level 0 (leaf)
     let pte0_addr = l0_base + vpn0 * PTE_SIZE;
@@ -80,18 +119,25 @@ fn map_4k_leaf(root_pt: usize, gpa: usize, pa: usize, perms: u64) {
     }
 }
 
+/// Map a contiguous region of memory (multiple 4KB pages).
+fn map_region(root_pt: usize, gpa_base: usize, pa_base: usize, num_pages: usize, perms: u64) {
+    for i in 0..num_pages {
+        let gpa = gpa_base + i * PAGE_SIZE;
+        let pa = pa_base + i * PAGE_SIZE;
+        map_4k_leaf(root_pt, gpa, pa, perms);
+    }
+}
+
 // -----------------------------
 // Core TSM structures
 // -----------------------------
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MemoryRegion {
     pub guest_gpa_base: usize,
     pub num_pages: usize,
 }
 
-#[repr(C)]
 pub struct HypervisorState {
     pub tvm: Option<Tvm>,
     confidential_memory: Vec<(usize, usize, Option<usize>), MAX_PAGE_BLOCKS>,
@@ -273,6 +319,57 @@ impl HypervisorState {
 
         assert_eq!(tsm_page_type, 0, "accepting 4k pages for now");
 
+        if (source_addr % PAGE_SIZE) != 0
+            || (dest_addr % PAGE_SIZE) != 0
+            || (tvm_guest_gpa % PAGE_SIZE) != 0
+        {
+            anyhow::bail!("all addresses must be page-aligned");
+        }
+
+        // Verify the GPA range falls within a defined memory region
+        let gpa_end = tvm_guest_gpa + num_pages * PAGE_SIZE;
+        let mut found_region = false;
+
+        for r in t.memory_regions.iter() {
+            let r_start = r.guest_gpa_base;
+            let r_end = r.guest_gpa_base + r.num_pages * PAGE_SIZE;
+
+            if tvm_guest_gpa >= r_start && gpa_end <= r_end {
+                found_region = true;
+                break;
+            }
+        }
+
+        if !found_region {
+            anyhow::bail!(
+                "GPA range 0x{:x}-0x{:x} not within any memory region",
+                tvm_guest_gpa,
+                gpa_end
+            );
+        }
+
+        // Verify dest_addr is in confidential memory
+        let dest_end = dest_addr + num_pages * PAGE_SIZE;
+        let mut in_confidential = false;
+
+        for (base, npages, owner) in self.confidential_memory.iter() {
+            let conf_start = *base;
+            let conf_end = base + npages * PAGE_SIZE;
+
+            if dest_addr >= conf_start && dest_end <= conf_end {
+                // Check if already owned by this TVM
+                if owner.is_some() && *owner != Some(tvm_id) {
+                    anyhow::bail!("confidential memory already owned by another TVM");
+                }
+                in_confidential = true;
+                break;
+            }
+        }
+
+        if !in_confidential {
+            anyhow::bail!("dest_addr not in confidential memory");
+        }
+
         unsafe {
             let tot_bytes = PAGE_SIZE * num_pages;
             core::ptr::copy_nonoverlapping(
@@ -280,14 +377,16 @@ impl HypervisorState {
                 dest_addr as *mut u8,
                 tot_bytes,
             );
-            // map GPA → PA in the TVM's page table
-            map_4k_leaf(
-                t.page_table_addr,
-                tvm_guest_gpa,
-                dest_addr,
-                PTE_R | PTE_X | PTE_U,
-            );
         }
+
+        // Map each page in the TVM's page table
+        map_region(
+            t.page_table_addr,
+            tvm_guest_gpa,
+            dest_addr,
+            num_pages,
+            PTE_R | PTE_W | PTE_X | PTE_U,
+        );
 
         Ok(())
     }
@@ -354,11 +453,16 @@ impl HypervisorState {
         anyhow::bail!("no VM")
     }
 
+    /// Helper to find which confidential memory block contains an address range
     fn find_confidential_block_idx_covering(&self, addr: usize, size: usize) -> Option<usize> {
-        for (i, &(base, npages, _owner)) in self.confidential_memory.iter().enumerate() {
-            let region_bytes = npages * PAGE_SIZE;
-            if addr >= base && (addr + size) <= (base + region_bytes) {
-                return Some(i);
+        let addr_end = addr + size;
+
+        for (idx, (base, npages, _)) in self.confidential_memory.iter().enumerate() {
+            let block_start = *base;
+            let block_end = base + npages * PAGE_SIZE;
+
+            if addr >= block_start && addr_end <= block_end {
+                return Some(idx);
             }
         }
         None
