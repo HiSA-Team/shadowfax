@@ -23,7 +23,7 @@ print_warn() { printf '%b[WARNING]%b %s\n' "$YELLOW" "$RESET" "$1" >&2; }
 LLVM_VERSION="${LLVM_VERSION:-17.0.6}"
 OPENSBI_VERSION="$(git -C shadowfax/opensbi describe)"
 PLATFORM="${PLATFORM:-generic}"
-ROOT_DOMAIN_JUMP_ADDRESS="0x82400000"
+ROOT_DOMAIN_JUMP_ADDRESS="0x82800000"
 
 get_libc() {
   if ldd --version 2>&1 | grep -q musl; then

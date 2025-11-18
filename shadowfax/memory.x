@@ -8,12 +8,12 @@
 
 /*
  * FLASH    0x80000000 - 0x80FFFFFF
- * RAM      0x81000000 - 0x813FFFFF
+ * RAM      0x81000000 - 0x81FFFFFF
  */
 MEMORY
 {
   FLASH (rx) : ORIGIN = 0x80000000, LENGTH = 16M
-  RAM   (rw) : ORIGIN = 0x81000000, LENGTH = 4M
+  RAM   (rw) : ORIGIN = 0x81000000, LENGTH = 16M
 }
 
 /*
@@ -25,13 +25,13 @@ REGION_ALIAS("REGION_DATA", RAM);
 REGION_ALIAS("REGION_TEE_MEM", RAM);
 
 /* variables */
-_boot_stack_size     = 0x4000;   /* 16k */
+_stack_size          = 0x4000;   /* 16k */
 _heap_size           = 0x10000;  /* 64k */
 _tee_stack_size      = 0x10000;  /* 64k */
 _tsm_state_size      = 0x10000;  /* 64k */
 
 _fw_start = ORIGIN(FLASH);
-_boot_stack_top = ORIGIN(RAM) + LENGTH(RAM);
+_stack_top = ORIGIN(RAM) + LENGTH(RAM);
 
 SECTIONS {
 
@@ -78,11 +78,6 @@ SECTIONS {
     . = ALIGN(4K);
     . += _tee_stack_size;
     _tee_stack_top = .;
-
-    /* Space for TSM state */
-    . = ALIGN(4K);
-    _tsm_state_start = .;
-    . += _tsm_state_size;
 
   } > REGION_TEE_MEM
 

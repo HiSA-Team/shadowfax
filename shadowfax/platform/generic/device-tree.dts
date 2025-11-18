@@ -101,13 +101,13 @@
 
 			umem: umem {
 				compatible = "opensbi,domain,memregion";
-				base = <0x0 0x82400000>;
+				base = <0x0 0x82800000>;
 				order = <24>;
 			};
 
 			tmem: tmem {
 				compatible = "opensbi,domain,memregion";
-				base = <0x0 0x81400000>;
+				base = <0x0 0x82000000>;
 				order = <23>;
 			};
 
@@ -116,7 +116,7 @@
 				possible-harts = <&cpu0>;
 				regions = <&tmem 0x3f>;
 				next-arg1 = <0x0 0x0>;
-				next-addr = <0x0 0x81400000>;
+				next-addr = <0x0 0x82000000>;
 				next-mode = <0x1>;
 			};
 
@@ -126,7 +126,7 @@
 				boot-hartid = <&cpu0>;
 				regions = <&umem 0x3f>;
 				next-arg1 = <0x0 0x0>;
-				next-addr = <0x0 0x82400000>;
+				next-addr = <0x0 0x82800000>;
 				next-mode = <0x1>;
 			};
 
