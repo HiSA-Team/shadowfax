@@ -46,3 +46,8 @@ pub mod sbi {
         }
     }
 }
+
+pub mod security {
+    /// Size of the signing key passed to the TSM in the initialization phaase
+    pub const TSM_KEY_SIZE: usize = 64;
+}

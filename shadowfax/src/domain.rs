@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use common::security::TSM_KEY_SIZE;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
@@ -35,7 +36,7 @@ pub struct Domain {
     pub memory_regions: Vec<MemoryRegion>,
 
     pub context_addr: usize,
-    pub security_context: Option<[u8; 256]>,
+    pub security_context: Option<[u8; TSM_KEY_SIZE]>,
 }
 
 impl Domain {
@@ -136,6 +137,7 @@ pub fn create_confidential_domain(context_addr: usize) -> Domain {
     // TODO: parse domain from FDT
     let tsm_ctx = context_addr as *mut Context;
     let mut domain = Domain::empty();
+    let key = [0; TSM_KEY_SIZE];
 
     // Trust both root and untrusted domains
     domain.trust_map = (1 << 2) | (1 << 0);
@@ -159,7 +161,7 @@ pub fn create_confidential_domain(context_addr: usize) -> Domain {
 
     // Save the context address and the state address
     domain.context_addr = context_addr;
-    domain.security_context = Some([0; 256]);
+    domain.security_context = Some(key);
 
     // Configure PMP entry for TMem
     let tmem_region = &domain.memory_regions[0];
@@ -181,5 +183,42 @@ pub fn create_confidential_domain(context_addr: usize) -> Domain {
     )
     .unwrap();
 
+    // Boot and initialize secure_init safely
+    boot_tsm(&key);
+
     return domain;
+}
+
+/// This function looks for the _secure_init symbol and invoke it as a function
+fn boot_tsm(key: &[u8; TSM_KEY_SIZE]) {
+    // parse ELF
+    let elf = ElfBytes::<AnyEndian>::minimal_parse(tsm::DEFAULT_TSM).unwrap();
+
+    // get static symbol table instead of dynsym
+    let (symtab, strtab) = elf
+        .symbol_table()
+        .expect("no .symtab section in ELF")
+        .unwrap();
+
+    // find symbol by iterating static symbols
+    let name = b"_secure_init";
+
+    let mut found = None;
+    for sym in symtab {
+        if let Ok(a) = strtab.get(sym.st_name as usize) {
+            if a.as_bytes() == name {
+                found = Some(sym);
+                break;
+            }
+        }
+    }
+
+    let sym = found.expect("cannot find _secure_init");
+
+    unsafe {
+        // Reinterpret the address as a function
+        let secure_init_fn = core::mem::transmute::<u64, fn(n: *const u8, id: usize)>(sym.st_value);
+
+        secure_init_fn(key.as_ptr(), 0);
+    }
 }

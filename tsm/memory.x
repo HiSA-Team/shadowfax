@@ -17,6 +17,7 @@ SECTIONS {
 
   .text : ALIGN(4K) {
     KEEP(*(._start));
+    KEEP(*(._secure_init));
     *(.text .text.*);
     *(.rodata .rodata.*);
   } > REGION_TEXT

@@ -3,15 +3,16 @@
 #![feature(never_type)]
 #![feature(fn_align)]
 
-use core::{
-    panic::PanicInfo,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::panic::PanicInfo;
 
-use common::sbi::{
-    SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
-    SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM,
-    SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RUN_TVM_VCPU,
+use common::{
+    sbi::{
+        SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
+        SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU,
+        SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO,
+        SBI_COVH_RUN_TVM_VCPU,
+    },
+    security::TSM_KEY_SIZE,
 };
 use linked_list_allocator::LockedHeap;
 use spin::Mutex;
@@ -85,10 +86,11 @@ extern "C" fn _start() -> ! {
 struct TsmState {
     info: TsmInfo,
     hypervisor: HypervisorState,
+    key: [u8; TSM_KEY_SIZE],
 }
 
 impl TsmState {
-    fn new() -> Self {
+    fn new(key: [u8; TSM_KEY_SIZE]) -> Self {
         Self {
             info: TsmInfo {
                 tsm_status: state::TsmStatus::TsmReady,
@@ -101,30 +103,39 @@ impl TsmState {
                 tvm_vcpu_state_pages: 0,
             },
             hypervisor: HypervisorState::new(),
+            key,
         }
     }
 }
 
-static INIT: AtomicBool = AtomicBool::new(false);
 static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
 
-fn ensure_init() -> spin::MutexGuard<'static, Option<TsmState>> {
-    let mut guard = STATE.lock();
+#[no_mangle]
+#[allow(dead_code)]
+#[inline(never)]
+#[link_section = "._secure_init"]
+/// This function will be called by the TSM-driver to initialize securely the TSM after the
+/// signature has bee authenticated. The TSM-driver will provide optionally an identity to prove
+/// its authenticity in a first local attestation scenario.
+extern "C" fn _secure_init(key: *const u8, _firmware_identity: usize) {
+    // Initialize heap
+    unsafe {
+        let heap_start = (&raw const _heap_start as *const u8) as usize;
+        let heap_size = ((&raw const _heap_end as *const u8) as usize) - heap_start;
 
-    if !INIT.load(Ordering::Acquire) {
-        // this enables heap allocations
-        unsafe {
-            // Initialize global alloca
-            let heap_start = (&raw const _heap_start as *const u8) as usize;
-            let heap_size = ((&raw const _heap_end as *const u8) as usize) - heap_start;
-            ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
-        }
-        let state = TsmState::new(); // heavy init allowed here
-        *guard = Some(state);
-        INIT.store(true, Ordering::Release);
+        ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
     }
 
-    guard
+    // convert the nonce to a [u8; TSM_KEY_SIZE]
+    let key: [u8; TSM_KEY_SIZE] = unsafe {
+        let key = core::slice::from_raw_parts(key, TSM_KEY_SIZE);
+        key.try_into().unwrap()
+    };
+
+    let mut state = STATE.lock();
+    *state = Some(TsmState::new(key));
+
+    drop(state);
 }
 
 // Since this is a TSM with non reentrant model, an ECALL should be a TEERET
@@ -142,7 +153,7 @@ fn main(
     // TODO: the TSM will be invoked also for the CoVG SBI
     assert_eq!(a7, SBI_COVH_EXT_ID);
 
-    let mut lock = ensure_init();
+    let mut lock = STATE.lock();
     let state = lock.as_mut().unwrap();
 
     // fid is formated as:
