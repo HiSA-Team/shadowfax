@@ -1,12 +1,13 @@
 # Toolchain
-HOST_TRIPLET    := $(shell rustc -vV | grep '^host:' | awk '{print $$2}')
-OPENSBI_VERSION := $(shell git -C shadowfax/opensbi describe)
-TARGET_TRIPLET  ?= riscv64imac-unknown-none-elf
-PROFILE         ?= debug
+HOST_TRIPLET      := $(shell rustc -vV | grep '^host:' | awk '{print $$2}')
+OPENSBI_VERSION   := $(shell git -C shadowfax/opensbi describe)
+TARGET_TRIPLET    ?= riscv64imac-unknown-none-elf
+PROFILE           ?= debug
+HOST_ARCHITECTURE ?= $(shell uname -m)
 
 # OpenSBI Params
-CROSS_COMPILE   ?= riscv64-unknown-linux-${LIBC_PREFIX}-
-PLATFORM        ?= generic
+CROSS_COMPILE     ?= riscv64-unknown-linux-${LIBC_PREFIX}-
+PLATFORM          ?= generic
 
 # General Directories
 BIN_DIR          = bin
@@ -28,7 +29,7 @@ all: firmware build-info
 
 ## firmware: build the firmware. It includes building the TSM and signing it
 firmware: tsm
-	 cargo build --target $(TARGET_TRIPLET) -p shadowfax
+	 CROSS_COMPILE=$(CROSS_COMPILE) cargo build --target $(TARGET_TRIPLET) -p shadowfax
 
 ## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
 tsm: $(TSM_SIG)
@@ -61,7 +62,7 @@ build-info:
 	@echo "  PLATFORM:                  $(PLATFORM)"
 	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
 	@echo "  OPENSBI_VERSION:           $(OPENSBI_VERSION)"
-	@echo "  ROOT_DOMAIN_JUMP_ADDRESS:  $(ROOT_DOMAIN_JUMP_ADDRESS)"
+	@echo "  BOOT_DOMAIN_ADDRESS:       $(BOOT_DOMAIN_ADDRESS)"
 
 ## clean: removes all build artifacts
 clean:
