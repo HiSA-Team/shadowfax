@@ -367,7 +367,7 @@ impl HypervisorState {
             let bytes = num_pages * PAGE_SIZE;
             core::ptr::copy_nonoverlapping(src_ptr, dst_ptr, bytes);
 
-            let content = from_raw_parts(src_ptr, bytes);
+            let content = core::slice::from_raw_parts(src_ptr, bytes);
             tvm.extend_measure(content);
         }
 

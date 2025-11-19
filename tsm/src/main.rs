@@ -86,11 +86,11 @@ extern "C" fn _start() -> ! {
 struct TsmState {
     info: TsmInfo,
     hypervisor: HypervisorState,
-    key: [u8; TSM_KEY_SIZE],
+    prev_tcb_measure: [u8; TSM_KEY_SIZE],
 }
 
 impl TsmState {
-    fn new(key: [u8; TSM_KEY_SIZE]) -> Self {
+    fn new(prev_tcb_measure: [u8; TSM_KEY_SIZE]) -> Self {
         Self {
             info: TsmInfo {
                 tsm_status: state::TsmStatus::TsmReady,
@@ -103,7 +103,7 @@ impl TsmState {
                 tvm_vcpu_state_pages: 0,
             },
             hypervisor: HypervisorState::new(),
-            key,
+            prev_tcb_measure,
         }
     }
 }
@@ -127,13 +127,13 @@ extern "C" fn _secure_init(key: *const u8, _firmware_identity: usize) {
     }
 
     // convert the nonce to a [u8; TSM_KEY_SIZE]
-    let key: [u8; TSM_KEY_SIZE] = unsafe {
+    let prev_tcb_measure: [u8; TSM_KEY_SIZE] = unsafe {
         let key = core::slice::from_raw_parts(key, TSM_KEY_SIZE);
         key.try_into().unwrap()
     };
 
     let mut state = STATE.lock();
-    *state = Some(TsmState::new(key));
+    *state = Some(TsmState::new(prev_tcb_measure));
 
     drop(state);
 }
