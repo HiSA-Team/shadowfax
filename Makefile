@@ -1,17 +1,23 @@
+# Toolchain
+HOST_TRIPLET    := $(shell rustc -vV | grep '^host:' | awk '{print $$2}')
+OPENSBI_VERSION := $(shell git -C shadowfax/opensbi describe)
 TARGET_TRIPLET  ?= riscv64imac-unknown-none-elf
-PROFILE ?= debug
-HOST_TRIPLET := $(shell rustc -vV | grep '^host:' | awk '{print $$2}')
+PROFILE         ?= debug
+
+# OpenSBI Params
+CROSS_COMPILE   ?= riscv64-unknown-linux-${LIBC_PREFIX}-
+PLATFORM        ?= generic
 
 # General Directories
-BIN_DIR			= bin
-KEYS_DIR		= shadowfax/keys
-TARGET_DIR	= target/$(TARGET_TRIPLET)/$(PROFILE)
+BIN_DIR          = bin
+KEYS_DIR         = shadowfax/keys
+TARGET_DIR       = target/$(TARGET_TRIPLET)/$(PROFILE)
 
 # TSM Files
-TSM_ELF							 = $(TARGET_DIR)/tsm
-TSM_SIG							 = $(BIN_DIR)/tsm.bin.signature
-PRIVATE_KEY					 = $(KEYS_DIR)/privatekey.pem
-PUBLIC_KEY					 = $(KEYS_DIR)/publickey.pem
+TSM_ELF          = $(TARGET_DIR)/tsm
+TSM_SIG          = $(BIN_DIR)/tsm.bin.signature
+PRIVATE_KEY      = $(KEYS_DIR)/privatekey.pem
+PUBLIC_KEY       = $(KEYS_DIR)/publickey.pem
 
 .PHONY: all clean firmware tsm test generate-keys help
 
@@ -37,7 +43,6 @@ $(TSM_ELF):
 test: firmware
 	cargo test --manifest-path test/Cargo.toml --target $(HOST_TRIPLET)
 
-
 ## generate-keys: generates a couple of RSA keys 2048 bit in shadowfax-core/keys/
 generate-keys:
 	mkdir -p $(KEYS_DIR)
@@ -47,16 +52,16 @@ generate-keys:
 ## info: display build configuration
 build-info:
 	@echo "Build Configuration:"
-	@echo "  TARGET_TRIPLET:            $(TARGET_TRIPLET)"
-	@echo "  PROFILE:                   $(PROFILE)"
-	@echo "  PLATFORM:                  $(PLATFORM)"
-	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
-	@echo "  CROSS_COMPILE:             $(CROSS_COMPILE)"
-	@echo "  OPENSBI_VERSION:           $(OPENSBI_VERSION)"
-	@echo "  ROOT_DOMAIN_JUMP_ADDRESS:  $(ROOT_DOMAIN_JUMP_ADDRESS)"
 	@echo "  HOST_ARCHITECTURE:         $(HOST_ARCHITECTURE)"
 	@echo "  HOST_LIBC_PREFIX:          $(LIBC_PREFIX)"
 	@echo "  HOST_TARGET_TRIPLET:       $(HOST_TRIPLET)"
+	@echo "  TARGET_TRIPLET:            $(TARGET_TRIPLET)"
+	@echo "  CROSS_COMPILE:             $(CROSS_COMPILE)"
+	@echo "  PROFILE:                   $(PROFILE)"
+	@echo "  PLATFORM:                  $(PLATFORM)"
+	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
+	@echo "  OPENSBI_VERSION:           $(OPENSBI_VERSION)"
+	@echo "  ROOT_DOMAIN_JUMP_ADDRESS:  $(ROOT_DOMAIN_JUMP_ADDRESS)"
 
 ## clean: removes all build artifacts
 clean:

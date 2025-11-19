@@ -254,7 +254,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     // prepare the next stage. If SHADOWFAX_JUMP_ADDRESS is specified, jump to that address (the
     // user will load that payload). Otherwise fallback to empty payload which does nothing
     let next_stage_address = {
-        let address = env!("ROOT_DOMAIN_JUMP_ADDRESS").strip_prefix("0x").unwrap();
+        let address = env!("BOOT_DOMAIN_ADDRESS").strip_prefix("0x").unwrap();
         usize::from_str_radix(address, 16)
             .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
     };
