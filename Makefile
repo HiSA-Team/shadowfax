@@ -56,7 +56,7 @@ build-info:
 	@echo "  ROOT_DOMAIN_JUMP_ADDRESS:  $(ROOT_DOMAIN_JUMP_ADDRESS)"
 	@echo "  HOST_ARCHITECTURE:         $(HOST_ARCHITECTURE)"
 	@echo "  HOST_LIBC_PREFIX:          $(LIBC_PREFIX)"
-	@echo "  HOST_TARGET_TRIPLET:       $(HOST_TARGET_TRIPLET)"
+	@echo "  HOST_TARGET_TRIPLET:       $(HOST_TRIPLET)"
 
 ## clean: removes all build artifacts
 clean:
