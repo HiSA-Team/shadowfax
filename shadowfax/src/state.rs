@@ -58,9 +58,11 @@
 use core::cell::OnceCell;
 
 use alloc::vec::Vec;
+use sha2::{Digest, Sha384};
 use spin::mutex::Mutex;
 
 use crate::{
+    _fw_rw_start, _fw_start,
     context::Context,
     cove::TEE_SCRATCH_SIZE,
     domain::{create_confidential_domain, Domain, MemoryRegion},
@@ -70,12 +72,14 @@ pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
 pub struct State {
     pub domains: Vec<Domain>,
+    tcb_measure: Vec<u8>,
 }
 
 impl State {
     fn new() -> Self {
         Self {
             domains: Vec::new(),
+            tcb_measure: Vec::new(),
         }
     }
 }
@@ -86,9 +90,13 @@ pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     let mut state = STATE.lock();
     let state = state.get_mut_or_init(|| State::new());
 
-    let tee_stack = &raw const crate::_tee_stack_top as *const u8 as usize;
-    // Create the root domain. The root domain id is always zero, so it has to be the first
+    // Calculate the measure of the immutable part of the firmware M-mode elements
+    let tcb_digest = fw_measure();
+    state.tcb_measure = tcb_digest.clone();
 
+    let tee_stack = &raw const crate::_tee_stack_top as *const u8 as usize;
+
+    // Create the root domain. The root domain id is always zero, so it has to be the first
     let root_domain = Domain {
         memory_regions: Vec::from([MemoryRegion {
             base_addr: 0,
@@ -106,7 +114,7 @@ pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     // Create and add the confidential_domain
     // TODO: make this dynamic
     let context_addr = tee_stack - (TEE_SCRATCH_SIZE + size_of::<Context>()) - size_of::<Context>();
-    let confidential_domain = create_confidential_domain(context_addr);
+    let confidential_domain = create_confidential_domain(context_addr, tcb_digest.as_slice());
 
     state.domains.push(confidential_domain);
 
@@ -126,4 +134,13 @@ pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     state.domains.push(untrusted_domain);
 
     Ok(())
+}
+
+fn fw_measure() -> Vec<u8> {
+    let fw_start = &raw const _fw_start as *const u8;
+    let fw_end = &raw const _fw_rw_start as *const u8;
+    let fw_size = (fw_end as usize) - (fw_start as usize);
+    let data = unsafe { core::slice::from_raw_parts(fw_start, fw_size) };
+
+    Sha384::digest(data).to_vec()
 }

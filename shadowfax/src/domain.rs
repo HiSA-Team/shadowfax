@@ -132,7 +132,7 @@ impl Domain {
     }
 }
 
-pub fn create_confidential_domain(context_addr: usize) -> Domain {
+pub fn create_confidential_domain(context_addr: usize, tcb_digest: &[u8]) -> Domain {
     // Assume that the specified domain is a trusted domain -> need to load the TSM in it
     // TODO: parse domain from FDT
     let tsm_ctx = context_addr as *mut Context;

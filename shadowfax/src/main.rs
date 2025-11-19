@@ -71,9 +71,9 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
  */
 unsafe extern "C" {
     // Firmware info
-    static _fw_start: u8;
+    pub static _fw_start: u8;
     static _fw_end: u8;
-    static _fw_rw_start: u8;
+    pub static _fw_rw_start: u8;
 
     // Heap
     static mut _heap_start: u8;
