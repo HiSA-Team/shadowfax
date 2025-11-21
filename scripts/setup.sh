@@ -1,10 +1,9 @@
 #!/bin/sh
-# This scripts:
+# This script:
 # - installs build dependencies for common distributions;
 # - installs rust toolchain with riscv target;
-# - builds and install opensbi libraries and header files;
-# - builds a custom clang with static linking from llvm (only for musl systems)
 #
+# Usage: sudo ./scripts/setup.sh
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
 set -e
@@ -51,21 +50,10 @@ install_dependencies() {
   # ubuntu 24.04, ubuntu 22.04, debian 12
   noble | jammy | bookworm)
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-    autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
-    device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
-    libexpat-dev libgmp-dev libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
-    make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev
-    if [ "$architecture" != "riscv64" ]; then
-      DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-"$LIBC_PREFIX"
-    fi
+      libssl-dev qemu-system-riscv64 curl build-essential make ca-certificates git libclang-dev
     ;;
   void)
-    xbps-install -Sy gawk bc gperf autoconf automake bison make base-devel bison flex \
-      openssl-devel libelf elfutils-devel libdwarf-devel curl git file cpio clang cmake ninja \
-      python3 python3-tomli ninja sudo texinfo lzlib-devel
-    if [ "$architecture" != "riscv64" ]; then
-      xbps-install -Sy cross-riscv64-linux-"$LIBC_PREFIX"
-    fi
+    xbps-install -Sy make base-devel openssl-devel curl qemu-system-riscv64 ca-certificates git
     ;;
   *)
     print_err "unsupported distribution: $DISTRO_CODENAME. Make sure you install dependencies according to your distribution"
@@ -80,47 +68,13 @@ install_rust() {
     su $USER_NAME -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
     su $USER_NAME -c "echo PATH=~/.cargo/bin:${PATH} >> ~/.bashrc"
   fi
-  su $USER_NAME -c "~/.cargo/bin/rustup show"
-}
-
-# Function to download, build, and install Clang from source for musl-based systems
-build_clang_from_source() {
-  print_info "Downloading LLVM source..."
-  su $USER_NAME -c "curl -fsSL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz \
-    -o ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
-
-  print_info "Extracting LLVM source..."
-  su $USER_NAME -c "tar -xf ${TEMP_DIR}/llvm-project-${LLVM_VERSION}.src.tar.xz"
-
-  print_info "Creating build directory..."
-  su $USER_NAME -c "mkdir llvm-project-${LLVM_VERSION}.src/build"
-
-  print_info "Configuring LLVM build with CMake..."
-  su $USER_NAME -c "cmake -G 'Ninja' \
-    -S llvm-project-${LLVM_VERSION}.src/llvm/ \
-    -B llvm-project-${LLVM_VERSION}.src/build \
-    -DLLVM_ENABLE_PROJECTS='clang' \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DLIBCLANG_BUILD_STATIC=ON \
-    -DLLVM_ENABLE_ZSTD=OFF \
-    -DLLVM_TARGETS_TO_BUILD='X86;RISCV' \
-    -DLLVM_HOST_TRIPLE=${ARCHITECTURE}-unknown-linux-${LIBC_PREFIX}"
-
-  print_info "Building LLVM with Ninja..."
-  su $USER_NAME -c "ninja -C llvm-project-${LLVM_VERSION}.src/build"
 }
 
 # Global variables
 DISTRO_CODENAME=$(get_distro_codename)
-TEMP_DIR=$(mktemp -d)
-
-# Make temp directory owned by the user
-chown -R ${USER_NAME} ${TEMP_DIR}
 
 print_info "running the script as ${USER_NAME}"
 print_info "base directory: ${BASEDIR}"
-print_info "detected architecture: ${ARCHITECTURE}"
-print_info "detected libc: ${LIBC}"
 print_info "detected distribution dodename: ${DISTRO_CODENAME}"
 
 install_dependencies
@@ -129,12 +83,4 @@ install_dependencies
 if ! command -v cargo &> /dev/null; then
   install_rust
 fi
-
-# build Clang if on musl
-if [ "$LIBC_PREFIX" = "musl" ]; then
-  print_warn "building Clang from source for musl-based system. This may take some time..."
-  build_clang_from_source
-fi
-
-print_info "removing ${TEMP_DIR}..."
-rm -rf ${TEMP_DIR}
+su $USER_NAME -c "~/.cargo/bin/rustup show"

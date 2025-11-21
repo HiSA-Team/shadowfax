@@ -1,18 +1,15 @@
 set confirm off
 set breakpoint pending on
 set pagination off
-set arch riscv:rv64
 
 target remote localhost:1234
 
-file target/riscv64imac-unknown-none-elf/debug/shadowfax
-
-# load tsm elf file for debug symbols
-add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm 0x81400000
+# load firwmare and tsm debug symbols
+add-symbol-file target/riscv64imac-unknown-none-elf/debug/shadowfax
+add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm 0x82000000
 
 break tsm::main
 
 define qemu-reset
-  delete breakpoint
   shell echo "system_reset" | socat - unix-connect:/tmp/shadowfax-qemu-monitor | tail --lines=+2 | grep -v '^(qemu)'
 end

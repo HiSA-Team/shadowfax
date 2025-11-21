@@ -17,14 +17,15 @@ SUPD_GET_ACTIVE_DOMAINS: int = 0
 COVH_GET_TSM_INFO: int = 0
 
 
+payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
+
+
 def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
     a1 = regs["a1"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-    assert a1 & 0x3 == 3, (
-        f"a1 must be contains tsm (id=1) and the root domain (id=0) bit set (0x3) (current {a1})"
-    )
+    assert a1 == 0b111, f"a1 must be 0b111 (current {a1})"
 
 
 def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
@@ -74,16 +75,15 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     assert tsm_capabilities == 0, (
         f"tsm_capabilities must be 0; current {tsm_capabilities}"
     )
-    assert tvm_state_pages == 1, f"tvm_state_pages must be 1; current {tvm_state_pages}"
+    assert tvm_state_pages == 0, f"tvm_state_pages must be 0; current {tvm_state_pages}"
     assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
-    assert tvm_vcpu_state_pages == 1, (
-        f"tvm_vcpu_state_pages must be 1; current {tvm_vcpu_state_pages}"
+    assert tvm_vcpu_state_pages == 0, (
+        f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
     )
 
 
 def run() -> None:
     print("=== GDB Get TSM Info Program ===")
-    payload_address: int = int(os.environ["ROOT_DOMAIN_JUMP_ADDRESS"], 16)
     print(f"S-Mode address 0x{payload_address:x}")
 
     runner = TestRunner(payload_address)
