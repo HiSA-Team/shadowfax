@@ -66,7 +66,7 @@ fn main() {
 
     // Compile the device tree
     {
-        let dts_file = &platform_dir.join("device-tree.dts");
+        let dts_file = &platform_dir.join("device-tree.dts").canonicalize().unwrap();
         let dtb_file = &bin_dir.join("device-tree.dtb");
         let status = Command::new("dtc")
             .args([
@@ -75,8 +75,8 @@ fn main() {
                 "-O",
                 "dtb",
                 "-o",
-                dtb_file.as_path().to_str().unwrap(),
-                dts_file.to_str().unwrap(),
+                &dtb_file.to_str().unwrap(),
+                &dts_file.to_str().unwrap(),
             ])
             .status()
             .expect("Failed to execute dtc");
