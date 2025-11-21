@@ -28,7 +28,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-ins
       libfdt-dev libpixman-1-dev zlib1g-dev ninja-build autoconf automake autotools-dev curl python3 \
       python3-pip python3-tomli libmpc-dev libmpfr-dev libgmp-dev gawk build-essential bison flex \
       texinfo gperf libtool patchutils bc zlib1g-dev libexpat-dev ninja-build git cmake libglib2.0-dev \
-      libslirp-dev \
+      libslirp-dev sudo device-tree-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and build QEMU
@@ -42,7 +42,9 @@ RUN ./configure --target-list=riscv64-softmmu \
 # Download and build GCC-RISC-V toolchain
 RUN git clone https://github.com/riscv/riscv-gnu-toolchain /tmp/riscv-gnu-toolchain
 WORKDIR /tmp/riscv-gnu-toolchain
-RUN git checkout 2025.10.28 && ./configure --prefix=/opt/riscv --with-abi=lp64 && make linux -j $(nproc)
+RUN git checkout 2025.10.28 \
+    && ./configure --prefix=/opt/riscv --with-abi=lp64 --with-languages=c \
+    && make linux -j $(nproc)
 
 # Create non-root user matching host UID
 RUN useradd -m -u ${USER_ID} -s /bin/bash devuser \
