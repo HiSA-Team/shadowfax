@@ -17,6 +17,9 @@ SUPD_GET_ACTIVE_DOMAINS: int = 0
 COVH_GET_TSM_INFO: int = 0
 
 
+payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
+
+
 def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
@@ -81,7 +84,6 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
 
 def run() -> None:
     print("=== GDB Get TSM Info Program ===")
-    payload_address: int = int(os.environ["ROOT_DOMAIN_JUMP_ADDRESS"], 16)
     print(f"S-Mode address 0x{payload_address:x}")
 
     runner = TestRunner(payload_address)

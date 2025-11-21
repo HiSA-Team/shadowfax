@@ -36,7 +36,7 @@ VCPU_ID: int = 0
 PAGE_SIZE: int = 0x1000  # 4096byte 4k
 PAGE_SIZE_TO_ID = {0x1000: 0}
 
-payload_address: int = int(os.environ["ROOT_DOMAIN_JUMP_ADDRESS"], 16)
+payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
 
 confidential_memory_start_addr: int = payload_address + 0x4000
 tvm_source_code_addr: int = payload_address + 0x2000
