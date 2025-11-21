@@ -19,6 +19,9 @@ COVH_GET_TSM_INFO: int = 0
 payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
 
 
+payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
+
+
 def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
