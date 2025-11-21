@@ -49,7 +49,7 @@ install_dependencies() {
   # ubuntu 24.04, ubuntu 22.04, debian 12
   noble | jammy | bookworm)
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-      libssl-dev qemu-system-riscv64 curl build-essential make ca-certificates git
+      libssl-dev qemu-system-riscv64 curl build-essential make ca-certificates git libclang-dev
     ;;
   void)
     xbps-install -Sy make base-devel openssl-devel curl qemu-system-riscv64 ca-certificates git

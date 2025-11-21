@@ -28,7 +28,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-ins
       libfdt-dev libpixman-1-dev zlib1g-dev ninja-build autoconf automake autotools-dev curl python3 \
       python3-pip python3-tomli libmpc-dev libmpfr-dev libgmp-dev gawk build-essential bison flex \
       texinfo gperf libtool patchutils bc zlib1g-dev libexpat-dev ninja-build git cmake libglib2.0-dev \
-      libslirp-dev sudo device-tree-compiler \
+      libslirp-dev sudo device-tree-compiler libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and build QEMU
