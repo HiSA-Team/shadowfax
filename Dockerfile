@@ -40,11 +40,9 @@ RUN ./configure --target-list=riscv64-softmmu \
     && make -j $(nproc) && make install
 
 # Download and build GCC-RISC-V toolchain
-RUN curl -fsSL https://github.com/riscv-collab/riscv-gnu-toolchain/archive/refs/tags/2025.10.28.tar.gz -o /tmp/riscv-gnu-toolchain-2025.10.28.tar.gz \
-    && tar xvf /tmp/riscv-gnu-toolchain-2025.10.28.tar.gz -C /tmp/
-
-WORKDIR /tmp/qemu-10.1.1
-RUN ./configure --prefix=/opt/riscv --with-abi=lp64 && make linux -j`nproc`
+RUN git clone https://github.com/riscv/riscv-gnu-toolchain /tmp/riscv-gnu-toolchain
+WORKDIR /tmp/riscv-gnu-toolchain
+RUN git checkout 2025.10.28 && ./configure --prefix=/opt/riscv --with-abi=lp64 && make linux -j $(nproc)
 
 # Create non-root user matching host UID
 RUN useradd -m -u ${USER_ID} -s /bin/bash devuser \
