@@ -3,6 +3,7 @@
 # - installs build dependencies for common distributions;
 # - installs rust toolchain with riscv target;
 #
+# Usage: sudo ./scripts/setup.sh
 # Author:  Giuseppe Capasso <capassog97@gmail.com>
 
 set -e
