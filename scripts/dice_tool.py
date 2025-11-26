@@ -18,7 +18,7 @@
 #     - Hidden Inputs (64 bytes) [OPTIONAL]: The input value is hidden in the sense that it does not appear in any certificate.
 #                                 It is used for both attestation and sealing CDI derivation so it is expected to be stable;
 #
-# This code will use HKDK and SHA384 as algorithms
+# This code will use HKDK and SHA512 as algorithms
 #
 # Reference https://trustedcomputinggroup.org/wp-content/uploads/DICE-Attestation-Architecture-v1.2_pub.pdf
 # Reference https://github.com/google/open-dice/blob/main/docs/specification.md
@@ -238,6 +238,12 @@ def generate_platform_token(args) -> None:
         (uds_private, uds_public), cdi_public, code_hash
     )
 
+    # Saves the Payload input formatted as follows:
+    # |--------|-----------------|--------|-----------------|
+    # | 4byte  |      CDILEN     | 4byte  |      EATLEN     |
+    # |--------|-----------------|--------|-----------------|
+    # | CDILEN |       CDI       | EATLEN |       EAT       |
+    # |--------|-----------------|--------|-----------------|
     with open(args.output, "wb") as f:
         f.write(struct.pack("<I", len(cdi0)))
         f.write(cdi0)
