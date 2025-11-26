@@ -51,14 +51,17 @@
 use core::cell::OnceCell;
 
 use alloc::vec::Vec;
-use common::security::SecurityContext;
+use common::security::AttestationContext;
 use spin::mutex::Mutex;
 
 use crate::{
+    constants::{
+        memory_layout::{ROOT_DOMAIN_REGIONS, UNTRUSTED_DOMAIN_REGIONS},
+        DICE_INPUT_ADDR,
+    },
     context::Context,
     cove::TEE_SCRATCH_SIZE,
-    domain::{create_confidential_domain, Domain, MemoryRegion},
-    memory_layout::{ROOT_DOMAIN_REGIONS, UNTRUSTED_DOMAIN_REGIONS},
+    domain::{create_confidential_domain, Domain},
 };
 
 #[link_section = ".rodata"]
@@ -68,14 +71,14 @@ pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
 pub struct State {
     pub domains: Vec<Domain>,
-    pub security_context: Option<SecurityContext>,
+    pub attestation_context: AttestationContext,
 }
 
 impl State {
     fn new() -> Self {
         Self {
             domains: Vec::new(),
-            security_context: None,
+            attestation_context: AttestationContext::None,
         }
     }
 }
@@ -95,16 +98,13 @@ pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     let state = state.get_mut_or_init(|| State::new());
 
     // First, get the security context
-    let dice_input = unsafe {
-        let dice_input_addr = 0x8200_0000 as *const u8;
-        let dice_input_size = 339;
-        core::slice::from_raw_parts(dice_input_addr, dice_input_size)
-    };
 
-    state.security_context = Some(SecurityContext::from_slice(
-        dice_input,
-        DICE_PLATFORM_PUBLIC_KEY,
-    ));
+    state.attestation_context = AttestationContext::init_from_addr(DICE_INPUT_ADDR);
+    // Verify the signature
+    state
+        .attestation_context
+        .verify(DICE_PLATFORM_PUBLIC_KEY)
+        .unwrap();
 
     let tee_stack = &raw const crate::_tee_stack_top as *const u8 as usize;
 
@@ -121,7 +121,10 @@ pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     // Create and add the confidential_domain
     // TODO: make this dynamic
     let context_addr = tee_stack - (TEE_SCRATCH_SIZE + size_of::<Context>()) - size_of::<Context>();
-    let confidential_domain = create_confidential_domain(context_addr);
+    let confidential_domain = create_confidential_domain(
+        context_addr,
+        state.attestation_context.compute_next(&[0; 32]),
+    );
 
     state.domains.push(confidential_domain);
 

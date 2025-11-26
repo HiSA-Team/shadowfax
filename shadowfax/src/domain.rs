@@ -1,8 +1,9 @@
 use alloc::vec::Vec;
-use ed25519_dalek::{pkcs8::DecodePublicKey, Signature, VerifyingKey};
+use common::security::{AttestationContext, AttestationPayload};
+use ed25519_compact::Signature;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
-use crate::{context::Context, error::TsmError, memory_layout::TRUSTED_DOMAIN_REGIONS};
+use crate::{constants::memory_layout::TRUSTED_DOMAIN_REGIONS, context::Context, error::TsmError};
 
 mod tsm {
     #[link_section = ".rodata"]
@@ -53,11 +54,10 @@ impl Domain {
         let public_key = str::from_utf8(public_key)?;
 
         let signature = Signature::from_slice(signature).map_err(TsmError::SignatureDecode)?;
-        let verifiying_key =
-            VerifyingKey::from_public_key_pem(public_key).map_err(TsmError::PublicKeyDecode)?;
+        let verifiying_key = from_public_pem(public_key).map_err(TsmError::PublicKeyDecode)?;
 
         verifiying_key
-            .verify_strict(bin, &signature)
+            .verify(bin, &signature)
             .map_err(TsmError::SignatureVerification)?;
 
         // load the tsm into the destination address
@@ -128,7 +128,10 @@ impl Domain {
     }
 }
 
-pub fn create_confidential_domain(context_addr: usize) -> Domain {
+pub fn create_confidential_domain(
+    context_addr: usize,
+    attestation_context: AttestationContext,
+) -> Domain {
     // Assume that the specified domain is a trusted domain -> need to load the TSM in it
     // TODO: parse domain from FDT
     let tsm_ctx = context_addr as *mut Context;
@@ -164,13 +167,13 @@ pub fn create_confidential_domain(context_addr: usize) -> Domain {
     .unwrap();
 
     // Boot and initialize secure_init safely
-    boot_tsm();
+    boot_tsm(attestation_context);
 
     return domain;
 }
 
 /// This function looks for the _secure_init symbol and invoke it as a function
-fn boot_tsm() {
+fn boot_tsm(attestation_context: AttestationContext) {
     // parse ELF
     let elf = ElfBytes::<AnyEndian>::minimal_parse(tsm::DEFAULT_TSM).unwrap();
 
@@ -197,8 +200,36 @@ fn boot_tsm() {
 
     unsafe {
         // Reinterpret the address as a function
-        let secure_init_fn = core::mem::transmute::<u64, fn()>(sym.st_value);
-
-        secure_init_fn();
+        let secure_init_fn = core::mem::transmute::<u64, fn(p: AttestationPayload)>(sym.st_value);
+        let payload = attestation_context.get_payload();
+        secure_init_fn(payload);
     }
+}
+
+/// THIS FUNCTION SHOULD NOT EXISTS. IT IS A TEMPORARY FIX SINCE THE ED25519 LIBRARY DEPENDS ON THE
+/// STD LIBRARY TO PARSE THE PEM
+use base64ct::Encoding;
+
+const DER_HEADER_PK: [u8; 12] = [48, 42, 48, 5, 6, 3, 43, 101, 112, 3, 33, 0];
+
+fn from_public_pem(pem: &str) -> Result<ed25519_compact::PublicKey, ed25519_compact::Error> {
+    let mut it = pem.split("-----BEGIN PUBLIC KEY-----");
+    let _ = it.next().ok_or(ed25519_compact::Error::ParseError)?;
+    let inner = it.next().ok_or(ed25519_compact::Error::ParseError)?;
+    let mut it = inner.split("-----END PUBLIC KEY-----");
+    let b64 = it.next().ok_or(ed25519_compact::Error::ParseError)?;
+    let _ = it.next().ok_or(ed25519_compact::Error::ParseError)?;
+
+    let mut der = [0u8; DER_HEADER_PK.len() + 32]; // 32-byte public key
+    let b64_clean = b64.trim();
+    base64ct::Base64::decode(b64_clean.as_bytes(), &mut der)
+        .map_err(|_| ed25519_compact::Error::ParseError)?;
+
+    if der.len() != DER_HEADER_PK.len() + 32 || der[0..DER_HEADER_PK.len()] != DER_HEADER_PK {
+        return Err(ed25519_compact::Error::ParseError);
+    }
+
+    let mut pk_bytes = [0u8; 32];
+    pk_bytes.copy_from_slice(&der[DER_HEADER_PK.len()..]);
+    Ok(ed25519_compact::PublicKey::from_slice(&pk_bytes)?)
 }

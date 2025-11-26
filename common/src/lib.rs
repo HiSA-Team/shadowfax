@@ -45,36 +45,155 @@ pub mod sbi {
 }
 
 pub mod security {
+    extern crate alloc;
+    use alloc::vec::Vec;
     use coset::{CborSerializable, CoseSign1};
-    use ed25519_dalek::{Signature, VerifyingKey};
+    use ed25519_compact::{KeyPair, Seed, Signature};
+    use sha2::Sha512;
 
-    pub struct SecurityContext {
-        cdi_id: [u8; 20],
-        sign1: CoseSign1,
+    const CDI_LENGTH: usize = 32;
+
+    #[repr(C)]
+    #[derive(Clone)]
+    struct Cdi(Vec<u8>);
+
+    #[repr(C)]
+    #[derive(Clone)]
+    pub struct AttestationPayload {
+        cdi: Cdi,
+        token: CoseSign1,
     }
 
-    impl SecurityContext {
-        /// Parses the DICE input formatted as follows:
-        /// [0..20] -> CDI id
-        /// [21..] -> CoseSign1
-        /// verifying_key is a raw 32 byte ED25519 public key
-        pub fn from_slice(data: &[u8], verifying_key: &[u8; 32]) -> Self {
-            assert!(data.len() >= 20, "input too short");
-
-            let mut cdi_id = [0u8; 20];
-            cdi_id.copy_from_slice(&data[..20]);
-
-            let sign1 = CoseSign1::from_slice(&data[20..]).unwrap();
-            let verifiying_key = VerifyingKey::from_bytes(verifying_key).unwrap();
-
-            sign1
-                .verify_signature(b"", |sig, data| {
-                    let signature = Signature::from_slice(sig).unwrap();
-                    verifiying_key.verify_strict(data, &signature)
-                })
-                .unwrap();
-
-            Self { cdi_id, sign1 }
+    impl From<*const u8> for AttestationPayload {
+        fn from(ptr: *const u8) -> Self {
+            Self::from_raw_bytes(ptr)
         }
+    }
+
+    impl AttestationPayload {
+        /// Parses the Payload input formatted as follows:
+        /// |--------|-----------------|--------|-----------------|
+        /// | 4byte  |      CDILEN     | 4byte  |      EATLEN     |
+        /// |--------|-----------------|--------|-----------------|
+        /// | CDILEN |       CDI       | EATLEN |       EAT       |
+        /// |--------|-----------------|--------|-----------------|
+        fn from_raw_bytes(ptr: *const u8) -> Self {
+            let mut offset = 0;
+
+            let read_u32 = |offset: &mut usize| -> u32 {
+                let mut buf = [0; 4];
+                for i in 0..4 {
+                    buf[i] = unsafe { core::ptr::read(ptr.add(*offset + i)) };
+                }
+                *offset += 4;
+                u32::from_le_bytes(buf)
+            };
+
+            // Read CDI len and CDI
+            let len = read_u32(&mut offset) as usize;
+
+            // Read CDI
+            let cdi = {
+                let slice = unsafe { core::slice::from_raw_parts(ptr.add(offset), len) };
+                offset += len;
+                Vec::from(slice)
+            };
+
+            let len = read_u32(&mut offset) as usize;
+
+            // Read CoseSign1
+            let token = {
+                let slice = unsafe { core::slice::from_raw_parts(ptr.add(offset), len) };
+                CoseSign1::from_slice(slice).unwrap()
+            };
+
+            Self {
+                cdi: Cdi(cdi),
+                token,
+            }
+        }
+    }
+
+    pub enum AttestationContext {
+        None,
+        Platform { payload: AttestationPayload },
+        Tsm { payload: AttestationPayload },
+        Tvm { payload: AttestationPayload },
+    }
+
+    impl AttestationContext {
+        pub fn init_from_addr(addr: usize) -> Self {
+            let ptr = addr as *const u8;
+            let payload = AttestationPayload::from(ptr);
+            Self::Platform { payload }
+        }
+
+        pub fn compute_next(&self, next_layer_data: &[u8]) -> AttestationContext {
+            match self {
+                Self::Platform { payload } => {
+                    // Build the attestation context for the TSM
+                    let token = generate_tsm_token(&payload.cdi);
+                    let cdi = payload.cdi.generate_next(&[0; 64]);
+                    Self::Tsm {
+                        payload: AttestationPayload { cdi, token },
+                    }
+                }
+                _ => panic!("invalid attestation context"),
+            }
+        }
+
+        pub fn verify(
+            &self,
+            verifying_key: &[u8; ed25519_compact::PublicKey::BYTES],
+        ) -> Result<(), ed25519_compact::Error> {
+            let verifiying_key = ed25519_compact::PublicKey::from_slice(verifying_key).unwrap();
+
+            let sign1 = match self {
+                Self::Platform { payload } => &payload.token,
+                Self::Tsm { payload } => &payload.token,
+                Self::Tvm { payload } => &payload.token,
+                _ => panic!("invalid attestation context"),
+            };
+
+            sign1.verify_signature(b"", |sig, data| {
+                let signature = Signature::from_slice(sig).unwrap();
+                verifiying_key.verify(data, &signature)
+            })?;
+
+            Ok(())
+        }
+
+        pub fn get_payload(&self) -> AttestationPayload {
+            match self {
+                Self::Platform { payload } => payload.clone(),
+                Self::Tsm { payload } => payload.clone(),
+                Self::Tvm { payload } => payload.clone(),
+                _ => panic!("invalid attestation context"),
+            }
+        }
+    }
+
+    impl Cdi {
+        fn generate_keys(&self) -> KeyPair {
+            let mut seed = [0; CDI_LENGTH];
+            hkdf::Hkdf::<Sha512>::new(None, self.0.as_slice())
+                .expand(b"Key Pair", &mut seed)
+                .expect("32 byte should be enough");
+            let seed = Seed::from_slice(&seed).unwrap();
+            KeyPair::from_seed(seed)
+        }
+        fn generate_next(&self, tcb_hash: &[u8]) -> Self {
+            let mut okm = [0; CDI_LENGTH];
+            hkdf::Hkdf::<Sha512>::new(None, self.0.as_slice())
+                .expand(b"CDI_Attest", &mut okm)
+                .expect("32 byte should be enough");
+
+            Self(okm.to_vec())
+        }
+    }
+
+    fn generate_tsm_token(cdi: &Cdi) -> coset::CoseSign1 {
+        let keys = cdi.generate_keys();
+        CoseSign1::default()
     }
 }

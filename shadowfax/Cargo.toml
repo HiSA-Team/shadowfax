@@ -18,8 +18,9 @@ features = ["static"]
 
 [dependencies]
 anyhow = { version = "1.0.98", default-features = false }
+base64ct = "1.8.0"
 common  = { path = "../common/" }
-ed25519-dalek = { version = "2.2.0", default-features = false, features = ["alloc", "pem"] }
+ed25519-compact = { version = "2.2.0", default-features = false }
 elf = { version = "0.7.2", default-features = false }
 fdt-rs = {version = "0.4", default-features = false }
 heapless = "0.8.0"

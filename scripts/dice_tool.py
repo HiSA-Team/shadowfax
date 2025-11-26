@@ -24,7 +24,6 @@
 # Reference https://github.com/google/open-dice/blob/main/docs/specification.md
 # Reference architecture is Ch. 6 of the CoVE specification.
 #
-#
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 ####################################################################################################
 
@@ -40,11 +39,11 @@ from pycose.headers import Algorithm, KID
 from pycose.keys import CoseKey
 from pycose.messages import Sign1Message
 from pycose.keys.keyparam import KpKty, OKPKpD, OKPKpX, KpKeyOps, OKPKpCurve
-
 from pycose.keys.keytype import KtyOKP
-
 from pycose.keys.keyops import SignOp
 from pycose.keys.curves import Ed25519
+
+import struct
 
 # UDS is a 32-byte secret which should be provided by the manufacturer
 UDS = bytes(32)
@@ -109,29 +108,13 @@ def calculate_asym_keypair(
     input: bytes,
 ) -> (ed25519.Ed25519PrivateKey, ed25519.Ed25519PublicKey):
     seed = HKDF(
-        algorithm=hashes.SHA384(), length=32, salt=ASYM_SALT, info=b"Key Pair"
+        algorithm=hashes.SHA512(), length=32, salt=ASYM_SALT, info=b"Key Pair"
     ).derive(input)
 
     cdi_private = ed25519.Ed25519PrivateKey.from_private_bytes(seed)
     cdi_public = cdi_private.public_key()
 
     return (cdi_private, cdi_public)
-
-
-def calculate_identifier_from_public(public: ed25519.Ed25519PublicKey) -> bytes:
-    public_bytes = public.public_bytes(
-        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
-    )
-
-    id = HKDF(algorithm=hashes.SHA384(), length=20, salt=ID_SALT, info=b"ID").derive(
-        public_bytes
-    )
-
-    # Clear high-order bit per spec
-    id = bytearray(id)
-    id[0] &= 0x7F
-
-    return id
 
 
 def generate_platform_cwt(
@@ -223,7 +206,7 @@ def generate_uds_keys(args) -> None:
         )
         f.write(uds_public_bytes)
 
-def generate_platform_token (args)->None:
+def generate_platform_token(args) -> None:
     # DICE Inputs
     configuration_data = bytes(64)
     authority_data = bytes(64)  # (all zeros if not used)
@@ -243,15 +226,12 @@ def generate_platform_token (args)->None:
         code_hash, authority_data, configuration_data, mode, hidden
     )
 
-    cdi_attest = HKDF(
-        algorithm=hashes.SHA384(), length=32, salt=attest_input, info=b"CDI_Attest"
+    cdi0 = HKDF(
+        algorithm=hashes.SHA512(), length=32, salt=attest_input, info=b"CDI_Attest"
     ).derive(UDS)
 
     # Create CDI and UDS asymetric key pair
-    cdi_private, cdi_public = calculate_asym_keypair(cdi_attest)
-
-    # Create CDI and UDS identifier
-    cdi_id = calculate_identifier_from_public(cdi_public)
+    cdi_private, cdi_public = calculate_asym_keypair(cdi0)
 
     # Generate Platform CWT
     platform_cwt = generate_platform_cwt(
@@ -259,7 +239,9 @@ def generate_platform_token (args)->None:
     )
 
     with open(args.output, "wb") as f:
-        f.write(cdi_id)
+        f.write(struct.pack("<I", len(cdi0)))
+        f.write(cdi0)
+        f.write(struct.pack("<I", len(platform_cwt)))
         f.write(platform_cwt)
 
 parser = argparse.ArgumentParser(

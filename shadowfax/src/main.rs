@@ -53,10 +53,10 @@ mod opensbi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+mod constants;
 mod context;
 mod domain;
 mod error;
-mod memory_layout;
 mod state;
 mod trap;
 

@@ -2,9 +2,9 @@ use core::{error::Error, fmt::Display};
 
 #[derive(Debug)]
 pub enum TsmError {
-    PublicKeyDecode(ed25519_dalek::pkcs8::spki::Error),
-    SignatureDecode(ed25519_dalek::SignatureError),
-    SignatureVerification(ed25519_dalek::ed25519::Error),
+    PublicKeyDecode(ed25519_compact::Error),
+    SignatureDecode(ed25519_compact::Error),
+    SignatureVerification(ed25519_compact::Error),
 }
 
 impl Display for TsmError {
