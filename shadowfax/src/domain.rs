@@ -1,14 +1,8 @@
 use alloc::vec::Vec;
-use common::security::TSM_KEY_SIZE;
+use ed25519_dalek::{pkcs8::DecodePublicKey, Signature, VerifyingKey};
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
-use rsa::{
-    pkcs1::DecodeRsaPublicKey,
-    pkcs1v15::{Signature, VerifyingKey},
-    signature::Verifier,
-};
-use sha2::Sha256;
 
-use crate::{context::Context, error::TsmError};
+use crate::{context::Context, error::TsmError, memory_layout::TRUSTED_DOMAIN_REGIONS};
 
 mod tsm {
     #[link_section = ".rodata"]
@@ -36,7 +30,7 @@ pub struct Domain {
     pub memory_regions: Vec<MemoryRegion>,
 
     pub context_addr: usize,
-    pub security_context: Option<[u8; TSM_KEY_SIZE]>,
+    pub has_tsm: bool,
 }
 
 impl Domain {
@@ -45,7 +39,7 @@ impl Domain {
             trust_map: 0,
             memory_regions: Vec::new(),
             context_addr: 0,
-            security_context: None,
+            has_tsm: false,
         }
     }
 
@@ -57,12 +51,14 @@ impl Domain {
     ) -> Result<(), anyhow::Error> {
         // Verify the tsm signature with the provided payload using the the public key
         let public_key = str::from_utf8(public_key)?;
-        let signature = Signature::try_from(signature).map_err(TsmError::SignatureError)?;
-        let verifying_key = VerifyingKey::<Sha256>::from_pkcs1_pem(&public_key)
-            .map_err(TsmError::RsaPublicKeyError)?;
-        verifying_key
-            .verify(bin, &signature)
-            .map_err(TsmError::SignatureError)?;
+
+        let signature = Signature::from_slice(signature).map_err(TsmError::SignatureDecode)?;
+        let verifiying_key =
+            VerifyingKey::from_public_key_pem(public_key).map_err(TsmError::PublicKeyDecode)?;
+
+        verifiying_key
+            .verify_strict(bin, &signature)
+            .map_err(TsmError::SignatureVerification)?;
 
         // load the tsm into the destination address
         let size = Self::load_elf(bin)?;
@@ -132,36 +128,20 @@ impl Domain {
     }
 }
 
-pub fn create_confidential_domain(context_addr: usize, tcb_digest: &[u8]) -> Domain {
+pub fn create_confidential_domain(context_addr: usize) -> Domain {
     // Assume that the specified domain is a trusted domain -> need to load the TSM in it
     // TODO: parse domain from FDT
     let tsm_ctx = context_addr as *mut Context;
     let mut domain = Domain::empty();
-    let key = [0; TSM_KEY_SIZE];
 
     // Trust both root and untrusted domains
     domain.trust_map = (1 << 2) | (1 << 0);
 
     // Hardcoded memory regions for now
-    domain.memory_regions = [
-        MemoryRegion {
-            base_addr: 0x8200_0000,
-            order: 24,
-            permissions: 0x3f,
-            mmio: false,
-        },
-        MemoryRegion {
-            base_addr: 0x1000_0000,
-            order: 12,
-            permissions: 0x3f,
-            mmio: true,
-        },
-    ]
-    .to_vec();
+    domain.memory_regions = TRUSTED_DOMAIN_REGIONS.to_vec();
 
     // Save the context address and the state address
     domain.context_addr = context_addr;
-    domain.security_context = Some(key);
 
     // Configure PMP entry for TMem
     let tmem_region = &domain.memory_regions[0];
@@ -184,13 +164,13 @@ pub fn create_confidential_domain(context_addr: usize, tcb_digest: &[u8]) -> Dom
     .unwrap();
 
     // Boot and initialize secure_init safely
-    boot_tsm(&key);
+    boot_tsm();
 
     return domain;
 }
 
 /// This function looks for the _secure_init symbol and invoke it as a function
-fn boot_tsm(key: &[u8; TSM_KEY_SIZE]) {
+fn boot_tsm() {
     // parse ELF
     let elf = ElfBytes::<AnyEndian>::minimal_parse(tsm::DEFAULT_TSM).unwrap();
 
@@ -217,8 +197,8 @@ fn boot_tsm(key: &[u8; TSM_KEY_SIZE]) {
 
     unsafe {
         // Reinterpret the address as a function
-        let secure_init_fn = core::mem::transmute::<u64, fn(n: *const u8, id: usize)>(sym.st_value);
+        let secure_init_fn = core::mem::transmute::<u64, fn()>(sym.st_value);
 
-        secure_init_fn(key.as_ptr(), 0);
+        secure_init_fn();
     }
 }

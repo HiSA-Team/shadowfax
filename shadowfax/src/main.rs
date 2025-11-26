@@ -56,6 +56,7 @@ mod opensbi {
 mod context;
 mod domain;
 mod error;
+mod memory_layout;
 mod state;
 mod trap;
 
@@ -144,6 +145,7 @@ extern "C" fn _start() -> ! {
 
         // Loop if s4 is less than s5
         blt s4, s5, 0b
+
         // call fw_platform_init
         // save registers a0-a4
         add s0, a0, zero

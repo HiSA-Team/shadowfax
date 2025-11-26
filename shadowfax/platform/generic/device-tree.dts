@@ -92,9 +92,6 @@
 	chosen {
 		stdout-path = "/soc/serial@10000000";
 		rng-seed = <0x4d28c772 0x2ab93c6a 0x79330cab 0x8b454f44 0x26c1e886 0x97d8b4e3 0x738e0214 0x3a5e1abc>;
-		bootargs = "console=ttyS0,115200 root=/dev/sda earlyprintk=serial net.ifnames=0 nokaslr loglevel=8";
-		linux,initrd-start = <0x80820000>;
-		linux,initrd-end = <0x8093f7c0>;
 
 		opensbi-domains {
 			compatible = "opensbi,domain,config";

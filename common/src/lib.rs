@@ -27,27 +27,54 @@ pub mod sbi {
     }
 
     pub fn sbi_call(extid: usize, fid: usize, args: &[usize; 5]) -> SbiRet {
-        let (error, value);
+        let (a0, a1);
         unsafe {
             core::arch::asm!(
                 "ecall",
                 in("a7") extid,
                 in("a6") fid,
-                inlateout("a0") args[0] => error,
-                inlateout("a1") args[1] => value,
+                inlateout("a0") args[0] => a0,
+                inlateout("a1") args[1] => a1,
                 in("a2") args[2],
                 in("a3") args[3],
                 in("a4") args[4],
             );
         }
-        SbiRet {
-            a0: error,
-            a1: value,
-        }
+        SbiRet { a0, a1 }
     }
 }
 
 pub mod security {
-    /// Size of the signing key passed to the TSM in the initialization phaase
-    pub const TSM_KEY_SIZE: usize = 64;
+    use coset::{CborSerializable, CoseSign1};
+    use ed25519_dalek::{Signature, VerifyingKey};
+
+    pub struct SecurityContext {
+        cdi_id: [u8; 20],
+        sign1: CoseSign1,
+    }
+
+    impl SecurityContext {
+        /// Parses the DICE input formatted as follows:
+        /// [0..20] -> CDI id
+        /// [21..] -> CoseSign1
+        /// verifying_key is a raw 32 byte ED25519 public key
+        pub fn from_slice(data: &[u8], verifying_key: &[u8; 32]) -> Self {
+            assert!(data.len() >= 20, "input too short");
+
+            let mut cdi_id = [0u8; 20];
+            cdi_id.copy_from_slice(&data[..20]);
+
+            let sign1 = CoseSign1::from_slice(&data[20..]).unwrap();
+            let verifiying_key = VerifyingKey::from_bytes(verifying_key).unwrap();
+
+            sign1
+                .verify_signature(b"", |sig, data| {
+                    let signature = Signature::from_slice(sig).unwrap();
+                    verifiying_key.verify_strict(data, &signature)
+                })
+                .unwrap();
+
+            Self { cdi_id, sign1 }
+        }
+    }
 }

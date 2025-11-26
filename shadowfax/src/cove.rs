@@ -158,7 +158,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let domain = domain.unwrap();
 
     // TEECALL
-    if domain.security_context.is_some() {
+    if domain.has_tsm {
         let domain_ctx = domain.context_addr as *mut Context;
         // TODO: get current domain
         let src_id = 2;

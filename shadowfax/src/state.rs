@@ -1,17 +1,10 @@
 /*
 * Global State of the TSM Driver. For now this state is an array of supervisor domains. The state
 * is initialized by the init function which populates the array from the device tree. The device
-* tree must declare supervisor domains with `compatible = "shadowfax,domain,config";`. Each
-* supervisor domain must declare an id and a `compatible = "shadowfax,domain,instance";`.
-* Other fields may be:
-* - trust: a list of id of other supervisor domains that are trusted;
-* - tsm-type:
-*  - "none": don't load anything not a confidential supervisor domains;
-*  - "default": confidential supervisor domain. Load the default TSM;
-*  - "external": confidential supervisor domain. Don't load the TSN;
-* - memory: an entry for the memory range used to program the PMP of the domain
+* tree must declare supervisor domains with `compatible = "opensbi,domain,config";`. Each
+* supervisor domain must declare an id and a `compatible = "opensbi,domain,instance";`.
 *
-* Note: since we use the OpenSBI implementation, the domain with id=0x0 is initialized by OpenSBI
+* Note: since we use the OpenSBI implementation, the domain with id=0 is initialized by OpenSBI
 * sbi_scratch_init() function.
 *
 * Examples:
@@ -58,89 +51,89 @@
 use core::cell::OnceCell;
 
 use alloc::vec::Vec;
-use sha2::{Digest, Sha384};
+use common::security::SecurityContext;
 use spin::mutex::Mutex;
 
 use crate::{
-    _fw_rw_start, _fw_start,
     context::Context,
     cove::TEE_SCRATCH_SIZE,
     domain::{create_confidential_domain, Domain, MemoryRegion},
+    memory_layout::{ROOT_DOMAIN_REGIONS, UNTRUSTED_DOMAIN_REGIONS},
 };
+
+#[link_section = ".rodata"]
+static DICE_PLATFORM_PUBLIC_KEY: &[u8; 32] = include_bytes!("../keys/root_of_trust_pub.bin");
 
 pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
 pub struct State {
     pub domains: Vec<Domain>,
-    tcb_measure: Vec<u8>,
+    pub security_context: Option<SecurityContext>,
 }
 
 impl State {
     fn new() -> Self {
         Self {
             domains: Vec::new(),
-            tcb_measure: Vec::new(),
+            security_context: None,
         }
     }
 }
 
-// TODO: parse domains dynamically from the device tree
-// Assumption: the domain id matches with its position in the domain array
+/// This function initializes the TSM-driver:
+/// - read DICE input parameters, compute the new security context and create TSM CDI_ID and
+/// certificate
+/// - initialize the TEE stack
+/// - create all domains: for now 3 hardcoded domains:
+///     - Trusted domain: where the TSM code leaves
+///     - Untrusted domain: normal OS/VMM
+///     - Root domain: mandatory by the Supervisor Domain specification, but should never be used.
+/// TODO: parse domains dynamically from the device tree
+/// Assumption: the domain id matches with its position in the domain array
 pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     let mut state = STATE.lock();
     let state = state.get_mut_or_init(|| State::new());
 
-    // Calculate the measure of the immutable part of the firmware M-mode elements
-    let tcb_digest = fw_measure();
-    state.tcb_measure = tcb_digest.clone();
+    // First, get the security context
+    let dice_input = unsafe {
+        let dice_input_addr = 0x8200_0000 as *const u8;
+        let dice_input_size = 339;
+        core::slice::from_raw_parts(dice_input_addr, dice_input_size)
+    };
+
+    state.security_context = Some(SecurityContext::from_slice(
+        dice_input,
+        DICE_PLATFORM_PUBLIC_KEY,
+    ));
 
     let tee_stack = &raw const crate::_tee_stack_top as *const u8 as usize;
 
     // Create the root domain. The root domain id is always zero, so it has to be the first
     let root_domain = Domain {
-        memory_regions: Vec::from([MemoryRegion {
-            base_addr: 0,
-            order: 64,
-            mmio: false,
-            permissions: 0x3F,
-        }]),
+        memory_regions: Vec::from(ROOT_DOMAIN_REGIONS),
         // The root domain should not be involved in Confidential call
         trust_map: 0,
         context_addr: 0,
-        security_context: None,
+        has_tsm: false,
     };
     state.domains.push(root_domain);
 
     // Create and add the confidential_domain
     // TODO: make this dynamic
     let context_addr = tee_stack - (TEE_SCRATCH_SIZE + size_of::<Context>()) - size_of::<Context>();
-    let confidential_domain = create_confidential_domain(context_addr, tcb_digest.as_slice());
+    let confidential_domain = create_confidential_domain(context_addr);
 
     state.domains.push(confidential_domain);
 
     // Create the untrusted domain
     let context_addr = context_addr - size_of::<Context>();
     let untrusted_domain = Domain {
-        memory_regions: Vec::from([MemoryRegion {
-            base_addr: 0x82800_0000,
-            order: 24,
-            mmio: false,
-            permissions: 0x3F,
-        }]),
+        memory_regions: Vec::from(UNTRUSTED_DOMAIN_REGIONS),
         trust_map: 1 << 1,
         context_addr,
-        security_context: None,
+        has_tsm: false,
     };
     state.domains.push(untrusted_domain);
 
     Ok(())
-}
-
-fn fw_measure() -> Vec<u8> {
-    let fw_start = &raw const _fw_start as *const u8;
-    let fw_end = &raw const _fw_rw_start as *const u8;
-    let fw_size = (fw_end as usize) - (fw_start as usize);
-    let data = unsafe { core::slice::from_raw_parts(fw_start, fw_size) };
-
-    Sha384::digest(data).to_vec()
 }

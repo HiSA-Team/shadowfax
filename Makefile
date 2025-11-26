@@ -13,6 +13,7 @@
 # Author: <capassog97@gmail.com>
 
 # Toolchain/Platform
+PYTHON                     := uv run --python 3.10
 HOST_TRIPLET               := $(shell rustc -vV | grep '^host:' | awk '{print $$2}')
 HOST_ARCHITECTURE          := $(shell uname -m)
 HOST_LIBC                  := $(shell if ldd --version 2>&1 | grep -q musl; then echo musl; else echo gnu; fi)
@@ -22,9 +23,12 @@ PROFILE                    ?= debug
 RUSTFLAGS                  := -C target-feature=+h
 
 # Platform Params
-RV_PREFIX                  ?= riscv64-unknown-linux-$(HOST_LIBC)-
 PLATFORM                   ?= generic
 BOOT_DOMAIN_ADDRESS        ?= 0x82800000
+
+# RISC-V Toolchain
+RV_PREFIX                  ?= riscv64-unknown-linux-$(HOST_LIBC)-
+OBJCOPY                    := $(RV_PREFIX)objcopy
 
 # Files and Directories
 MAKEFILE_SOURCE_DIR        := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
@@ -32,21 +36,30 @@ BIN_DIR                     = bin
 TARGET_DIR                  = target/$(TARGET_TRIPLET)/$(PROFILE)
 KEYS_DIR                    = shadowfax/keys
 
+FW_ELF                      = $(TARGET_DIR)/shadowfax
+FW_BIN                      = $(BIN_DIR)/shadowfax.bin
 TSM_ELF                     = $(TARGET_DIR)/tsm
 TSM_SIG                     = $(BIN_DIR)/tsm.bin.signature
+
+# Keys and Dice files
+DICE_INPUT                  = $(BIN_DIR)/shadowfax.dice.bin
 PRIVATE_KEY                 = $(KEYS_DIR)/privatekey.pem
 PUBLIC_KEY                  = $(KEYS_DIR)/publickey.pem
+DICE_PLATFORM_PUBLIC_KEY    = $(KEYS_DIR)/root_of_trust_pub.bin
+DICE_PLATFORM_PRIVATE_KEY   = $(KEYS_DIR)/root_of_trust_priv.bin
 
-FW_ELF                      = $(TARGET_DIR)/shadowfax
-
-# Debug variables
+# Debug variables for QEMU
 GDB                         = $(RV_PREFIX)gdb
 GDB_SETTINGS_SCRIPT         := $(MAKEFILE_SOURCE_DIR)scripts/gdb_settings
 GDB_COVE_SCRIPT             ?= $(MAKEFILE_SOURCE_DIR)scripts/gdb_covh_get_tsm_info.py
 
 # Needed for OpenSBI
-export CROSS_COMPILE        := $(RV_PREFIX)
+export RV_PREFIX
+
+# Needed to avoid passing manually to Cargo
 export RUSTFLAGS
+
+# Needed by Python GDB process
 export BOOT_DOMAIN_ADDRESS
 
 ifeq ($(HOST_LIBC), musl)
@@ -65,17 +78,30 @@ endif
 # ensure the bin directory is created
 $(shell mkdir -p $(BIN_DIR))
 
-all: firmware build-info
+## all: build tsm, firmware and attestation payload
+all: $(DICE_INPUT) build-info
 
-## firmware: build the firmware. It includes building the TSM and signing it
-firmware: tsm
-	cargo build --target $(TARGET_TRIPLET) -p shadowfax
+## firmware: builds the firmware alongisde TSM elf and its signature
+firmware: $(DICE_INPUT)
 
-## tsm: build the TSM. This copies the .elf in bin/ creates a binary and sign it with the keys in keys/
+## tsm: build the TSM and signs it
 tsm: $(TSM_SIG)
 
+# create attestation input (CDI_ID and Certificate) according to DICE specification
+$(DICE_INPUT): $(FW_BIN)
+	$(PYTHON) scripts/dice_tool.py generate-platform-token \
+		--uds-private-key $(DICE_PLATFORM_PRIVATE_KEY) \
+		--uds-public-key $(DICE_PLATFORM_PUBLIC_KEY) \
+		$< $@
+
+$(FW_BIN): $(FW_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+$(FW_ELF): $(TSM_ELF) $(TSM_SIG)
+	cargo build --target $(TARGET_TRIPLET) -p shadowfax
+
 $(TSM_SIG): $(TSM_ELF)
-	openssl dgst -sha256 -sign $(PRIVATE_KEY) -out $@ $<
+	openssl pkeyutl -sign -inkey $(PRIVATE_KEY) -in $< -out $@
 
 $(TSM_ELF):
 	 cargo build --target $(TARGET_TRIPLET) -p tsm
@@ -84,15 +110,20 @@ $(TSM_ELF):
 test: firmware
 	cargo test --manifest-path test/Cargo.toml --target $(HOST_TRIPLET)
 
-## generate-keys: generate a couple of RSA keys 2048 bit in shadowfax-core/keys/
+## generate-keys: generate ed25519 signing keys and DICE initial keys in shadowfax/keys/
 generate-keys:
 	mkdir -p $(KEYS_DIR)
-	openssl genrsa -out $(PRIVATE_KEY) 2048
-	openssl rsa -in $(PRIVATE_KEY) -RSAPublicKey_out -outform PEM -out $(PUBLIC_KEY)
+	openssl genpkey -algorithm ed25519 -out $(PRIVATE_KEY)
+	openssl pkey -in $(PRIVATE_KEY) -pubout -out $(PUBLIC_KEY)
+	$(PYTHON) scripts/dice_tool.py generate-uds-keys $(DICE_PLATFORM_PRIVATE_KEY) $(DICE_PLATFORM_PUBLIC_KEY)
 
 ## debug: attach to a gdb server and load $(GDB_COVE_SCRIPT)
 debug:
 	$(GDB) -x $(GDB_SETTINGS_SCRIPT) -x $(GDB_COVE_SCRIPT) $(FW_ELF)
+
+# Ensure bin directory exists
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
 
 ## build-info: display build configuration
 build-info:
@@ -101,7 +132,7 @@ build-info:
 	@echo "  HOST_LIBC:                 $(HOST_LIBC)"
 	@echo "  HOST_TARGET_TRIPLET:       $(HOST_TRIPLET)"
 	@echo "  TARGET_TRIPLET:            $(TARGET_TRIPLET)"
-	@echo "  CROSS_COMPILE:             $(CROSS_COMPILE)"
+	@echo "  RV_PREFIX:                 $(RV_PREFIX)"
 	@echo "  PROFILE:                   $(PROFILE)"
 	@echo "  PLATFORM:                  $(PLATFORM)"
 	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"

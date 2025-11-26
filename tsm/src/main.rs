@@ -5,14 +5,10 @@
 
 use core::panic::PanicInfo;
 
-use common::{
-    sbi::{
-        SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
-        SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU,
-        SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO,
-        SBI_COVH_RUN_TVM_VCPU,
-    },
-    security::TSM_KEY_SIZE,
+use common::sbi::{
+    SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
+    SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM,
+    SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RUN_TVM_VCPU,
 };
 use linked_list_allocator::LockedHeap;
 use spin::Mutex;
@@ -86,11 +82,10 @@ extern "C" fn _start() -> ! {
 struct TsmState {
     info: TsmInfo,
     hypervisor: HypervisorState,
-    prev_tcb_measure: [u8; TSM_KEY_SIZE],
 }
 
 impl TsmState {
-    fn new(prev_tcb_measure: [u8; TSM_KEY_SIZE]) -> Self {
+    fn new() -> Self {
         Self {
             info: TsmInfo {
                 tsm_status: state::TsmStatus::TsmReady,
@@ -103,7 +98,6 @@ impl TsmState {
                 tvm_vcpu_state_pages: 0,
             },
             hypervisor: HypervisorState::new(),
-            prev_tcb_measure,
         }
     }
 }
@@ -117,7 +111,7 @@ static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
 /// This function will be called by the TSM-driver to initialize securely the TSM after the
 /// signature has bee authenticated. The TSM-driver will provide optionally an identity to prove
 /// its authenticity in a first local attestation scenario.
-extern "C" fn _secure_init(key: *const u8, _firmware_identity: usize) {
+extern "C" fn _secure_init() {
     // Initialize heap
     unsafe {
         let heap_start = (&raw const _heap_start as *const u8) as usize;
@@ -126,14 +120,8 @@ extern "C" fn _secure_init(key: *const u8, _firmware_identity: usize) {
         ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
     }
 
-    // convert the nonce to a [u8; TSM_KEY_SIZE]
-    let prev_tcb_measure: [u8; TSM_KEY_SIZE] = unsafe {
-        let key = core::slice::from_raw_parts(key, TSM_KEY_SIZE);
-        key.try_into().unwrap()
-    };
-
     let mut state = STATE.lock();
-    *state = Some(TsmState::new(prev_tcb_measure));
+    *state = Some(TsmState::new());
 
     drop(state);
 }
