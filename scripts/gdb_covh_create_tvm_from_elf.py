@@ -162,8 +162,25 @@ def assert_create_tvm(prev: Optional[Dict], curr: Dict) -> None:
         "page table must be zero after TVM creation"
     )
 
+def assert_create_tvm_vcpu(prev: Optional[Dict], curr: Dict) -> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
+
+def assert_finalize_tvm(prev: Optional[Dict], curr: Dict)-> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
 
 def assert_add_tvm_memory_region(prev: Optional[Dict], curr: Dict) -> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
+
+def assert_add_tvm_measured_pages(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
@@ -260,6 +277,7 @@ def load_guest_elf_and_make_steps(
                     "a6": (1 << 26) | (COVH_ADD_MEMORY_REGION & 0xFFFF),
                     "a7": EID_COVH_ID,
                 },
+                assert_fn=assert_add_tvm_memory_region
             ),
         )
 
@@ -297,6 +315,7 @@ def load_guest_elf_and_make_steps(
                         "a6": (1 << 26) | (COVH_ADD_TVM_MEASURED_PAGES & 0xFFFF),
                         "a7": EID_COVH_ID,
                     },
+                    assert_fn=assert_add_tvm_measured_pages
                 )
             )
 
@@ -413,7 +432,7 @@ def run() -> None:
                 "a7": EID_COVH_ID,
             },
             setup_mem_fn=None,
-            assert_fn=None,
+            assert_fn=assert_create_tvm_vcpu,
         )
     )
 
@@ -433,7 +452,7 @@ def run() -> None:
                 "a7": EID_COVH_ID,
             },
             setup_mem_fn=None,
-            assert_fn=None,
+            assert_fn=assert_finalize_tvm,
         )
     )
 
@@ -451,8 +470,6 @@ def run() -> None:
                 "a6": (1 << 26) | (COVH_RUN_TVM_VCPU & 0xFFFF),
                 "a7": EID_COVH_ID,
             },
-            setup_mem_fn=None,
-            assert_fn=None,
         )
     )
 
