@@ -402,7 +402,7 @@ impl HypervisorState {
         Ok(())
     }
 
-    pub fn run_tvm_vcpu(&self, tvm_id: usize, vcpu_id: usize) -> anyhow::Result<!> {
+    pub fn run_tvm_vcpu(&self, tvm_id: usize, _vcpu_id: usize) -> anyhow::Result<!> {
         if self.tvm.is_none() {
             anyhow::bail!("no tvm present");
         }
@@ -416,10 +416,6 @@ impl HypervisorState {
             anyhow::bail!("no vcpu present");
         }
         let vcpu = tvm.vcpu.as_ref().unwrap();
-
-        if vcpu.get_id() != vcpu_id {
-            anyhow::bail!("invalid vcpu id");
-        }
 
         match tvm.state_enum {
             TvmState::TvmRunnable => {}
@@ -555,17 +551,6 @@ impl TvmVcpuState {
         vcpu.regs[10] = id;
 
         vcpu
-    }
-
-    fn init(&mut self, sepc: usize, arg: usize) {
-        self.stvec = sepc;
-        self.sepc = sepc;
-        // a1 reg
-        self.regs[11] = arg;
-    }
-
-    fn get_id(&self) -> usize {
-        self.regs[10]
     }
 
     unsafe fn enter(&self, entry_sepc: usize, _entry_arg: usize) -> ! {
