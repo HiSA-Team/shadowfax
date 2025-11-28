@@ -178,22 +178,11 @@ def setup_add_tvm_measured_pages() -> None:
     inf.write_memory(tvm_source_code_addr, JAL_LOOP_WORD)
 
 
+# TODO: assert the pagetable mapping
 def assert_add_tvm_measured_pages(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-
-    # assert that the "source code" has been copied successfully
-    tvm_source_code_addr = prev["regs"]["a1"]
-
-    instr_raw = read_mem(tvm_source_code_addr, 8)
-    instr = struct.unpack("<I", instr_raw)[0]
-    jal = struct.unpack("<I", JAL_LOOP_WORD)[0]
-
-    assert instr == jal, (
-        f"expected JAL_LOOP_WORD at {hex(tvm_source_code_addr)}; got {hex(instr)}"
-    )
-    # TODO: assert the pagetable mapping
 
 
 def setup_create_tvm_vcpu() -> None:
@@ -201,7 +190,16 @@ def setup_create_tvm_vcpu() -> None:
 
 
 def assert_create_tvm_vcpu(prev: Optional[Dict], curr: Dict) -> None:
-    pass
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
+
+def assert_finalize_tvm(prev: Optional[Dict], curr: Dict)-> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
 
 
 def run() -> None:
@@ -330,7 +328,7 @@ def run() -> None:
                 "a7": EID_COVH_ID,
             },
             setup_mem_fn=setup_add_tvm_measured_pages,
-            assert_fn=None,
+            assert_fn=assert_add_tvm_measured_pages,
         )
     )
 
@@ -351,7 +349,7 @@ def run() -> None:
                 "a7": EID_COVH_ID,
             },
             setup_mem_fn=None,
-            assert_fn=None,
+            assert_fn=assert_create_tvm_vcpu,
         )
     )
 
@@ -372,7 +370,7 @@ def run() -> None:
                 "a7": EID_COVH_ID,
             },
             setup_mem_fn=None,
-            assert_fn=None,
+            assert_fn=assert_finalize_tvm,
         )
     )
 
@@ -396,6 +394,11 @@ def run() -> None:
     )
 
     runner.install_breakpoints()
+    for i, step in enumerate(runner.steps):
+        print(f"step[{i}] {step.name}")
+        for reg in step.regs:
+            print(f"\t{reg}: 0x{step.regs[reg]:x}")
+        print()
     print("=== Test harness ready; continue from gdb to run ===")
 
 
