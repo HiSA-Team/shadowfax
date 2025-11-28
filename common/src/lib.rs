@@ -44,11 +44,17 @@ pub mod sbi {
     }
 }
 
-pub mod security {
+pub mod attestation {
     extern crate alloc;
     use alloc::vec::Vec;
-    use coset::{CborSerializable, CoseSign1};
-    use ed25519_compact::{KeyPair, Seed, Signature};
+    use coset::{
+        AsCborValue, CborSerializable, CoseKeyBuilder, CoseSign1, CoseSign1Builder, HeaderBuilder,
+        KeyType,
+        cbor::{Value, value::Integer},
+        cwt::{self, ClaimsSet},
+        iana::{self, Algorithm},
+    };
+    use ed25519_compact::{KeyPair, PublicKey, Seed, Signature};
     use sha2::Sha512;
 
     const CDI_LENGTH: usize = 32;
@@ -60,32 +66,141 @@ pub mod security {
         0xB1, 0xB3, 0xCF, 0xF1, 0x67, 0x9B, 0x05, 0xAB, 0x1C, 0xA5, 0xD1, 0xAF, 0xFB, 0x78, 0x9C,
         0xCD, 0x2B, 0x0B, 0x3B,
     ];
-    const ID_SALT: [u8; 64] = [
-        0xDB, 0xDB, 0xAE, 0xBC, 0x80, 0x20, 0xDA, 0x9F, 0xF0, 0xDD, 0x5A, 0x24, 0xC8, 0x3A, 0xA5,
-        0xA5, 0x42, 0x86, 0xDF, 0xC2, 0x63, 0x03, 0x1E, 0x32, 0x9B, 0x4D, 0xA1, 0x48, 0x43, 0x06,
-        0x59, 0xFE, 0x62, 0xCD, 0xB5, 0xB7, 0xE1, 0xE0, 0x0F, 0xC6, 0x80, 0x30, 0x67, 0x11, 0xEB,
-        0x44, 0x4A, 0xF7, 0x72, 0x09, 0x35, 0x94, 0x96, 0xFC, 0xFF, 0x1D, 0xB9, 0x52, 0x0B, 0xA5,
-        0x1C, 0x7B, 0x29, 0xEA,
-    ];
 
-    #[repr(C)]
-    #[derive(Clone)]
-    struct Cdi(Vec<u8>);
+    const PROFILE_LABEL: i64 = 265;
+    const PLATFORM_PUBLIC_KEY_LABEL: i64 = -70_000;
+    const MANUFACTURER_ID_LABEL: i64 = -70_001;
+    const PLATFORM_STATE_LABEL: i64 = -70_002;
+    const PLATFORM_SW_COMPONENTS_LABEL: i64 = -70_003;
+    const TSM_PUBLIC_KEY_LABEL: i64 = -70_004;
 
-    #[repr(C)]
+    #[derive(Debug)]
+    pub enum AttestationError {
+        InvalidPublicKey,
+        MissingSignature,
+        InvalidSignatureFormat,
+        SignatureVerificationFailed,
+    }
+    /// A Compound Device Identifier (CDI) wrapper.
     #[derive(Clone)]
-    pub struct AttestationPayload {
+    pub struct Cdi(Vec<u8>);
+
+    impl Cdi {
+        /// Derive the next CDI given measurements (using HKDF).
+        fn derive_next(&self, next_measurement: &[u8]) -> Self {
+            let mut okm = [0u8; CDI_LENGTH];
+            // HKDF(salt=measurement, input_key_material=previous CDI)
+            hkdf::Hkdf::<Sha512>::new(Some(next_measurement), &self.0)
+                .expand(b"CDI_Attest", &mut okm)
+                .expect("HKDF output length");
+            Cdi(okm.to_vec())
+        }
+        /// Derive an Ed25519 keypair from this CDI.
+        fn derive_keys(&self) -> KeyPair {
+            let mut seed = [0u8; CDI_LENGTH];
+            // HKDF(salt=ASYM_SALT, input_key_material=this CDI)
+            hkdf::Hkdf::<Sha512>::new(Some(&ASYM_SALT), &self.0)
+                .expand(b"Key Pair", &mut seed)
+                .expect("HKDF for key seed");
+            let seed = Seed::from_slice(&seed).unwrap();
+            KeyPair::from_seed(seed)
+        }
+    }
+
+    /// Trait representing a DICE layer. Layers can compute the next layer and verify their token.
+    pub trait DiceLayer {
+        type NextLayer;
+
+        /// Derive the next layer from this one using `measurement`.
+        fn compute_next(&self, measurement: &[u8]) -> Self::NextLayer;
+        /// Get a reference to this layer's CDI.
+        fn cdi(&self) -> &Cdi;
+        /// Get a reference to this layer's COSE_Sign1 token.
+        fn token(&self) -> &CoseSign1;
+        /// Verify *this* layer's COSE_Sign1 token against an external Ed25519 public key.
+        fn verify_with_pubkey(&self, parent_pubkey: &[u8]) -> Result<(), AttestationError> {
+            verify_cose_signature(self.token(), parent_pubkey)
+        }
+    }
+
+    /// Platform layer (e.g. hardware RoT); holds its CDI and self-signed token.
+    #[derive(Clone)]
+    pub struct PlatformAttestationContext {
         cdi: Cdi,
         token: CoseSign1,
     }
 
-    impl From<*const u8> for AttestationPayload {
-        fn from(ptr: *const u8) -> Self {
-            Self::from_raw_bytes(ptr)
+    impl DiceLayer for PlatformAttestationContext {
+        type NextLayer = TsmAttestationContext;
+        fn compute_next(&self, measurement: &[u8]) -> Self::NextLayer {
+            // Derive TSM CDI from Platform CDI and TSM measurement
+            let next_cdi = self.cdi.derive_next(measurement);
+            let tsm_public_key = {
+                let pkey = next_cdi.derive_keys().pk;
+                CoseKeyBuilder::new_okp_key()
+                    .algorithm(Algorithm::EdDSA)
+                    .param(-2, coset::cbor::Value::Bytes(pkey.to_vec()))
+                    .build()
+            };
+
+            // Add to the previous SW Components the TSM measurement
+            let platform_claims = PlatformClaims::from_cbor(self.token.payload.as_ref().unwrap());
+            let mut platform_sw_components = platform_claims.platform_sw_components.clone();
+
+            platform_sw_components.push(RiscvCoveSwComponent {
+                component_type: alloc::string::ToString::to_string(&"tsm"),
+                measurement: measurement.to_vec(),
+                svn: alloc::string::ToString::to_string(&"0"),
+                manifest_hash: None,
+                signer_pubkey_hash: Vec::new(),
+                hash_alg_id: alloc::string::ToString::to_string(&"SHA512"),
+            });
+
+            let tsm_claims = TsmClaims {
+                tsm_public_key: tsm_public_key.to_vec().unwrap(),
+                platform_sw_components,
+            };
+
+            // Sign the TSM token payload with Platform's derived key
+            let signing_key = self.cdi.derive_keys().sk;
+
+            let protected = HeaderBuilder::new()
+                .algorithm(iana::Algorithm::EdDSA)
+                .key_id(b"TSM".to_vec())
+                .build();
+            let tsm_token = CoseSign1Builder::new()
+                .protected(protected)
+                .payload(
+                    tsm_claims
+                        .to_claims_set()
+                        .to_cbor_value()
+                        .unwrap()
+                        .to_vec()
+                        .unwrap(),
+                )
+                .create_signature(b"", |data| signing_key.sign(data, None).to_vec())
+                .build();
+
+            TsmAttestationContext {
+                platform_token: self.token.clone(),
+                cdi: next_cdi,
+                token: tsm_token,
+            }
+        }
+        fn cdi(&self) -> &Cdi {
+            &self.cdi
+        }
+        fn token(&self) -> &CoseSign1 {
+            &self.token
         }
     }
 
-    impl AttestationPayload {
+    impl PlatformAttestationContext {
+        pub fn init_from_addr(addr: usize) -> Self {
+            let ptr = addr as *const u8;
+            Self::from_raw_bytes(ptr)
+        }
+
         /// Parses the Payload input formatted as follows:
         /// |--------|-----------------|--------|-----------------|
         /// | 4byte  |      CDILEN     | 4byte  |      EATLEN     |
@@ -111,7 +226,7 @@ pub mod security {
             let cdi = {
                 let slice = unsafe { core::slice::from_raw_parts(ptr.add(offset), len) };
                 offset += len;
-                Vec::from(slice)
+                Cdi(Vec::from(slice))
             };
 
             let len = read_u32(&mut offset) as usize;
@@ -122,94 +237,333 @@ pub mod security {
                 CoseSign1::from_slice(slice).unwrap()
             };
 
-            Self {
-                cdi: Cdi(cdi),
-                token,
+            Self { cdi, token }
+        }
+    }
+
+    /// TSM layer: holds its CDI, its token (signed by Platform) and the Platform token for evidence composition
+    #[derive(Clone)]
+    pub struct TsmAttestationContext {
+        cdi: Cdi,
+        platform_token: CoseSign1,
+        token: CoseSign1,
+    }
+
+    impl DiceLayer for TsmAttestationContext {
+        type NextLayer = Tvm;
+
+        fn compute_next(&self, measurement: &[u8]) -> Self::NextLayer {
+            // Derive TSM CDI from Platform CDI and TSM measurement
+            let next_cdi = self.cdi.derive_next(measurement);
+
+            Tvm {
+                platform_token: self.platform_token.clone(),
+                cdi: next_cdi,
+                tsm_token: self.token.clone(),
+            }
+        }
+
+        fn cdi(&self) -> &Cdi {
+            &self.cdi
+        }
+
+        fn token(&self) -> &CoseSign1 {
+            &self.token
+        }
+    }
+
+    /// TSM layer: holds its CDI, its token (signed by Platform) and the Platform token for evidence composition
+    #[derive(Clone)]
+    pub struct Tvm {
+        cdi: Cdi,
+        platform_token: CoseSign1,
+        tsm_token: CoseSign1,
+    }
+
+    impl Tvm {
+        /// Returns (platform_token, tsm_token, tvm_token) packaged into a `Evidence` representation.
+        pub fn get_evidence(&self, _tvm_measurement: &[u8], challenge: &[u8]) -> Evidence {
+            // Build TVM token payload: include placeholder claims + the challenge
+            let mut tvm_payload = Vec::new();
+            tvm_payload.extend_from_slice(b"tvm-claims:");
+            tvm_payload.extend_from_slice(challenge);
+
+            // Sign TVM token with TSM's key (i.e., key derived from TSM CDI)
+            let tsm_key = self.cdi.derive_keys();
+            let protected = HeaderBuilder::new()
+                .algorithm(iana::Algorithm::EdDSA)
+                .build();
+            let tvm_token = CoseSign1Builder::new()
+                .protected(protected)
+                .payload(tvm_payload)
+                .create_signature(&[], |m| tsm_key.sk.sign(m, None).to_vec())
+                .build();
+
+            // Compose riscv-cove-token (submodule map) with platform/tsm/tvm tokens
+            Evidence {
+                platform: self.platform_token.clone(),
+                tsm: self.tsm_token.clone(),
+                tvm: tvm_token,
             }
         }
     }
 
-    pub enum AttestationContext {
-        None,
-        Platform { payload: AttestationPayload },
-        Tsm { payload: AttestationPayload },
-        Tvm { payload: AttestationPayload },
+    /// Evidence envelope struct matching the "riscv-cove-token" submodule form.
+    pub struct Evidence {
+        pub platform: CoseSign1,
+        pub tsm: CoseSign1,
+        pub tvm: CoseSign1,
     }
 
-    impl AttestationContext {
-        pub fn init_from_addr(addr: usize) -> Self {
-            let ptr = addr as *const u8;
-            let payload = AttestationPayload::from(ptr);
-            Self::Platform { payload }
-        }
+    /// Verify a COSE_Sign1 token using an external Ed25519 public key bytes.
+    ///
+    /// Uses `CoseSign1::verify_signature` to obtain (sig, data) and performs Ed25519 verification.
+    fn verify_cose_signature(
+        token: &CoseSign1,
+        parent_pubkey: &[u8],
+    ) -> Result<(), AttestationError> {
+        // Convert public key
+        let pk =
+            PublicKey::from_slice(parent_pubkey).map_err(|_| AttestationError::InvalidPublicKey)?;
 
-        pub fn compute_next(&self, next_layer_data: &[u8]) -> AttestationContext {
+        // Use coset's verify_signature helper which supplies the payload to be verified.
+        // The closure must return Result<(), E> where E is the underlying verification error type.
+        token.verify_signature(b"", |sig, data| {
+            // Convert signature to ed25519 type
+            let sig =
+                Signature::from_slice(sig).map_err(|_| AttestationError::InvalidSignatureFormat)?;
+            pk.verify(data, &sig)
+                .map_err(|_| AttestationError::SignatureVerificationFailed)
+        })
+    }
+
+    impl core::fmt::Display for AttestationError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             match self {
-                Self::Platform { payload } => {
-                    // Build the attestation context for the TSM
-                    let token = generate_tsm_token(&payload.cdi);
-                    let cdi = payload.cdi.generate_next(&[0; 64]);
-                    Self::Tsm {
-                        payload: AttestationPayload { cdi, token },
-                    }
-                }
-                _ => panic!("invalid attestation context"),
+                Self::InvalidPublicKey => write!(f, "invalid public key"),
+                Self::MissingSignature => write!(f, "missing signature"),
+                Self::InvalidSignatureFormat => write!(f, "invalid signature format"),
+                Self::SignatureVerificationFailed => write!(f, "signature verification failed"),
             }
         }
+    }
+    impl core::error::Error for AttestationError {}
 
-        pub fn verify(
-            &self,
-            verifying_key: &[u8; ed25519_compact::PublicKey::BYTES],
-        ) -> Result<(), ed25519_compact::Error> {
-            let verifiying_key = ed25519_compact::PublicKey::from_slice(verifying_key).unwrap();
+    #[derive(Debug, Clone)]
+    struct RiscvCoveSwComponent {
+        component_type: alloc::string::String, // 1 => text
+        measurement: Vec<u8>,                  // 2 => hash
+        svn: alloc::string::String,            // 3 => text
+        manifest_hash: Option<Vec<u8>>,        // 4 => hash
+        signer_pubkey_hash: Vec<u8>,           // 5 => hash
+        hash_alg_id: alloc::string::String,    // 6 => text
+    }
 
-            let sign1 = match self {
-                Self::Platform { payload } => &payload.token,
-                Self::Tsm { payload } => &payload.token,
-                Self::Tvm { payload } => &payload.token,
-                _ => panic!("invalid attestation context"),
+    impl RiscvCoveSwComponent {
+        fn to_cbor(&self) -> Value {
+            let mut map = Vec::from([
+                (
+                    Value::Integer(1.into()),
+                    Value::Text(self.component_type.clone()),
+                ),
+                (
+                    Value::Integer(2.into()),
+                    Value::Bytes(self.measurement.clone()),
+                ),
+                (Value::Integer(3.into()), Value::Text(self.svn.clone())),
+                (
+                    Value::Integer(5.into()),
+                    Value::Bytes(self.signer_pubkey_hash.clone()),
+                ),
+                (
+                    Value::Integer(6.into()),
+                    Value::Text(self.hash_alg_id.clone()),
+                ),
+            ]);
+
+            if let Some(h) = &self.manifest_hash {
+                map.push((Value::Integer(4.into()), Value::Bytes(h.clone())));
+            }
+
+            Value::Map(map)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct TsmClaims {
+        tsm_public_key: Vec<u8>,
+        platform_sw_components: Vec<RiscvCoveSwComponent>,
+    }
+
+    impl TsmClaims {
+        fn to_claims_set(&self) -> ClaimsSet {
+            let sw_components_array = Value::Array(
+                self.platform_sw_components
+                    .iter()
+                    .map(|c| c.to_cbor())
+                    .collect(),
+            );
+
+            let mut builder = cwt::ClaimsSetBuilder::new();
+            let key_bytes = Value::Bytes(self.tsm_public_key.clone());
+
+            builder = builder.private_claim(TSM_PUBLIC_KEY_LABEL, key_bytes);
+
+            builder = builder.private_claim(PLATFORM_SW_COMPONENTS_LABEL, sw_components_array);
+
+            builder.build()
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    enum PlatformState {
+        NotConfigured,
+        Secured,
+        Debug,
+        Recovery,
+    }
+
+    #[derive(Debug, Clone)]
+    struct PlatformClaims {
+        platform_public_key: Vec<u8>,
+        manufacturer_id: [u8; 64],
+        platform_state: PlatformState,
+        platform_sw_components: Vec<RiscvCoveSwComponent>,
+    }
+
+    impl PlatformClaims {
+        fn from_cbor(data: &[u8]) -> PlatformClaims {
+            let value: Value = coset::cbor::from_reader(data).expect("invalid CBOR");
+
+            let map = match value {
+                Value::Tag(_, boxed) => match *boxed {
+                    Value::Map(m) => m,
+                    _ => panic!("platform token must contain a CBOR map"),
+                },
+                Value::Map(m) => m,
+                _ => panic!("platform token must be a CBOR map"),
             };
 
-            sign1.verify_signature(b"", |sig, data| {
-                let signature = Signature::from_slice(sig).unwrap();
-                verifiying_key.verify(data, &signature)
-            })?;
+            // Helper closures
+            let get_bytes = |v: Value| match v {
+                Value::Bytes(b) => b,
+                _ => panic!("expected bytes"),
+            };
 
-            Ok(())
-        }
+            let get_text = |v: Value| match v {
+                Value::Text(t) => t,
+                _ => panic!("expected text"),
+            };
 
-        pub fn get_payload(&self) -> AttestationPayload {
-            match self {
-                Self::Platform { payload } => payload.clone(),
-                Self::Tsm { payload } => payload.clone(),
-                Self::Tvm { payload } => payload.clone(),
-                _ => panic!("invalid attestation context"),
+            let get_i64 = |v: Value| match v {
+                Value::Integer(n) => n,
+                _ => panic!("expected integer"),
+            };
+
+            let mut platform_public_key = None;
+            let mut manufacturer_id = None;
+            let mut platform_state = None;
+            let mut platform_sw_components = None;
+
+            for (k, v) in map {
+                let key = match k {
+                    Value::Integer(n) => n,
+                    _ => continue,
+                };
+
+                if key == PROFILE_LABEL.into() {
+                    continue;
+                }
+
+                if key == PLATFORM_PUBLIC_KEY_LABEL.into() {
+                    platform_public_key = Some(get_bytes(v));
+                    continue;
+                }
+
+                if key == MANUFACTURER_ID_LABEL.into() {
+                    let bytes = get_bytes(v);
+                    if bytes.len() != 64 {
+                        panic!("manufacturer-id must be 64 bytes");
+                    }
+                    let mut arr = [0u8; 64];
+                    arr.copy_from_slice(&bytes);
+                    manufacturer_id = Some(arr);
+                    continue;
+                }
+
+                if key == PLATFORM_STATE_LABEL.into() {
+                    let n = get_i64(v);
+                    let state = match n.into() {
+                        1 => PlatformState::NotConfigured,
+                        2 => PlatformState::Secured,
+                        3 => PlatformState::Debug,
+                        4 => PlatformState::Recovery,
+                        _ => panic!("invalid platform-state"),
+                    };
+                    platform_state = Some(state);
+                    continue;
+                }
+
+                if key == PLATFORM_SW_COMPONENTS_LABEL.into() {
+                    let arr = match v {
+                        Value::Array(a) => a,
+                        _ => panic!("platform-sw-components must be array"),
+                    };
+
+                    let mut comps = Vec::new();
+
+                    for entry in arr {
+                        let comp_map = match entry {
+                            Value::Map(m) => m,
+                            _ => panic!("component entry must be map"),
+                        };
+
+                        let mut component_type = None;
+                        let mut measurement = None;
+                        let mut svn = None;
+                        let mut manifest_hash = None;
+                        let mut signer_pubkey_hash = None;
+                        let mut hash_alg_id = None;
+
+                        for (ck, cv) in comp_map {
+                            let ckey = match ck {
+                                Value::Integer(n) => n,
+                                _ => continue,
+                            };
+
+                            match ckey.into() {
+                                1 => component_type = Some(get_text(cv)),
+                                2 => measurement = Some(get_bytes(cv)),
+                                3 => svn = Some(get_text(cv)),
+                                4 => manifest_hash = Some(get_bytes(cv)),
+                                5 => signer_pubkey_hash = Some(get_bytes(cv)),
+                                6 => hash_alg_id = Some(get_text(cv)),
+                                _ => {}
+                            }
+                        }
+
+                        comps.push(RiscvCoveSwComponent {
+                            component_type: component_type.expect("missing 1"),
+                            measurement: measurement.expect("missing 2"),
+                            svn: svn.expect("missing 3"),
+                            manifest_hash,
+                            signer_pubkey_hash: signer_pubkey_hash.expect("missing 5"),
+                            hash_alg_id: hash_alg_id.expect("missing 6"),
+                        });
+                    }
+
+                    platform_sw_components = Some(comps);
+                    continue;
+                }
+            }
+
+            PlatformClaims {
+                platform_public_key: platform_public_key.expect("missing platform-public-key"),
+                manufacturer_id: manufacturer_id.expect("missing manufacturer-id"),
+                platform_state: platform_state.expect("missing platform-state"),
+                platform_sw_components: platform_sw_components
+                    .expect("missing platform-sw-components"),
             }
         }
-    }
-
-    impl Cdi {
-        fn generate_keys(&self) -> KeyPair {
-            let mut seed = [0; CDI_LENGTH];
-            hkdf::Hkdf::<Sha512>::new(Some(&ASYM_SALT), self.0.as_slice())
-                .expand(b"Key Pair", &mut seed)
-                .expect("32 byte should be enough");
-            let seed = Seed::from_slice(&seed).unwrap();
-            KeyPair::from_seed(seed)
-        }
-
-        fn generate_next(&self, tcb_hash: &[u8]) -> Self {
-            let mut okm = [0; CDI_LENGTH];
-            hkdf::Hkdf::<Sha512>::new(None, self.0.as_slice())
-                .expand(b"CDI_Attest", &mut okm)
-                .expect("32 byte should be enough");
-
-            Self(okm.to_vec())
-        }
-    }
-
-    fn generate_tsm_token(cdi: &Cdi) -> coset::CoseSign1 {
-        let keys = cdi.generate_keys();
-        CoseSign1::default()
     }
 }

@@ -51,7 +51,7 @@
 use core::cell::OnceCell;
 
 use alloc::vec::Vec;
-use common::security::AttestationContext;
+use common::attestation::{DiceLayer, PlatformAttestationContext};
 use spin::mutex::Mutex;
 
 use crate::{
@@ -71,14 +71,14 @@ pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
 pub struct State {
     pub domains: Vec<Domain>,
-    pub attestation_context: AttestationContext,
+    pub attestation_context: PlatformAttestationContext,
 }
 
 impl State {
-    fn new() -> Self {
+    fn new(attestation_context: PlatformAttestationContext) -> Self {
         Self {
             domains: Vec::new(),
-            attestation_context: AttestationContext::None,
+            attestation_context,
         }
     }
 }
@@ -94,17 +94,14 @@ impl State {
 /// TODO: parse domains dynamically from the device tree
 /// Assumption: the domain id matches with its position in the domain array
 pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
-    let mut state = STATE.lock();
-    let state = state.get_mut_or_init(|| State::new());
-
     // First, get the security context
-
-    state.attestation_context = AttestationContext::init_from_addr(DICE_INPUT_ADDR);
+    let attestation_context = PlatformAttestationContext::init_from_addr(DICE_INPUT_ADDR);
     // Verify the signature
-    state
-        .attestation_context
-        .verify(DICE_PLATFORM_PUBLIC_KEY)
-        .unwrap();
+    attestation_context.verify_with_pubkey(DICE_PLATFORM_PUBLIC_KEY)?;
+
+    // Lock the state and init the data structure
+    let mut state = STATE.lock();
+    let state = state.get_mut_or_init(|| State::new(attestation_context));
 
     let tee_stack = &raw const crate::_tee_stack_top as *const u8 as usize;
 
@@ -121,10 +118,8 @@ pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     // Create and add the confidential_domain
     // TODO: make this dynamic
     let context_addr = tee_stack - (TEE_SCRATCH_SIZE + size_of::<Context>()) - size_of::<Context>();
-    let confidential_domain = create_confidential_domain(
-        context_addr,
-        state.attestation_context.compute_next(&[0; 32]),
-    );
+    let tsm_context = state.attestation_context.compute_next(&[0; 32]);
+    let confidential_domain = create_confidential_domain(context_addr, tsm_context);
 
     state.domains.push(confidential_domain);
 

@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use common::security::{AttestationContext, AttestationPayload};
+use common::attestation::TsmAttestationContext;
 use ed25519_compact::Signature;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
@@ -130,7 +130,7 @@ impl Domain {
 
 pub fn create_confidential_domain(
     context_addr: usize,
-    attestation_context: AttestationContext,
+    attestation_context: TsmAttestationContext,
 ) -> Domain {
     // Assume that the specified domain is a trusted domain -> need to load the TSM in it
     // TODO: parse domain from FDT
@@ -145,6 +145,9 @@ pub fn create_confidential_domain(
 
     // Save the context address and the state address
     domain.context_addr = context_addr;
+
+    // Mark the domain as a TSM containing domain -> can accept TEECALL
+    domain.has_tsm = true;
 
     // Configure PMP entry for TMem
     let tmem_region = &domain.memory_regions[0];
@@ -173,7 +176,7 @@ pub fn create_confidential_domain(
 }
 
 /// This function looks for the _secure_init symbol and invoke it as a function
-fn boot_tsm(attestation_context: AttestationContext) {
+fn boot_tsm(attestation_context: TsmAttestationContext) {
     // parse ELF
     let elf = ElfBytes::<AnyEndian>::minimal_parse(tsm::DEFAULT_TSM).unwrap();
 
@@ -200,8 +203,9 @@ fn boot_tsm(attestation_context: AttestationContext) {
 
     unsafe {
         // Reinterpret the address as a function
-        let secure_init_fn = core::mem::transmute::<u64, fn(p: AttestationPayload)>(sym.st_value);
-        let payload = attestation_context.get_payload();
+        let secure_init_fn =
+            core::mem::transmute::<u64, fn(p: TsmAttestationContext)>(sym.st_value);
+        let payload = attestation_context.clone();
         secure_init_fn(payload);
     }
 }

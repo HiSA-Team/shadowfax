@@ -61,21 +61,21 @@ RISCV_COVE_EAT_PROFILE_LABEL = 265
 RISCV_COVE_EAT_PROFILE_DOC = "https://riscv.org/TBD"
 
 # Platform Public Key Claim
-PLATFORM_PUBLIC_KEY_LABEL = 266
+PLATFORM_PUBLIC_KEY_LABEL = -70000
 
 # Platform Manufacturer Identifier Claim
-PLATFORM_MANUFACTURER_ID_LABEL = 267
+PLATFORM_MANUFACTURER_ID_LABEL = -70001
 PLATFORM_MANUFACTURER_ID_TYPE = bytes(64)
 
 # Platform State Claim
-PLATFORM_STATE_LABEL = 268
+PLATFORM_STATE_LABEL = -70002
 PLATFORM_STATE_NOT_CONFIGURED = 1
 PLATFORM_STATE_SECURED = 2
 PLATFORM_STATE_DEBUG = 3
 PLATFORM_STATE_RECOVERY = 4
 
 # Platform Software Components Claim
-PLATFORM_SW_COMPONENTS_LABEL = 269
+PLATFORM_SW_COMPONENTS_LABEL = -70003
 
 
 def calculate_hash_from_file(file: str) -> bytes:
@@ -156,9 +156,8 @@ def generate_platform_cwt(
             {
                 1: "tsm-driver",  # Component Type
                 2: fw_hash,  # Component hash
-                3: 0x0,  # SVN
-                4: 0x0,  # Manifest hash (unused)
-                5: 0x0,  # Component signer (unused)
+                3: "0",  # SVN
+                5: bytes(64),  # Component signer (unused)
                 6: "SHA512",  # Hash Algorithm Name
             }
         ],
@@ -179,7 +178,7 @@ def generate_platform_cwt(
         OKPKpD: uds_private_bytes,  # private scalar (label depends on library; KpD used here)
     }
 
-    # Convert to library CoseKey object (assumes CoseKey.from_dict exists and constants match)
+    # Convert to library CoseKey object
     cose_key_obj = CoseKey.from_dict(cose_key)
 
     # Attach signing key and encode

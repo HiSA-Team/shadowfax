@@ -6,13 +6,13 @@
 use core::panic::PanicInfo;
 
 use common::{
+    attestation::TsmAttestationContext,
     sbi::{
         SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
         SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU,
         SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO,
         SBI_COVH_RUN_TVM_VCPU,
     },
-    security::{AttestationContext, AttestationPayload},
 };
 use linked_list_allocator::LockedHeap;
 use spin::Mutex;
@@ -86,11 +86,11 @@ extern "C" fn _start() -> ! {
 struct TsmState {
     info: TsmInfo,
     hypervisor: HypervisorState,
-    attestation_context: AttestationContext,
+    attestation_context: TsmAttestationContext,
 }
 
 impl TsmState {
-    fn new(attestation_context: AttestationContext) -> Self {
+    fn new(attestation_context: TsmAttestationContext) -> Self {
         Self {
             info: TsmInfo {
                 tsm_status: state::TsmStatus::TsmReady,
@@ -117,7 +117,7 @@ static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
 /// This function will be called by the TSM-driver to initialize securely the TSM after the
 /// signature has bee authenticated. The TSM-driver will provide optionally an identity to prove
 /// its authenticity in a first local attestation scenario.
-extern "C" fn _secure_init(payload: AttestationPayload) {
+fn _secure_init(payload: TsmAttestationContext) {
     // Initialize heap
     unsafe {
         let heap_start = (&raw const _heap_start as *const u8) as usize;
@@ -127,8 +127,7 @@ extern "C" fn _secure_init(payload: AttestationPayload) {
     }
 
     let mut state = STATE.lock();
-    let attestation_context = AttestationContext::Tsm { payload };
-    *state = Some(TsmState::new(attestation_context));
+    *state = Some(TsmState::new(payload));
 
     drop(state);
 }
