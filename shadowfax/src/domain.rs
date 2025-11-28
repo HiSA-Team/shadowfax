@@ -1,9 +1,14 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use common::attestation::TsmAttestationContext;
 use ed25519_compact::Signature;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
-use crate::{constants::memory_layout::TRUSTED_DOMAIN_REGIONS, context::Context, error::TsmError};
+use crate::{
+    constants::memory_layout::{ROOT_DOMAIN_REGIONS, TRUSTED_DOMAIN_REGIONS},
+    context::Context,
+    cove::program_pmp_from_regions,
+    error::TsmError,
+};
 
 mod tsm {
     #[link_section = ".rodata"]
@@ -201,17 +206,17 @@ fn boot_tsm(attestation_context: TsmAttestationContext) {
 
     let sym = found.expect("cannot find _secure_init");
 
+    let boxed = Box::new(attestation_context);
+    let addr = Box::into_raw(boxed) as usize;
     unsafe {
         // Reinterpret the address as a function
-        let secure_init_fn =
-            core::mem::transmute::<u64, fn(p: TsmAttestationContext)>(sym.st_value);
-        let payload = attestation_context.clone();
-        secure_init_fn(payload);
+        let secure_init_fn = core::mem::transmute::<u64, fn(addr: usize)>(sym.st_value);
+        secure_init_fn(addr);
     }
 }
 
-/// THIS FUNCTION SHOULD NOT EXISTS. IT IS A TEMPORARY FIX SINCE THE ED25519 LIBRARY DEPENDS ON THE
-/// STD LIBRARY TO PARSE THE PEM
+/// THIS FUNCTION SHOULD NOT EXISTS. IT IS A TEMPORARY FIX SINCE THE ED25519 LIBRARY DEPENDS ON
+/// STD TO PARSE THE PEM
 use base64ct::Encoding;
 
 const DER_HEADER_PK: [u8; 12] = [48, 42, 48, 5, 6, 3, 43, 101, 112, 3, 33, 0];

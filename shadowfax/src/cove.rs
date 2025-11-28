@@ -468,7 +468,7 @@ unsafe fn return_error(ctx_addr: usize, code: isize) -> usize {
 }
 
 // Program the PMP as stated in 3.7 in Privileged ISA
-fn program_pmp_from_regions(regions: &[MemoryRegion]) {
+pub fn program_pmp_from_regions(regions: &[MemoryRegion]) {
     for (i, r) in regions.iter().enumerate() {
         let ones = (1 << (r.order - 3)) - 1;
         let range = riscv::register::Range::NAPOT as usize;

@@ -49,8 +49,7 @@ pub mod attestation {
     use alloc::vec::Vec;
     use coset::{
         AsCborValue, CborSerializable, CoseKeyBuilder, CoseSign1, CoseSign1Builder, HeaderBuilder,
-        KeyType,
-        cbor::{Value, value::Integer},
+        cbor::{Value, Value::Integer},
         cwt::{self, ClaimsSet},
         iana::{self, Algorithm},
     };
@@ -89,8 +88,13 @@ pub mod attestation {
         /// Derive the next CDI given measurements (using HKDF).
         fn derive_next(&self, next_measurement: &[u8]) -> Self {
             let mut okm = [0u8; CDI_LENGTH];
+            let next_measurement = if next_measurement.len() > 0 {
+                Some(next_measurement)
+            } else {
+                None
+            };
             // HKDF(salt=measurement, input_key_material=previous CDI)
-            hkdf::Hkdf::<Sha512>::new(Some(next_measurement), &self.0)
+            hkdf::Hkdf::<Sha512>::new(next_measurement, &self.0)
                 .expand(b"CDI_Attest", &mut okm)
                 .expect("HKDF output length");
             Cdi(okm.to_vec())
@@ -249,14 +253,25 @@ pub mod attestation {
         token: CoseSign1,
     }
 
+    impl TsmAttestationContext {
+        pub fn init_from_addr(addr: usize) -> Self {
+            let ptr = addr as *const u8;
+            Self::from_raw_bytes(ptr)
+        }
+
+        fn from_raw_bytes(ptr: *const u8) -> Self {
+            todo!()
+        }
+    }
+
     impl DiceLayer for TsmAttestationContext {
-        type NextLayer = Tvm;
+        type NextLayer = TvmAttestationContext;
 
         fn compute_next(&self, measurement: &[u8]) -> Self::NextLayer {
             // Derive TSM CDI from Platform CDI and TSM measurement
             let next_cdi = self.cdi.derive_next(measurement);
 
-            Tvm {
+            TvmAttestationContext {
                 platform_token: self.platform_token.clone(),
                 cdi: next_cdi,
                 tsm_token: self.token.clone(),
@@ -274,13 +289,17 @@ pub mod attestation {
 
     /// TSM layer: holds its CDI, its token (signed by Platform) and the Platform token for evidence composition
     #[derive(Clone)]
-    pub struct Tvm {
+    pub struct TvmAttestationContext {
         cdi: Cdi,
         platform_token: CoseSign1,
         tsm_token: CoseSign1,
     }
 
-    impl Tvm {
+    impl TvmAttestationContext {
+        pub fn cdi(&self) -> &Cdi {
+            &self.cdi
+        }
+
         /// Returns (platform_token, tsm_token, tvm_token) packaged into a `Evidence` representation.
         pub fn get_evidence(&self, _tvm_measurement: &[u8], challenge: &[u8]) -> Evidence {
             // Build TVM token payload: include placeholder claims + the challenge
@@ -293,6 +312,7 @@ pub mod attestation {
             let protected = HeaderBuilder::new()
                 .algorithm(iana::Algorithm::EdDSA)
                 .build();
+
             let tvm_token = CoseSign1Builder::new()
                 .protected(protected)
                 .payload(tvm_payload)

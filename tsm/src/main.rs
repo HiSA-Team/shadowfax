@@ -5,8 +5,9 @@
 
 use core::panic::PanicInfo;
 
+use alloc::boxed::Box;
 use common::{
-    attestation::TsmAttestationContext,
+    attestation::{DiceLayer, TsmAttestationContext},
     sbi::{
         SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
         SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU,
@@ -115,9 +116,8 @@ static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
 #[inline(never)]
 #[link_section = "._secure_init"]
 /// This function will be called by the TSM-driver to initialize securely the TSM after the
-/// signature has bee authenticated. The TSM-driver will provide optionally an identity to prove
-/// its authenticity in a first local attestation scenario.
-fn _secure_init(payload: TsmAttestationContext) {
+/// signature has bee authenticated.
+fn _secure_init(addr: usize) {
     // Initialize heap
     unsafe {
         let heap_start = (&raw const _heap_start as *const u8) as usize;
@@ -125,8 +125,11 @@ fn _secure_init(payload: TsmAttestationContext) {
 
         ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
     }
-
     let mut state = STATE.lock();
+
+    let payload_ptr = addr as *mut TsmAttestationContext;
+    let payload = unsafe { (*payload_ptr).clone() };
+
     *state = Some(TsmState::new(payload));
 
     drop(state);
@@ -180,7 +183,12 @@ fn main(
                 (page_table_address, state_address)
             };
 
-            match state.hypervisor.create_tvm(tvm_params.0, tvm_params.1) {
+            let attestation_context = state.attestation_context.compute_next(&[0; 32]);
+
+            match state
+                .hypervisor
+                .create_tvm(attestation_context, tvm_params.0, tvm_params.1)
+            {
                 Ok(id) => SbiRet {
                     a0: 0,
                     a1: id as isize,
