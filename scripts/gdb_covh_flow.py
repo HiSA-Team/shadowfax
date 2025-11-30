@@ -214,25 +214,19 @@ class TestRunner:
             nop_addr = ecall_addr + 4
 
             inf.write_memory(ecall_addr, ECALL_WORD)
-            # print(f"Wrote ecall at 0x{ecall_addr:x}")
             inf.write_memory(nop_addr, NOP_WORD)
-            # print(f"Wrote nop at 0x{nop_addr:x}")
 
             PreBP(ecall_addr, i, self)
-            # print(f"Installed PreBP (step {i} - {step.name}) at 0x{ecall_addr:x}")
 
             PostBP(nop_addr, i, self)
-            # print(f"Installed PostBP (step {i} - {step.name}) at 0x{nop_addr:x}")
 
         # write an ebreak
         next_addr = self.payload_address + 8 * len(self.steps)
         if install_ebreak:
             ebreak_addr = next_addr
             inf.write_memory(ebreak_addr, EBREAK_WORD)
-            # print(f"Wrote ebreak instruction at 0x{ebreak_addr:x}")
             next_addr += 4
 
         # write infinite loop to ensure the program to hang
         loop_addr = next_addr
         inf.write_memory(loop_addr, JAL_LOOP_WORD)
-        print(f"Wrote loop instruction at 0x{loop_addr:x}")

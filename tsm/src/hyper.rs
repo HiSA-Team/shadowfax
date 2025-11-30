@@ -3,14 +3,12 @@ use common::attestation::TvmAttestationContext;
 use riscv::register::{
     sepc,
     sstatus::{self, FS, SPP},
+    stvec::{self, Stvec},
 };
 use sha2::{Digest, Sha384};
 
 use crate::h_extension::{
-    csrs::{
-        hedeleg::{self, ExceptionKind},
-        hgatp, hideleg, hstatus, hvip, vsatp, VsInterruptKind,
-    },
+    csrs::{hgatp, hstatus, vsatp},
     instruction::hfence_gvma_all,
 };
 
@@ -61,8 +59,8 @@ fn ppn_to_pa(ppn: u64) -> usize {
 ///
 /// Note: This assumes all mappings use VPN[2]=0 (addresses < 1GB)
 fn map_4k_leaf(root_pt: usize, gpa: usize, pa: usize, perms: u64) {
-    assert_eq!(gpa % PAGE_SIZE, 0, "GPA must be page-aligned");
-    assert_eq!(pa % PAGE_SIZE, 0, "PA must be page-aligned");
+    // assert_eq!(gpa % PAGE_SIZE, 0, "GPA must be page-aligned");
+    // assert_eq!(pa % PAGE_SIZE, 0, "PA must be page-aligned");
 
     let [vpn2, vpn1, vpn0] = make_vpn_sv39(gpa);
 
@@ -120,6 +118,7 @@ fn map_4k_leaf(root_pt: usize, gpa: usize, pa: usize, perms: u64) {
 /// Map a contiguous region of memory (multiple 4KB pages).
 fn map_region(root_pt: usize, gpa_base: usize, pa_base: usize, num_pages: usize, perms: u64) {
     for i in 0..num_pages {
+        // TODO align GPA to PAGE
         let gpa = gpa_base + i * PAGE_SIZE;
         let pa = pa_base + i * PAGE_SIZE;
         map_4k_leaf(root_pt, gpa, pa, perms);
@@ -148,6 +147,7 @@ impl HypervisorState {
             confidential_memory: Vec::new(),
         }
     }
+    // TODO: Zero out the confidential pages
     pub fn add_confidential_pages(
         &mut self,
         base_page_addr: usize,
@@ -383,6 +383,78 @@ impl HypervisorState {
         Ok(())
     }
 
+    pub fn add_tvm_zero_pages(
+        &mut self,
+        tvm_id: usize,
+        base_page_address: usize,
+        tsm_page_type: usize,
+        num_pages: usize,
+        tvm_base_page_address: usize,
+    ) -> anyhow::Result<()> {
+        if self.tvm.is_none() {
+            anyhow::bail!("no tvm present");
+        }
+        let tvm = self.tvm.as_mut().unwrap();
+        if tvm.id != tvm_id {
+            anyhow::bail!("tvm id mismatch");
+        }
+
+        assert_eq!(tsm_page_type, 0, "accepting 4k pages for now");
+        if (base_page_address % PAGE_SIZE) != 0 || (tvm_base_page_address % PAGE_SIZE) != 0 {
+            anyhow::bail!("all addresses must be page-aligned");
+        }
+        let mut in_confidential = false;
+
+        let dest_end = base_page_address + num_pages * PAGE_SIZE;
+        for (base, npages, owner) in self.confidential_memory.iter() {
+            let conf_start = *base;
+            let conf_end = base + npages * PAGE_SIZE;
+
+            if base_page_address >= conf_start && dest_end <= conf_end {
+                // Check if already owned by this TVM
+                if owner.is_some() && *owner != Some(tvm_id) {
+                    anyhow::bail!("confidential memory already owned by another TVM");
+                }
+                in_confidential = true;
+                break;
+            }
+        }
+        if !in_confidential {
+            anyhow::bail!("dest_addr not in confidential memory");
+        }
+
+        // Verify the GPA range falls within a defined memory region
+        let gpa_end = tvm_base_page_address + num_pages * PAGE_SIZE;
+        let mut found_region = false;
+
+        for r in tvm.memory_regions.iter() {
+            let r_start = r.guest_gpa_base;
+            let r_end = r.guest_gpa_base + r.num_pages * PAGE_SIZE;
+
+            if tvm_base_page_address >= r_start && gpa_end <= r_end {
+                found_region = true;
+                break;
+            }
+        }
+
+        if !found_region {
+            anyhow::bail!(
+                "GPA range 0x{:x}-0x{:x} not within any memory region",
+                tvm_base_page_address,
+                gpa_end
+            );
+        }
+
+        map_region(
+            tvm.page_table_addr,
+            tvm_base_page_address,
+            base_page_address,
+            num_pages,
+            PTE_R | PTE_W | PTE_X | PTE_U,
+        );
+        Ok(())
+    }
+
     pub fn create_tvm_vcpu(
         &mut self,
         tvm_id: usize,
@@ -559,6 +631,9 @@ impl TvmVcpuState {
         sstatus::set_sie(); // Enable interrupts
         sstatus::set_fs(FS::Initial); // Enable FP state
 
+        // Hypervisor trap handler
+        stvec::write(Stvec::from_bits(hyper_trap as *const fn() as usize));
+
         // Enable virtualization (SPV=1 means we enter VS-mode on sret)
         hstatus::set_spv();
 
@@ -575,4 +650,11 @@ impl TvmVcpuState {
             options(readonly, noreturn, nostack)
         )
     }
+}
+
+#[no_mangle]
+#[rustc_align(4)]
+// #[unsafe(naked)]
+unsafe extern "C" fn hyper_trap() -> ! {
+    loop {}
 }

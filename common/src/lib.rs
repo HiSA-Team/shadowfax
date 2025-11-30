@@ -13,6 +13,7 @@ pub mod sbi {
     pub const SBI_COVH_DESTROY_TVM: usize = 8;
     pub const SBI_COVH_ADD_TVM_MEMORY_REGION: usize = 9;
     pub const SBI_COVH_ADD_TVM_MEASURED_PAGES: usize = 11;
+    pub const SBI_COVH_ADD_ZERO_PAGES: usize = 12;
     pub const SBI_COVH_CREATE_TVM_VCPU: usize = 14;
     pub const SBI_COVH_RUN_TVM_VCPU: usize = 15;
 
