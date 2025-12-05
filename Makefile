@@ -9,6 +9,7 @@
 #
 # Usage:
 #   make help # discover available targets
+#   make qemu-run # runs the system on qemu (DEBUG=1 to start gdb server and wait)
 #
 # Author: <capassog97@gmail.com>
 
@@ -21,6 +22,11 @@ OPENSBI_VERSION            := $(shell git -C shadowfax/opensbi describe)
 TARGET_TRIPLET             ?= riscv64imac-unknown-none-elf
 PROFILE                    ?= debug
 RUSTFLAGS                  := -C target-feature=+h
+QEMU                       := qemu-system-riscv64
+QEMU_FLAGS                 := -M virt -m 64M -smp 1 -nographic -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait
+ifeq ($(DEBUG), 1)
+QEMU_FLAGS                 +=  -s -S
+endif
 
 # Platform Params
 PLATFORM                   ?= generic
@@ -116,6 +122,11 @@ generate-keys:
 	openssl genpkey -algorithm ed25519 -out $(PRIVATE_KEY)
 	openssl pkey -in $(PRIVATE_KEY) -pubout -out $(PUBLIC_KEY)
 	$(PYTHON) scripts/dice_tool.py generate-uds-keys $(DICE_PLATFORM_PRIVATE_KEY) $(DICE_PLATFORM_PUBLIC_KEY)
+
+## qemu-run: runs the script on qemu
+qemu-run: firmware
+	$(QEMU) $(QEMU_FLAGS) -dtb $(BIN_DIR)/device-tree.dtb -bios $(FW_ELF) \
+		-device loader,file=$(DICE_INPUT),addr=0x82000000,force-raw=on
 
 ## debug: attach to a gdb server and load $(GDB_COVE_SCRIPT)
 debug:

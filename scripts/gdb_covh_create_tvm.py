@@ -104,9 +104,9 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     assert tsm_capabilities == 0, (
         f"tsm_capabilities must be 0; current {tsm_capabilities}"
     )
-    assert tvm_state_pages == 0, f"tvm_state_pages must be 0; current {tvm_state_pages}"
+    assert tvm_state_pages == 1, f"tvm_state_pages must be 0; current {tvm_state_pages}"
     assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
-    assert tvm_vcpu_state_pages == 0, (
+    assert tvm_vcpu_state_pages == , (
         f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
     )
 

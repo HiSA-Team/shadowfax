@@ -10,9 +10,6 @@ target remote localhost:1234
 add-symbol-file target/riscv64imac-unknown-none-elf/debug/shadowfax
 add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm 0x82000000
 
-# Load the DICE Payload
-restore bin/shadowfax.dice.bin binary 0x82000000
-
 break tsm::main
 
 define qemu-reset
