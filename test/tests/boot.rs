@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 fn spawn_qemu_and_stream(
     firmware: &Path,
     dtb: &Path,
+    dice: &Path,
 ) -> (Child, Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>) {
     let mut child = Command::new("qemu-system-riscv64")
         .args(&[
@@ -16,8 +17,12 @@ fn spawn_qemu_and_stream(
             "-m",
             "64M",
             "-nographic",
+            "-smp",
+            "1",
             "-bios",
             firmware.to_str().unwrap(),
+            "-device",
+            format!("loader,file={},addr=0x82000000", dice.display()).as_str(),
             "-dtb",
             dtb.to_str().unwrap(),
         ])
@@ -61,6 +66,7 @@ fn spawn_qemu_and_stream(
 fn firmware_boots_correctly() {
     let firmware = PathBuf::from("../target/riscv64imac-unknown-none-elf/debug/shadowfax");
     let dtb = PathBuf::from("../bin/device-tree.dtb");
+    let dice = PathBuf::from("../bin/shadowfax.dice.bin");
 
     assert!(
         firmware.exists(),
@@ -72,8 +78,13 @@ fn firmware_boots_correctly() {
         "dtb {} does not exist. Build it first.",
         dtb.display()
     );
+    assert!(
+        dice.exists(),
+        "dice payload {} does not exist. Build it first.",
+        dice.display()
+    );
 
-    let (mut child, out_lines, err_lines) = spawn_qemu_and_stream(&firmware, &dtb);
+    let (mut child, out_lines, err_lines) = spawn_qemu_and_stream(&firmware, &dtb, &dice);
 
     let timeout = Duration::from_secs(60);
     let deadline = Instant::now() + timeout;
