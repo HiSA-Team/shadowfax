@@ -5,7 +5,6 @@
 
 use core::panic::PanicInfo;
 
-use alloc::boxed::Box;
 use common::{
     attestation::{DiceLayer, TsmAttestationContext},
     sbi::{
@@ -35,7 +34,7 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
 unsafe extern "C" {
     /// boot stack top (defined in `memory.x`)
-    static _stack_top: u8;
+    pub static mut _stack_top: u8;
 
     // Heap
     static mut _heap_start: u8;
@@ -52,8 +51,8 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
-// Give each hart 8K stack
-const STACK_SIZE_PER_HART: usize = 1024 * 8;
+// Give each hart 32K stack
+const STACK_SIZE_PER_HART: usize = 1024 * 32;
 
 #[no_mangle]
 #[unsafe(naked)]
@@ -99,9 +98,9 @@ impl TsmState {
                 tsm_version: TSM_VERSION,
                 _padding: 0,
                 tsm_capabilities: 0,
-                tvm_state_pages: 0,
+                tvm_state_pages: 1,
                 tvm_max_vcpus: 1,
-                tvm_vcpu_state_pages: 0,
+                tvm_vcpu_state_pages: 1,
             },
             hypervisor: HypervisorState::new(),
             attestation_context,
@@ -147,9 +146,34 @@ fn main(
     a7: usize,
 ) -> ! {
     // The TSM should be called only for CoVH.
-    // TODO: the TSM will be invoked also for the CoVG SBI
     assert_eq!(a7, SBI_COVH_EXT_ID);
 
+    let ret = handle_covh(a0, a1, a2, a3, a4, a5, a6);
+
+    // Issue the TEERET
+    unsafe {
+        core::arch::asm!(
+            "
+            ecall
+            ",
+            in("a0") ret.a0,
+            in("a1") ret.a1,
+            in("a6") a6,
+            in("a7") SBI_COVH_EXT_ID,
+            options(noreturn)
+        );
+    };
+}
+
+fn handle_covh(
+    a0: usize,
+    a1: usize,
+    a2: usize,
+    a3: usize,
+    a4: usize,
+    a5: usize,
+    a6: usize,
+) -> SbiRet {
     let mut lock = STATE.lock();
     let state = lock.as_mut().unwrap();
 
@@ -158,7 +182,7 @@ fn main(
     // bits[15:0]: function ID
     let fid = a6 & 0xFFFF;
 
-    let ret = match fid {
+    match fid {
         SBI_COVH_GET_TSM_INFO => {
             assert!(a1 >= core::mem::size_of::<TsmInfo>());
             unsafe {
@@ -239,22 +263,5 @@ fn main(
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
         _ => SbiRet { a0: -1, a1: 0 },
-    };
-
-    // Needed because this function does not end gracefully, but with an ECALL
-    drop(lock);
-
-    // Issue the TEERET
-    unsafe {
-        core::arch::asm!(
-            "
-            ecall
-            ",
-            in("a0") ret.a0,
-            in("a1") ret.a1,
-            in("a6") a6,
-            in("a7") SBI_COVH_EXT_ID,
-            options(noreturn)
-        );
-    };
+    }
 }

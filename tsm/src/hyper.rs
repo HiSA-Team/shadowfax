@@ -7,9 +7,12 @@ use riscv::register::{
 };
 use sha2::{Digest, Sha384};
 
-use crate::h_extension::{
-    csrs::{hgatp, hstatus, vsatp},
-    instruction::hfence_gvma_all,
+use crate::{
+    h_extension::{
+        csrs::{hgatp, hstatus, vsatp},
+        instruction::hfence_gvma_all,
+    },
+    STACK_SIZE_PER_HART,
 };
 
 const PAGE_SIZE: usize = 4096;
@@ -588,7 +591,7 @@ impl Tvm {
 }
 
 #[derive(Clone)]
-pub enum TvmState {
+enum TvmState {
     TvmInitializing = 0,
     TvmRunnable = 1,
 }

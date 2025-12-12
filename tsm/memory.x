@@ -7,8 +7,7 @@ REGION_ALIAS("REGION_TEXT", RAM);
 REGION_ALIAS("REGION_DATA", RAM);
 REGION_ALIAS("REGION_BSS", RAM);
 
-_heap_size          = 0x1000;  /* 4k */
-_stack_size         = 0x2000;   /* 8k */
+_heap_size          = 0x1000;   /* 4k  */
 
 _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 
