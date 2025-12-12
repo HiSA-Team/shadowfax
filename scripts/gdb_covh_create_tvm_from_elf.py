@@ -52,6 +52,7 @@ DEFAULT_PAGE_SIZE: int = 4096 # 4k
 PAGE_DIRECTORY_SIZE: int = 0x4000  # 16kib
 NUM_PAGES_TO_DONATE: int = 1024
 TVM_RAM_SIZE: int = 0x4000 # 16k Guest RAM
+TVM_VCPU_STATE_SIZE: int = 0x1000 #4k
 
 TVM_ID: int = 1
 VCPU_ID: int = 0
@@ -62,7 +63,8 @@ untrusted_ram_start: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
 untrusted_ram_scratch: int = untrusted_ram_start + 0x1000
 untrusted_tvm_source_code: int = untrusted_ram_start + 0x2000
 confidential_ram_start: int = untrusted_ram_start + 0x4000
-trusted_tvm_ram_start: int = confidential_ram_start + PAGE_DIRECTORY_SIZE
+trusted_tvm_state_start: int = confidential_ram_start + PAGE_DIRECTORY_SIZE
+trusted_tvm_ram_start: int = confidential_ram_start + PAGE_DIRECTORY_SIZE + TVM_VCPU_STATE_SIZE
 
 # Asserts to check memory size
 assert os.path.getsize(TVM_BIN_PATH) < TVM_RAM_SIZE, "insufficient Guest RAM (make sure guest ram < 1Mb)"
@@ -124,9 +126,9 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     assert tsm_capabilities == 0, (
         f"tsm_capabilities must be 0; current {tsm_capabilities}"
     )
-    assert tvm_state_pages == 0, f"tvm_state_pages must be 0; current {tvm_state_pages}"
+    assert tvm_state_pages == 1, f"tvm_state_pages must be 0; current {tvm_state_pages}"
     assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
-    assert tvm_vcpu_state_pages == 0, (
+    assert tvm_vcpu_state_pages == 1, (
         f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
     )
 

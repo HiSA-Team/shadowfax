@@ -11,7 +11,7 @@ NOP_WORD = struct.pack("<I", 0x00000013)  # addi x0,x0,0 -> nop
 JAL_LOOP_WORD = struct.pack("<I", 0x0000006F)  # jal x0, 0  -> tight infinite loop
 
 
-# --- helper snapshot helpers -------------------------------------------------
+# --------------------------- helper snapshot helpers ----------------------------------------------
 def read_reg(name: str) -> int:
     """Return integer value of a register (e.g. 'a0', 'pc')."""
     return int(gdb.parse_and_eval(f"${name}"))
