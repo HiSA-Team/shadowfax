@@ -93,7 +93,7 @@ impl State {
 ///     - Root domain: mandatory by the Supervisor Domain specification, but should never be used.
 /// TODO: parse domains dynamically from the device tree
 /// Assumption: the domain id matches with its position in the domain array
-pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
+pub fn init(_fdt_addr: usize) -> Result<usize, anyhow::Error> {
     // First, get the security context
     let attestation_context = PlatformAttestationContext::init_from_addr(DICE_INPUT_ADDR);
     // Verify the signature
@@ -133,5 +133,5 @@ pub fn init(_fdt_addr: usize) -> Result<(), anyhow::Error> {
     };
     state.domains.push(untrusted_domain);
 
-    Ok(())
+    Ok(UNTRUSTED_DOMAIN_REGIONS[0].base_addr)
 }

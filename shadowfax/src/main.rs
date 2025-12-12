@@ -253,18 +253,11 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
-    // prepare the next stage. If SHADOWFAX_JUMP_ADDRESS is specified, jump to that address (the
-    // user will load that payload). Otherwise fallback to empty payload which does nothing
-    let next_stage_address = {
-        let address = env!("BOOT_DOMAIN_ADDRESS").strip_prefix("0x").unwrap();
-        usize::from_str_radix(address, 16)
-            .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
-    };
 
-    dump_linker_symbols(next_stage_address);
+    dump_linker_symbols();
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
-    state::init(fdt_addr).unwrap();
+    let next_stage_address = state::init(fdt_addr).unwrap();
 
     /*
      * This code initializes the scratch space, which is a per-HART data structure
@@ -448,7 +441,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 }
 
 // a small helper to print an address using the print_raw! macro
-fn dump_linker_symbols(next_stage_address: usize) {
+fn dump_linker_symbols() {
     // print header
     print_raw!("\nSHADOWFAX Firmware v0.1\n");
     print_raw!("========================\n");
@@ -476,8 +469,6 @@ fn dump_linker_symbols(next_stage_address: usize) {
             "TEE Stack Top     : {:#018x}\n",
             &_tee_stack_top as *const u8 as usize
         );
-
-        print_raw!("Root Domain Address    : {:#018x}\n", next_stage_address);
     }
 
     // hart and ISA info
@@ -485,11 +476,13 @@ fn dump_linker_symbols(next_stage_address: usize) {
     print_raw!("Boot HART ID      : {}\n", hart_id);
 
     let misa = misa::read();
+
     let xlen = match misa.mxl() {
         misa::XLEN::XLEN32 => 32,
         misa::XLEN::XLEN64 => 64,
         misa::XLEN::XLEN128 => 128,
     };
+
     // TODO build feature string
     print_raw!("Boot HART ISA     : rv{}\n", xlen);
     print_raw!("========================\n\n");

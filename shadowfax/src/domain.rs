@@ -3,12 +3,7 @@ use common::attestation::TsmAttestationContext;
 use ed25519_compact::Signature;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
-use crate::{
-    constants::memory_layout::{ROOT_DOMAIN_REGIONS, TRUSTED_DOMAIN_REGIONS},
-    context::Context,
-    cove::program_pmp_from_regions,
-    error::TsmError,
-};
+use crate::{constants::memory_layout::TRUSTED_DOMAIN_REGIONS, context::Context, error::TsmError};
 
 mod tsm {
     #[link_section = ".rodata"]
