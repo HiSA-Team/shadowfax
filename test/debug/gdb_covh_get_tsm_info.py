@@ -2,12 +2,13 @@ import os
 import struct
 import sys
 from typing import Dict, Optional
+from pathlib import Path
 
-this_dir = os.path.dirname(__file__) or os.getcwd()
-if this_dir not in sys.path:
-    sys.path.insert(0, this_dir)
+dirpath = os.path.join(os.getcwd(), "test")
+if dirpath not in sys.path:
+    sys.path.insert(0, dirpath)
 
-from gdb_covh_flow import Step, TestRunner, read_mem
+from riscv_tee import Step, Runner, Domain, read_mem
 
 EID_SUPD_ID: int = 0x53555044
 EID_COVH_ID: int = 0x434F5648
@@ -15,8 +16,6 @@ EID_COVH_ID: int = 0x434F5648
 SUPD_GET_ACTIVE_DOMAINS: int = 0
 
 COVH_GET_TSM_INFO: int = 0
-
-payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
 
 
 def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
@@ -77,15 +76,23 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     assert tvm_state_pages == 1, f"tvm_state_pages must be 0; current {tvm_state_pages}"
     assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
     assert tvm_vcpu_state_pages == 1, (
-        f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
+        f"tvm_vcpu_state_pages must be 1; current {tvm_vcpu_state_pages}"
     )
 
 
 def run() -> None:
     print("=== GDB Get TSM Info Program ===")
-    print(f"S-Mode address 0x{payload_address:x}")
 
-    runner = TestRunner(payload_address)
+    domain_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
+    print(f"Test domain address 0x{domain_address:x}")
+
+    domain = Domain(
+            name="testdomain",
+            instr_base=domain_address,
+            data_base=domain_address + 0x1000
+    )
+
+    runner = Runner(commit_on_add=True)
 
     runner.add_step(
         Step(
@@ -102,14 +109,15 @@ def run() -> None:
             },
             setup_mem_fn=None,
             assert_fn=assert_get_active_domains,
-        )
+        ),
+        domain
     )
 
     runner.add_step(
         Step(
             name="get_tsm_info",
             regs={
-                "a0": payload_address + 0x1000,
+                "a0": domain.data_base,
                 "a1": 48,
                 "a2": 0,
                 "a3": 0,
@@ -120,11 +128,15 @@ def run() -> None:
             },
             setup_mem_fn=None,
             assert_fn=assert_get_tsm_info,
-        )
+        ),
+        domain
     )
 
     runner.install_breakpoints()
-    print("=== Test harness ready; continue from gdb to run ===")
+    runner.debug_print()
+    domain.debug_print()
+
+    print("=== Payload and breakpoints installed; continue in GDB ===")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@
 # Author: <capassog97@gmail.com>
 
 # Toolchain/Platform
-PYTHON                     := uv run --python 3.10
+PYTHON                     := python
 HOST_TRIPLET               := $(shell rustc -vV | grep '^host:' | awk '{print $$2}')
 HOST_ARCHITECTURE          := $(shell uname -m)
 HOST_LIBC                  := $(shell if ldd --version 2>&1 | grep -q musl; then echo musl; else echo gnu; fi)
@@ -41,6 +41,7 @@ MAKEFILE_SOURCE_DIR        := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 BIN_DIR                     = bin
 TARGET_DIR                  = target/$(TARGET_TRIPLET)/$(PROFILE)
 KEYS_DIR                    = shadowfax/keys
+TEST_DIR                    = test/functional/
 
 FW_ELF                      = $(TARGET_DIR)/shadowfax
 FW_BIN                      = $(BIN_DIR)/shadowfax.bin
@@ -56,8 +57,8 @@ DICE_PLATFORM_PRIVATE_KEY   = $(KEYS_DIR)/root_of_trust_priv.bin
 
 # Debug variables for QEMU
 GDB                         = $(RV_PREFIX)gdb
-GDB_SETTINGS_SCRIPT         := $(MAKEFILE_SOURCE_DIR)scripts/gdb_settings
-GDB_COVE_SCRIPT             ?= $(MAKEFILE_SOURCE_DIR)scripts/gdb_covh_get_tsm_info.py
+GDB_SETTINGS_SCRIPT         := test/debug/gdbinit
+GDB_COVE_SCRIPT             ?= test/debug/gdb_covh_get_tsm_info.py
 
 # Needed for OpenSBI
 export RV_PREFIX
@@ -114,7 +115,7 @@ $(TSM_ELF):
 
 ## test: build and run the tests
 test: firmware
-	cargo test --manifest-path test/Cargo.toml --target $(HOST_TRIPLET)
+	cargo test --manifest-path $(TEST_DIR)/Cargo.toml --target $(HOST_TRIPLET)
 
 ## generate-keys: generate ed25519 signing keys and DICE initial keys in shadowfax/keys/
 generate-keys:

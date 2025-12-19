@@ -1,8 +1,27 @@
+# This program simulates a Trusted Virtual Machine (TVM) using an ELF image.
+# Memory is divided between an Untrusted OS (emulated by this script) and the Trusted OS.
+#
+# Memory Layout:
+# Untrusted OS:
+#   - Total memory: 4 KB for code, 4 KB scratch space, 4KB for the program.
+#   - Code section (4 KB) at UNTRUSTED_RAM_BASE contains ECALL and NOP instructions.
+#   - Scratch memory (4 KB) for temporary computations which is at UNTRUSTED_RAM_BASE + 0x1000
+#   - Program (ELF) is loaded at UNTRUSTED_RAM_BASE + 0x2000.
+#
+# Trusted OS (TVM):
+#   - Receives 1024 pages (4 KB each) donated by the Untrusted OS, totaling 4 MB.
+#   - First 16 KB of Trusted memory reserved for page tables.
+#   - 4 KB reserved for the guest image.
+#   - Trusted memory starts at UNTRUSTED_RAM_BASE + 0x4000.
+#
+# Author: Giuseppe Capasso <capassog97@gmail.com>
 import os
 import struct
 import sys
 import gdb
 from typing import Dict, Optional
+
+from elftools.elf.elffile import ELFFile
 
 this_dir = os.path.dirname(__file__) or os.getcwd()
 if this_dir not in sys.path:
@@ -10,8 +29,7 @@ if this_dir not in sys.path:
 
 from gdb_covh_flow import Step, TestRunner, read_mem, read_reg
 
-
-# ================ CoVE Constants ======================= #
+# ================ CoVE Constants ========================#
 EID_SUPD_ID: int = 0x53555044
 EID_COVH_ID: int = 0x434F5648
 
@@ -23,29 +41,33 @@ COVH_FINALIZE_TVM: int = 6
 COVH_DESTROY_TVM: int = 8
 COVH_ADD_MEMORY_REGION: int = 9
 COVH_ADD_TVM_MEASURED_PAGES: int = 11
+COVH_ADD_TVM_ZERO_PAGES: int = 12
 COVH_CREATE_TVM_VCPU: int = 14
 COVH_RUN_TVM_VCPU: int = 15
 
 # ================ Create TVM Input ======================= #
+TVM_ELF_PATH: str = "a.out"
+TVM_BIN_PATH: str = "a.bin"
+DEFAULT_PAGE_SIZE: int = 4096 # 4k
 PAGE_DIRECTORY_SIZE: int = 0x4000  # 16kib
-GPA_BASE: int = 0x1000
-NUM_PAGES_TO_DONATE: int = 16
-JAL_LOOP_WORD = struct.pack("<I", 0x0000006F)  # jal x0, 0  -> tight infinite loop
+NUM_PAGES_TO_DONATE: int = 1024
+TVM_RAM_SIZE: int = 0x4000 # 16k Guest RAM
+TVM_VCPU_STATE_SIZE: int = 0x1000 #4k
 
 TVM_ID: int = 1
 VCPU_ID: int = 0
+PAGE_SIZE: int = 0x1000  # 4k
 PAGE_SIZE_TO_ID = {0x1000: 0}
-PAGE_SIZE: int = 0x1000  # 4096byte 4k
 
-payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
-confidential_memory_start_addr: int = payload_address + 0x4000
-tvm_source_code_addr: int = payload_address + 0x2000
-tvm_page_start_addr: int = confidential_memory_start_addr + PAGE_DIRECTORY_SIZE + 0x1000
+untrusted_ram_start: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
+untrusted_ram_scratch: int = untrusted_ram_start + 0x1000
+untrusted_tvm_source_code: int = untrusted_ram_start + 0x2000
+confidential_ram_start: int = untrusted_ram_start + 0x4000
+trusted_tvm_state_start: int = confidential_ram_start + PAGE_DIRECTORY_SIZE
+trusted_tvm_ram_start: int = confidential_ram_start + PAGE_DIRECTORY_SIZE + TVM_VCPU_STATE_SIZE
 
-confidential_memory_size: int = tvm_page_start_addr - confidential_memory_start_addr
-assert confidential_memory_size <= NUM_PAGES_TO_DONATE * 0x1000, (
-    f"Insufficient memory region size: donated {NUM_PAGES_TO_DONATE * 0x1000} < needed {confidential_memory_size}"
-)
+# Asserts to check memory size
+assert os.path.getsize(TVM_BIN_PATH) < TVM_RAM_SIZE, "insufficient Guest RAM (make sure guest ram < 1Mb)"
 
 
 def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
@@ -106,8 +128,8 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     )
     assert tvm_state_pages == 1, f"tvm_state_pages must be 0; current {tvm_state_pages}"
     assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
-    assert tvm_vcpu_state_pages == , (
-        f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
+    assert tvm_vcpu_state_pages == 1, (
+        f"tvm_vcpu_state_pages must be 1; current {tvm_vcpu_state_pages}"
     )
 
 
@@ -121,8 +143,8 @@ def setup_create_tvm() -> None:
     # ecall parameter where to store the address
     tvm_params_addr = read_reg("a0")
 
-    tvm_directory_addr = confidential_memory_start_addr
-    tvm_state_addr = confidential_memory_start_addr + PAGE_DIRECTORY_SIZE
+    tvm_directory_addr = confidential_ram_start
+    tvm_state_addr = confidential_ram_start + PAGE_DIRECTORY_SIZE
 
     print(f"tvm_params is at 0x{tvm_params_addr:x}")
     print(f"tvm_page_directory_addr (0x{tvm_params_addr:x}): 0x{tvm_directory_addr:x}")
@@ -141,9 +163,7 @@ def setup_create_tvm() -> None:
 def assert_create_tvm(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
-    a1 = regs["a1"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-    assert a1 == TVM_ID, f"expected tvm_id={TVM_ID}in a1({a1})"
 
     # assert that the pagetable is zero
     params_addr = prev["regs"]["a0"]
@@ -164,31 +184,6 @@ def assert_create_tvm(prev: Optional[Dict], curr: Dict) -> None:
         "page table must be zero after TVM creation"
     )
 
-
-def assert_add_tvm_memory_region(prev: Optional[Dict], curr: Dict) -> None:
-    regs = curr["regs"]
-    a0 = regs["a0"]
-    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-
-
-def setup_add_tvm_measured_pages() -> None:
-    tvm_source_code_addr = read_reg("a1")
-
-    inf = gdb.selected_inferior()
-    inf.write_memory(tvm_source_code_addr, JAL_LOOP_WORD)
-
-
-# TODO: assert the pagetable mapping
-def assert_add_tvm_measured_pages(prev: Optional[Dict], curr: Dict) -> None:
-    regs = curr["regs"]
-    a0 = regs["a0"]
-    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-
-
-def setup_create_tvm_vcpu() -> None:
-    pass
-
-
 def assert_create_tvm_vcpu(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
@@ -201,12 +196,139 @@ def assert_finalize_tvm(prev: Optional[Dict], curr: Dict)-> None:
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
 
 
+def assert_add_tvm_memory_region(prev: Optional[Dict], curr: Dict) -> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
+
+def assert_add_tvm_measured_pages(prev: Optional[Dict], curr: Dict) -> None:
+    regs = curr["regs"]
+    a0 = regs["a0"]
+    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
+
+def align_up(addr: int, align: int) -> int:
+    return (addr + align - 1) & ~(align - 1)
+
+
+def align_down(addr: int, align: int) -> int:
+    return (addr) & ~(align - 1)
+
+
+def load_guest_elf_and_make_steps(
+    path: str, untrusted_base_addr: int, trusted_physical_addr: int
+) -> (int, list):
+    """
+    Load ELF segments into memory via GDB and creates step to map into confidential domain
+
+    Args:
+        path: Path to ELF file
+        base_addr: Base address where to load (like src in your code)
+
+    Returns:
+        Entry point address and list of steps
+    """
+    inf = gdb.selected_inferior()
+    steps = []
+    with open(path, "rb") as f:
+        elf = ELFFile(f)
+        entry = elf.header["e_entry"]
+
+        assert elf.header["e_machine"] == "EM_RISCV", "Not a RISCV ELF"
+        print(f"Guest ELF Machine: {elf.header['e_machine']}")
+        print(f"Guest Entry point (GPA): 0x{entry:X}")
+
+        segments_info = []
+        steps = []
+
+        # Copy the ELF segments into Untrusted Memory
+        for i, seg in enumerate(elf.iter_segments()):
+            if seg.header.p_type != "PT_LOAD":
+                continue
+
+            gpa_addr = seg.header.p_paddr
+            filesz = seg.header.p_filesz
+            memsz = seg.header.p_memsz
+            # Get the raw segment data
+            seg_data = seg.data()
+
+            # page-align the guest GPA for this segment
+            guest_page = align_down(gpa_addr, PAGE_SIZE)
+            page_offset = gpa_addr - guest_page
+
+            # number of pages that cover this segment (including offset)
+            num_pages = (page_offset + memsz + PAGE_SIZE - 1) // PAGE_SIZE
+
+            # actual load base in untrusted memory must be page-aligned
+            page_aligned_load_addr = untrusted_base_addr + guest_page
+
+            # make sure the untrusted memory contains the full pages:
+            #  - write the segment file bytes at page_aligned_load_addr + page_offset
+            #  - zero out the rest of the covered pages
+            total_bytes = num_pages * PAGE_SIZE
+            # zero whole area first (simple, safe); then overwrite file bytes above
+            zeros = bytes(total_bytes)
+            inf.write_memory(page_aligned_load_addr, zeros)
+            if filesz > 0:
+                inf.write_memory(page_aligned_load_addr + page_offset, seg_data[:filesz])
+
+            segments_info.append({
+                "gpa_addr": gpa_addr,
+                "guest_page": guest_page,
+                "page_offset": page_offset,
+                "load_page_addr": page_aligned_load_addr,
+                "memsz": memsz,
+                "filesz": filesz,
+                "num_pages": num_pages,
+                "index": i
+            })
+
+        # Step 2: Add measured pages for each segment
+        current_trusted_offset = 0
+
+        for s in segments_info:
+            load_page_addr = s["load_page_addr"]
+            guest_page = s["guest_page"]
+            num_pages = s["num_pages"]
+
+            # Trusted physical address for this segment
+            trusted_addr = trusted_physical_addr + current_trusted_offset
+
+            print(f"Segment {i}: filesz={filesz}, memsz={memsz}")
+            print(f"  Source (untrusted): 0x{load_page_addr:x}")
+            print(f"  Dest (trusted): 0x{trusted_addr:x}")
+            print(f"  GPA: 0x{guest_page:x}")
+            print(f"  Pages: {num_pages}")
+
+            steps.append(
+                Step(
+                    name=f"add_tvm_measured_pages_{i}",
+                    regs={
+                        "a0": TVM_ID,
+                        "a1": load_page_addr,  # Source: untrusted memory
+                        "a2": trusted_addr,  # Dest: confidential memory
+                        "a3": PAGE_SIZE_TO_ID[PAGE_SIZE],
+                        "a4": num_pages,
+                        "a5": guest_page,  # GPA to map at
+                        "a6": (1 << 26) | (COVH_ADD_TVM_MEASURED_PAGES & 0xFFFF),
+                        "a7": EID_COVH_ID,
+                    },
+                    assert_fn=assert_add_tvm_measured_pages
+                )
+            )
+
+            # Advance trusted memory pointer
+            current_trusted_offset += num_pages * PAGE_SIZE
+
+        return entry, steps, current_trusted_offset
+
 
 def run() -> None:
-    print("=== GDB Create TVM Program ===")
-    print(f"S-Mode address 0x{payload_address:x}")
+    print("=== GDB Create TVM Program (from ELF) ===")
+    print(f"S-Mode address 0x{untrusted_ram_start:x}")
 
-    runner = TestRunner(payload_address)
+    runner = TestRunner(untrusted_ram_start)
 
     # Enumerate supervsisor domain: our untruste domain should discover the trusted domain
     # which contains a TSM with id 1
@@ -233,7 +355,7 @@ def run() -> None:
         Step(
             name="get_tsm_info",
             regs={
-                "a0": payload_address + 0x1000,
+                "a0": untrusted_ram_scratch,
                 "a1": 48,
                 "a2": 0,
                 "a3": 0,
@@ -253,7 +375,7 @@ def run() -> None:
         Step(
             name="convert_pages",
             regs={
-                "a0": confidential_memory_start_addr,
+                "a0": confidential_ram_start,
                 "a1": NUM_PAGES_TO_DONATE,
                 "a2": 0,
                 "a3": 0,
@@ -273,7 +395,7 @@ def run() -> None:
         Step(
             name="create_tvm",
             regs={
-                "a0": payload_address + 0x1000,
+                "a0": untrusted_ram_scratch,
                 "a1": 16,
                 "a2": 0,
                 "a3": 0,
@@ -287,48 +409,44 @@ def run() -> None:
         )
     )
 
-    # Create a memory region. This region will be used to host the TVM code/data. The memory region
-    # will be assigned to the TVM for the base GPA mapping
     runner.add_step(
         Step(
-            name="add_tvm_memory_region",
+            name="create_tvm_region",
             regs={
-                "a0": 1,
-                # Guest Physical Address (GPA)
-                "a1": GPA_BASE,
-                "a2": PAGE_SIZE,
+                "a0": TVM_ID,
+                "a1": 0x0,  # Start of region (page-aligned)
+                "a2": TVM_RAM_SIZE,  # Total size
                 "a3": 0,
                 "a4": 0,
                 "a5": 0,
                 "a6": (1 << 26) | (COVH_ADD_MEMORY_REGION & 0xFFFF),
                 "a7": EID_COVH_ID,
             },
-            setup_mem_fn=None,
-            assert_fn=assert_add_tvm_memory_region,
-        )
+            assert_fn=assert_add_tvm_memory_region
+        ),
     )
 
-    # Copy TVM code/data in the trusted domain. The TSM will map these pages into the TVM GPT
-    # and measure them
+    guest_entry, steps, tvm_ram_off = load_guest_elf_and_make_steps(
+        TVM_ELF_PATH, untrusted_tvm_source_code, trusted_tvm_ram_start
+    )
+
+    runner.steps += steps
+
+    # map the rest as zero pages (stack, heap) as they don't are part of the measurement process
     runner.add_step(
         Step(
-            name="add_tvm_measured_pages",
+            name=f"add_tvm_zero_pages",
             regs={
                 "a0": TVM_ID,
-                # will write at this address the loop jump loop instruction
-                "a1": tvm_source_code_addr,
-                # the address of the physical confidential memory
-                # START_CONFIDENTIAL_REGION + 16 kb +
-                "a2": tvm_page_start_addr,
-                "a3": PAGE_SIZE_TO_ID[PAGE_SIZE],
-                # num pages just one page
-                "a4": 1,
-                "a5": GPA_BASE,
-                "a6": (1 << 26) | (COVH_ADD_TVM_MEASURED_PAGES & 0xFFFF),
+                "a1": trusted_tvm_ram_start + tvm_ram_off,  # Dest: confidential memory
+                "a2": PAGE_SIZE_TO_ID[PAGE_SIZE],
+                "a3": 1,
+                "a4": 0x3000,  # GPA to map at
+                "a5": 0,
+                "a6": (1 << 26) | (COVH_ADD_TVM_ZERO_PAGES & 0xFFFF),
                 "a7": EID_COVH_ID,
             },
-            setup_mem_fn=setup_add_tvm_measured_pages,
-            assert_fn=assert_add_tvm_measured_pages,
+            assert_fn=assert_add_tvm_measured_pages
         )
     )
 
@@ -338,9 +456,7 @@ def run() -> None:
             name="create_vcpu",
             regs={
                 "a0": TVM_ID,
-                # vcpuid
                 "a1": VCPU_ID,
-                # tvm_state address (unused for now)
                 "a2": 0,
                 "a3": 0,
                 "a4": 0,
@@ -359,8 +475,7 @@ def run() -> None:
             name="finalize_tvm",
             regs={
                 "a0": TVM_ID,
-                # entrypoint
-                "a1": GPA_BASE,
+                "a1": guest_entry,
                 # tvm identity addr (unused for now)
                 "a2": 0,
                 "a3": 0,
@@ -388,8 +503,6 @@ def run() -> None:
                 "a6": (1 << 26) | (COVH_RUN_TVM_VCPU & 0xFFFF),
                 "a7": EID_COVH_ID,
             },
-            setup_mem_fn=None,
-            assert_fn=None,
         )
     )
 

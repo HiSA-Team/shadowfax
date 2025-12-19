@@ -64,9 +64,9 @@ fn spawn_qemu_and_stream(
 
 #[test]
 fn firmware_boots_correctly() {
-    let firmware = PathBuf::from("../target/riscv64imac-unknown-none-elf/debug/shadowfax");
-    let dtb = PathBuf::from("../bin/device-tree.dtb");
-    let dice = PathBuf::from("../bin/shadowfax.dice.bin");
+    let firmware = PathBuf::from("../../target/riscv64imac-unknown-none-elf/debug/shadowfax");
+    let dtb = PathBuf::from("../../bin/device-tree.dtb");
+    let dice = PathBuf::from("../../bin/shadowfax.dice.bin");
 
     assert!(
         firmware.exists(),
