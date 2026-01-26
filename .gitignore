@@ -19,7 +19,7 @@
 !/Cargo.toml
 !/docs
 !/Dockerfile
-!/environment.sh
+!/guest
 !/LICENSE
 !/Makefile
 !/README.md

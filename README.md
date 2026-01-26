@@ -64,6 +64,7 @@ order to provide `libclang.a`. After the build, users will have to provide:
 - **LIBCLANG_STATIC_PATH**: pointing to the `lib` directory contains all static library built from LLVM.
 
 As an example, users will have to do something like this:
+
 ```sh
 git clone git@github.com:llvm/llvm-project.git
 cd llvm-project
