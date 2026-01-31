@@ -27,6 +27,9 @@ mod hyper;
 mod log;
 mod state;
 
+#[link_section = ".rodata"]
+pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/riscv-tests/benchmarks/towers.riscv");
+
 extern crate alloc;
 #[global_allocator]
 /// Global allocator.
@@ -62,8 +65,6 @@ extern "C" fn _start() -> ! {
      * TSM entry point. The TSM acts as "trap handler for CoVE" so we must preserve a0-a7 registers
      * as they contains ECALL parameters.
      *
-     * We define a custom "ABI". TSM Expects the State Address (initialized by the TSM Driver) in
-     * t0: it must not be clobbered.
      */
     core::arch::naked_asm!(
         r#"
@@ -79,7 +80,7 @@ extern "C" fn _start() -> ! {
 
         stack_size_per_hart = const STACK_SIZE_PER_HART,
         stack_top = sym _stack_top,
-        main = sym main,
+        main = sym test_tvm_bootstrap,
     )
 }
 
@@ -264,4 +265,62 @@ fn handle_covh(
         },
         _ => SbiRet { a0: -1, a1: 0 },
     }
+}
+
+/// Test function to bypass SBI and jump straight into a TVM
+fn test_tvm_bootstrap() -> ! {
+    println!("[OLORIN] Starting Mapping TVM from ELF");
+    // 1. Initialize the TSM state manually (if _secure_init wasn't called by a driver)
+    // We'll simulate a dummy attestation context for testing.
+    let dummy_context = TsmAttestationContext::default();
+    _secure_init(&dummy_context as *const _ as usize);
+
+    let mut lock = STATE.lock();
+    let state = lock.as_mut().expect("State not initialized");
+
+    // 2. Define Memory Layout for Testing (Adjust based on your QEMU RAM)
+    // Assuming TSM is at 0x80200000, let's put TVM structures higher up.
+    let tvm_page_table_addr = 0x80800000; // Must be 16KB aligned
+    let tvm_state_addr = 0x80810000;
+    let tvm_confidential_pool = 0x80900000; // Where guest RAM actually sits
+    let pool_size_pages = 512; // 2MB test pool
+
+    // 3. Convert pages to confidential
+    state
+        .hypervisor
+        .add_confidential_pages(tvm_page_table_addr, 4)
+        .unwrap(); // 16KB
+    state
+        .hypervisor
+        .add_confidential_pages(tvm_state_addr, 1)
+        .unwrap();
+    state
+        .hypervisor
+        .add_confidential_pages(tvm_confidential_pool, pool_size_pages)
+        .unwrap();
+
+    // 4. Use the ELF loading procedure
+    // This helper parses GUEST_ELF and maps it into the TVM
+    let tvm_id = hyper::bootstrap_load_elf(
+        state,
+        GUEST_ELF,
+        tvm_page_table_addr,
+        tvm_state_addr,
+        tvm_confidential_pool,
+    )
+    .expect("Failed to load ELF");
+
+    // 5. Create VCPU (ID 0)
+    state
+        .hypervisor
+        .create_tvm_vcpu(tvm_id, 0, 0)
+        .expect("Failed to create VCPU");
+
+    println!("[OLORIN] Bootstrap complete. Entering Guest...");
+
+    // 6. Run it!
+    state
+        .hypervisor
+        .run_tvm_vcpu(tvm_id, 0)
+        .expect("Failed to run VCPU");
 }

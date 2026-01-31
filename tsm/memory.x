@@ -1,13 +1,13 @@
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x82000000, LENGTH = 8M
+    RAM (rwx) : ORIGIN = 0x82000000, LENGTH = 64M
 }
 
 REGION_ALIAS("REGION_TEXT", RAM);
 REGION_ALIAS("REGION_DATA", RAM);
 REGION_ALIAS("REGION_BSS", RAM);
 
-_heap_size          = 0x1000;   /* 4k  */
+_heap_size          = 1024 * 1024 * 16;
 
 _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 

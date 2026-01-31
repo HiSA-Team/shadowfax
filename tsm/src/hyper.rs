@@ -1,5 +1,7 @@
 use alloc::vec::Vec;
-use common::attestation::TvmAttestationContext;
+use common::attestation::{DiceLayer, TvmAttestationContext};
+use core::alloc::Layout;
+use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 use riscv::register::{
     sepc,
     sstatus::{self, FS, SPP},
@@ -12,7 +14,7 @@ use crate::{
         csrs::{hgatp, hstatus, vsatp},
         instruction::hfence_gvma_all,
     },
-    STACK_SIZE_PER_HART,
+    println, TsmState,
 };
 
 const PAGE_SIZE: usize = 4096;
@@ -312,10 +314,8 @@ impl HypervisorState {
 
         assert_eq!(tsm_page_type, 0, "accepting 4k pages for now");
 
-        if (source_addr % PAGE_SIZE) != 0
-            || (dest_addr % PAGE_SIZE) != 0
-            || (tvm_guest_gpa % PAGE_SIZE) != 0
-        {
+        // if (source_addr % PAGE_SIZE) != 0
+        if (dest_addr % PAGE_SIZE) != 0 || (tvm_guest_gpa % PAGE_SIZE) != 0 {
             anyhow::bail!("all addresses must be page-aligned");
         }
 
@@ -596,7 +596,16 @@ enum TvmState {
     TvmRunnable = 1,
 }
 
+#[repr(C)]
 #[derive(Clone, Debug)]
+pub struct VmTrapContext {
+    // Guest registers x0-x31 (Offset 0-248)
+    // We save x0 as a placeholder to keep indexing simple: regs[i] == x(i)
+    pub regs: [usize; 32],
+    // Hypervisor Stack Pointer (Offset 256)
+    pub hs_sp: usize,
+}
+
 #[repr(C, align(4))]
 struct TvmVcpuState {
     regs: [usize; 32],
@@ -607,6 +616,9 @@ struct TvmVcpuState {
     sepc: usize,
     scause: usize,
     stval: usize,
+    trap_ctx: VmTrapContext,
+    // Hypervisor scratch stack (grows downward from end)
+    hs_scratch_stack: [u8; 4096],
 }
 
 impl TvmVcpuState {
@@ -620,15 +632,30 @@ impl TvmVcpuState {
             sepc: 0,
             scause: 0,
             stval: 0,
+            trap_ctx: VmTrapContext {
+                regs: [0; 32],
+                hs_sp: 0,
+            },
+            hs_scratch_stack: [0; 4096],
         };
-
         // We write vhartid in a0
         vcpu.regs[10] = id;
-
         vcpu
     }
 
     unsafe fn enter(&self, entry_sepc: usize, _entry_arg: usize) -> ! {
+        let ctx = &self.trap_ctx as *const VmTrapContext as usize;
+
+        // Calculate HS stack top (grows downward, so point to end of array)
+        let hs_stack_top = self.hs_scratch_stack.as_ptr() as usize + self.hs_scratch_stack.len();
+
+        // Initialize trap context
+        let trap_ctx_mut = ctx as *mut VmTrapContext;
+        (*trap_ctx_mut).hs_sp = hs_stack_top;
+
+        // sscratch = &VmTrapContext
+        core::arch::asm!("csrw sscratch, {}", in(reg) ctx);
+
         sstatus::set_sum(); // Allow supervisor to access user pages
         sstatus::set_spp(SPP::Supervisor); // Return to S-mode (VS-mode with SPV=1)
         sstatus::set_sie(); // Enable interrupts
@@ -636,7 +663,11 @@ impl TvmVcpuState {
 
         // Hypervisor trap handler
         stvec::write(Stvec::from_bits(hyper_trap as *const fn() as usize));
-
+        // Bit 1 (TM) allows access to the 'time' CSR
+        // Bit 0 (CY) allows access to 'cycle'
+        // Bit 2 (IR) allows access to 'instret'
+        let hcounteren_val: usize = 0b111;
+        core::arch::asm!("csrw hcounteren, {}", in(reg) hcounteren_val);
         // Enable virtualization (SPV=1 means we enter VS-mode on sret)
         hstatus::set_spv();
 
@@ -644,7 +675,6 @@ impl TvmVcpuState {
         sepc::write(entry_sepc);
 
         // TODO: restore vCPU context
-
         core::arch::asm!(
             r#"
                 fence.i
@@ -656,8 +686,265 @@ impl TvmVcpuState {
 }
 
 #[no_mangle]
-#[rustc_align(4)]
-// #[unsafe(naked)]
-unsafe extern "C" fn hyper_trap() -> ! {
-    loop {}
+#[unsafe(naked)]
+pub unsafe extern "C" fn hyper_trap() -> ! {
+    core::arch::naked_asm!(
+        // --- 1. ENTRY: Save Guest Context ---
+        // Swap Guest t6 (x31) with sscratch (which holds pointer to VmTrapContext)
+        "csrrw t6, sscratch, t6",
+        // Save Guest GPRs x1-x30 into the context
+        "sd x1,   8(t6)",  // ra
+        "sd x2,  16(t6)",  // sp
+        "sd x3,  24(t6)",  // gp
+        "sd x4,  32(t6)",  // tp
+        "sd x5,  40(t6)",  // t0
+        "sd x6,  48(t6)",  // t1
+        "sd x7,  56(t6)",  // t2
+        "sd x8,  64(t6)",  // s0
+        "sd x9,  72(t6)",  // s1
+        "sd x10, 80(t6)",  // a0
+        "sd x11, 88(t6)",  // a1
+        "sd x12, 96(t6)",  // a2
+        "sd x13, 104(t6)", // a3
+        "sd x14, 112(t6)", // a4
+        "sd x15, 120(t6)", // a5
+        "sd x16, 128(t6)", // a6
+        "sd x17, 136(t6)", // a7
+        "sd x18, 144(t6)", // s2
+        "sd x19, 152(t6)", // s3
+        "sd x20, 160(t6)", // s4
+        "sd x21, 168(t6)", // s5
+        "sd x22, 176(t6)", // s6
+        "sd x23, 184(t6)", // s7
+        "sd x24, 192(t6)", // s8
+        "sd x25, 200(t6)", // s9
+        "sd x26, 208(t6)", // s10
+        "sd x27, 216(t6)", // s11
+        "sd x28, 224(t6)", // t3
+        "sd x29, 232(t6)", // t4
+        "sd x30, 240(t6)", // t5
+        // Save the Guest's original t6 (currently in sscratch)
+        "csrr t0, sscratch",
+        "sd t0, 248(t6)",
+        // --- 2. TRANSITION: Switch to HS-mode Stack ---
+        "ld sp, 256(t6)", // Load hs_sp
+        // Call the Rust handler.
+        // a0 must be the pointer to VmTrapContext.
+        "mv a0, t6",
+        "call hyper_trap_handler_rust",
+        // --- 3. EXIT: Restore Guest Context ---
+        // Rust returns the pointer to VmTrapContext in a0
+        "mv t6, a0",
+        // Restore GPRs x1-x30
+        "ld x1,   8(t6)",
+        "ld x2,  16(t6)",
+        "ld x3,  24(t6)",
+        "ld x4,  32(t6)",
+        "ld x5,  40(t6)",
+        "ld x6,  48(t6)",
+        "ld x7,  56(t6)",
+        "ld x8,  64(t6)",
+        "ld x9,  72(t6)",
+        "ld x10, 80(t6)",
+        "ld x11, 88(t6)",
+        "ld x12, 96(t6)",
+        "ld x13, 104(t6)",
+        "ld x14, 112(t6)",
+        "ld x15, 120(t6)",
+        "ld x16, 128(t6)",
+        "ld x17, 136(t6)",
+        "ld x18, 144(t6)",
+        "ld x19, 152(t6)",
+        "ld x20, 160(t6)",
+        "ld x21, 168(t6)",
+        "ld x22, 176(t6)",
+        "ld x23, 184(t6)",
+        "ld x24, 192(t6)",
+        "ld x25, 200(t6)",
+        "ld x26, 208(t6)",
+        "ld x27, 216(t6)",
+        "ld x28, 224(t6)",
+        "ld x29, 232(t6)",
+        "ld x30, 240(t6)",
+        // Restore Guest t6 and set up sscratch for next trap
+        "ld t0, 248(t6)",    // Load saved Guest t6 into t0
+        "csrw sscratch, t6", // Put VmTrapContext pointer back into sscratch
+        "mv t6, t0",         // Finally restore Guest t6
+        "sret",
+    )
+}
+
+#[no_mangle]
+extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapContext {
+    // We use the 'riscv' crate style CSR access or core::arch::asm
+    let scause = riscv::register::scause::read();
+    let mut sepc = riscv::register::sepc::read();
+
+    // 10 = Environment call from VS-mode
+    if scause.bits() == 10 {
+        let regs = unsafe { &mut (*ctx).regs };
+
+        // 1. Forward to OpenSBI (M-mode)
+        // eid = a7 (regs[17]), fid = a6 (regs[16])
+        let sbi_ret = sbi_call(regs[17], regs[16], regs[10], regs[11], regs[12], regs[13]);
+
+        // 2. Write return values back to Guest a0, a1
+        regs[10] = sbi_ret.error;
+        regs[11] = sbi_ret.value;
+
+        // 3. Skip the 'ecall' instruction in the guest
+        sepc += 4;
+        unsafe {
+            riscv::register::sepc::write(sepc);
+        }
+    } else {
+        panic!("Unhandled Trap: {:?}, SEPC: {:#x}", scause.cause(), sepc);
+    }
+
+    ctx
+}
+
+fn sbi_call(eid: usize, fid: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> SbiRet {
+    let (error, value);
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") eid,
+            in("a6") fid,
+            inout("a0") a0 => error,
+            inout("a1") a1 => value,
+            in("a2") a2,
+            in("a3") a3,
+        );
+    }
+    SbiRet { error, value }
+}
+
+struct SbiRet {
+    error: usize,
+    value: usize,
+}
+
+pub fn bootstrap_load_elf(
+    state: &mut TsmState,
+    data: &[u8],
+    pt_addr: usize,
+    state_addr: usize,
+    conf_pool_base: usize,
+) -> anyhow::Result<usize> {
+    let elf = ElfBytes::<AnyEndian>::minimal_parse(data)
+        .map_err(|e| anyhow::anyhow!("ELF parse error: {:?}", e))?;
+
+    // 1. Create TVM
+    let attestation = state.attestation_context.compute_next(&[0; 32]);
+    let tvm_id = state
+        .hypervisor
+        .create_tvm(attestation, pt_addr, state_addr)?;
+
+    // 2. Define Guest RAM - MATCH LINKER SCRIPT (ORIGIN = 0x1000)
+    let gpa_base = 0x1000;
+    let ram_size = 2 * 1024 * 1024; // 2MB
+    state
+        .hypervisor
+        .add_tvm_memory_region(tvm_id, gpa_base, ram_size)?;
+
+    let segments = elf
+        .segments()
+        .ok_or_else(|| anyhow::anyhow!("No program headers"))?;
+    let mut current_conf_ptr = conf_pool_base;
+    let mut highest_gpa_mapped = gpa_base;
+
+    // 3. Load PT_LOAD segments
+    for ph in segments.iter().filter(|ph| ph.p_type == PT_LOAD) {
+        let p_vaddr = ph.p_vaddr as usize;
+        let p_filesz = ph.p_filesz as usize;
+        let p_memsz = ph.p_memsz as usize;
+        let p_offset = ph.p_offset as usize;
+
+        // Alignment Math
+        let gpa_page_start = p_vaddr & !(PAGE_SIZE - 1);
+        let offset_in_page = p_vaddr - gpa_page_start;
+        let num_measured_pages = (offset_in_page + p_filesz + PAGE_SIZE - 1) / PAGE_SIZE;
+
+        if p_filesz > 0 {
+            // FIX: Use an aligned scratchpad to avoid "src addr must be page-aligned" panic
+            let layout =
+                Layout::from_size_align(num_measured_pages * PAGE_SIZE, PAGE_SIZE).unwrap();
+            unsafe {
+                let scratchpad = alloc::alloc::alloc_zeroed(layout);
+                if scratchpad.is_null() {
+                    anyhow::bail!("TSM Out of Memory");
+                }
+
+                // Copy ELF data into scratchpad at the correct sub-page offset
+                let src_data = &data[p_offset..p_offset + p_filesz];
+                core::ptr::copy_nonoverlapping(
+                    src_data.as_ptr(),
+                    scratchpad.add(offset_in_page),
+                    p_filesz,
+                );
+
+                // Map and measure the aligned scratchpad
+                state.hypervisor.add_tvm_measured_pages(
+                    tvm_id,
+                    scratchpad as usize,
+                    current_conf_ptr,
+                    0, // 4K
+                    num_measured_pages,
+                    gpa_page_start,
+                )?;
+
+                alloc::alloc::dealloc(scratchpad, layout);
+            }
+            current_conf_ptr += num_measured_pages * PAGE_SIZE;
+        }
+
+        // Handle .bss suffix within the same segment
+        if p_memsz > p_filesz {
+            let total_pages = (offset_in_page + p_memsz + PAGE_SIZE - 1) / PAGE_SIZE;
+            let zero_pages = total_pages - num_measured_pages;
+
+            if zero_pages > 0 {
+                let zero_gpa_start = gpa_page_start + (num_measured_pages * PAGE_SIZE);
+                state.hypervisor.add_tvm_zero_pages(
+                    tvm_id,
+                    current_conf_ptr,
+                    0,
+                    zero_pages,
+                    zero_gpa_start,
+                )?;
+                current_conf_ptr += zero_pages * PAGE_SIZE;
+            }
+        }
+
+        // Track the end of mapped memory
+        let segment_end =
+            gpa_page_start + ((offset_in_page + p_memsz + PAGE_SIZE - 1) & !(PAGE_SIZE - 1));
+        highest_gpa_mapped = highest_gpa_mapped.max(segment_end);
+    }
+
+    // 4. Map the rest of the 2MB RAM (The Stack and Heap)
+    // This is critical. If CoreMark allocates the list outside PT_LOAD,
+    // it will be NULL or Fault unless we map the remaining RAM here.
+    let ram_end_gpa = gpa_base + ram_size;
+    if highest_gpa_mapped < ram_end_gpa {
+        let remaining_pages = (ram_end_gpa - highest_gpa_mapped) / PAGE_SIZE;
+        state.hypervisor.add_tvm_zero_pages(
+            tvm_id,
+            current_conf_ptr,
+            0,
+            remaining_pages,
+            highest_gpa_mapped,
+        )?;
+    }
+
+    // 5. Finalize TVM
+    let entry_point = elf.ehdr.e_entry as usize;
+    state.hypervisor.finalize_tvm(tvm_id, entry_point, 0, 0)?;
+    println!(
+        "[OLORIN] Mapping stack/gap: GPA 0x{:x} to 0x{:x}",
+        highest_gpa_mapped, ram_end_gpa
+    );
+
+    Ok(tvm_id)
 }
