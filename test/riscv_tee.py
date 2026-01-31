@@ -28,7 +28,7 @@ High-level behavior
   later commit via commit_planned_writes().
 
 Usage (interactive in GDB)
-1. (gdb) source /path/to/gdb_covh_flow.py
+1. (gdb) source /path/to/riscv_tee.py
 2. Create Domain(s) and Step(s). Add domains to Runner or pass domain to
    runner.add_step(step, domain). The call will allocate a slot and schedule
    ECALL/NOP and a domain tail loop; writes are attempted immediately if
@@ -103,7 +103,7 @@ def write_mem(addr: int, data: bytes) -> None:
     inf.write_memory(addr, data)
 
 
-# --------------------------- datatypes ---------------------------------------
+# -------------------------------------- datatypes -----------------------------------------
 
 @dataclass
 class Step:
@@ -152,7 +152,7 @@ class Domain:
         print(f"Domain '{self.name}': instr_base={hex(self.instr_base)}, data_base={hex(self.data_base)}, slots={self._instr_slots}")
 
 
-# ----------------------------- PreBP / PostBP: before/after ECALL handling -----------------------------
+# --------------------------- PreBP / PostBP: before/after ECALL handling ------------------------
 if GDB_AVAILABLE:
     class PreBP(gdb.Breakpoint):
         """

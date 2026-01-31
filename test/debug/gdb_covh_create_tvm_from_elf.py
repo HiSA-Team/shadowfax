@@ -45,12 +45,12 @@ COVH_CREATE_TVM_VCPU: int = 14
 COVH_RUN_TVM_VCPU: int = 15
 
 # ================ Create TVM Input ======================= #
-TVM_ELF_PATH: str = "a.out"
+TVM_ELF_PATH: str = "guests/coremark/coremark.bin"
 TVM_BIN_PATH: str = "a.bin"
 DEFAULT_PAGE_SIZE: int = 4096 # 4k
 PAGE_DIRECTORY_SIZE: int = 0x4000  # 16kib
 NUM_PAGES_TO_DONATE: int = 1024
-TVM_RAM_SIZE: int = 0x4000 # 16k Guest RAM
+TVM_RAM_SIZE: int = 1024 * 128 # 16k Guest RAM
 TVM_VCPU_STATE_SIZE: int = 0x1000 #4k
 
 TVM_ID: int = 1
@@ -182,16 +182,20 @@ def align_down(addr: int, align: int) -> int:
 
 def load_guest_elf_and_make_steps(
         path: str, untrusted_base_addr: int, trusted_physical_addr: int
-) -> (int, list):
+) -> (int, list, int, int):
     """
     Load ELF segments into memory via GDB and creates step to map into confidential domain
 
     Args:
         path: Path to ELF file
-        base_addr: Base address where to load (like src in your code)
+        untrusted_base_addr: Base address where to load the tvm
+        trusted_physical_addr: where to copy the TVM in confidential memory
 
     Returns:
-        Entry point address and list of steps
+        - Entry point address
+        - List of steps
+        - Current trusted offset
+        - max gpa reached
     """
     inf = gdb.selected_inferior()
     steps = []
@@ -402,7 +406,7 @@ def run() -> None:
             regs={
                 "a0": TVM_ID,
                 "a1": 0x0,  # Start of region (page-aligned)
-                "a2": TVM_RAM_SIZE,  # Total size
+                "a2": TVM_RAM_SIZE + 0x1000,  # Total size
                 "a3": 0,
                 "a4": 0,
                 "a5": 0,
@@ -431,7 +435,7 @@ def run() -> None:
                 "a1": trusted_tvm_ram_start + tvm_ram_off,  # Dest: confidential memory
                 "a2": PAGE_SIZE_TO_ID[PAGE_SIZE],
                 "a3": 1,
-                "a4": 0x3000,  # GPA to map at
+                "a4": 0x20000,  # GPA to map at
                 "a5": 0,
                 "a6": (1 << 26) | (COVH_ADD_TVM_ZERO_PAGES & 0xFFFF),
                 "a7": EID_COVH_ID,
