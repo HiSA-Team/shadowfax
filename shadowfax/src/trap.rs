@@ -22,7 +22,6 @@ pub fn handler() -> ! {
     core::arch::naked_asm!(
         /*
          * Check if the trap is a TEECALL/TEERET and perform the context switch to the tsm
-         * TODO: a7 may be tampered
          */
         "
             csrrw tp, mscratch, tp

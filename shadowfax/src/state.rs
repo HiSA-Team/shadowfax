@@ -30,7 +30,6 @@
                 regions = <&tmem 0x3f>;
                 next-arg1 = <0x0 0x0>;
                 next-addr = <0x0 0x81400000>;
-                next-mode = <0x1>;
             };
 
             udomain: untrusted-domain {
