@@ -85,6 +85,12 @@ pub mod attestation {
     #[derive(Clone)]
     pub struct Cdi(Vec<u8>);
 
+    impl Default for Cdi {
+        fn default() -> Self {
+            Self(Default::default())
+        }
+    }
+
     impl Cdi {
         /// Derive the next CDI given measurements (using HKDF).
         fn derive_next(&self, next_measurement: &[u8]) -> Self {
@@ -254,6 +260,16 @@ pub mod attestation {
         token: CoseSign1,
     }
 
+    impl Default for TsmAttestationContext {
+        fn default() -> Self {
+            Self {
+                cdi: Default::default(),
+                platform_token: Default::default(),
+                token: Default::default(),
+            }
+        }
+    }
+
     impl TsmAttestationContext {
         pub fn init_from_addr(addr: usize) -> Self {
             let ptr = addr as *const u8;
@@ -294,6 +310,16 @@ pub mod attestation {
         cdi: Cdi,
         platform_token: CoseSign1,
         tsm_token: CoseSign1,
+    }
+
+    impl Default for TvmAttestationContext {
+        fn default() -> Self {
+            Self {
+                cdi: Cdi::default(),
+                platform_token: Default::default(),
+                tsm_token: Default::default(),
+            }
+        }
     }
 
     impl TvmAttestationContext {
