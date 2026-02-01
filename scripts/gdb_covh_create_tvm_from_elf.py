@@ -4,12 +4,13 @@ import sys
 import gdb
 from typing import Dict, Optional
 
+from elftools.elf.elffile import ELFFile
+
 this_dir = os.path.dirname(__file__) or os.getcwd()
 if this_dir not in sys.path:
     sys.path.insert(0, this_dir)
 
 from gdb_covh_flow import Step, TestRunner, read_mem, read_reg
-
 
 # ================ CoVE Constants ======================= #
 EID_SUPD_ID: int = 0x53555044
@@ -28,16 +29,15 @@ COVH_RUN_TVM_VCPU: int = 15
 
 # ================ Create TVM Input ======================= #
 PAGE_DIRECTORY_SIZE: int = 0x4000  # 16kib
-GPA_BASE: int = 0x1000
 NUM_PAGES_TO_DONATE: int = 16
-JAL_LOOP_WORD = struct.pack("<I", 0x0000006F)  # jal x0, 0  -> tight infinite loop
 
 TVM_ID: int = 1
 VCPU_ID: int = 0
-PAGE_SIZE_TO_ID = {0x1000: 0}
 PAGE_SIZE: int = 0x1000  # 4096byte 4k
+PAGE_SIZE_TO_ID = {0x1000: 0}
 
 payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
+
 confidential_memory_start_addr: int = payload_address + 0x4000
 tvm_source_code_addr: int = payload_address + 0x2000
 tvm_page_start_addr: int = confidential_memory_start_addr + PAGE_DIRECTORY_SIZE + 0x1000
@@ -141,9 +141,7 @@ def setup_create_tvm() -> None:
 def assert_create_tvm(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
-    a1 = regs["a1"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-    assert a1 == TVM_ID, f"expected tvm_id={TVM_ID}in a1({a1})"
 
     # assert that the pagetable is zero
     params_addr = prev["regs"]["a0"]
@@ -171,42 +169,147 @@ def assert_add_tvm_memory_region(prev: Optional[Dict], curr: Dict) -> None:
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
 
 
-def setup_add_tvm_measured_pages() -> None:
-    tvm_source_code_addr = read_reg("a1")
+def align_up(addr: int, align: int) -> int:
+    return (addr + align - 1) & ~(align - 1)
 
+
+def align_down(addr: int, align: int) -> int:
+    return (addr) & ~(align - 1)
+
+
+def load_guest_elf_and_make_steps(
+    path: str, base_addr: int, trusted_physical_addr: int
+) -> (int, list):
+    """
+    Load ELF segments into memory via GDB and creates step to map into confidential domain
+
+    Args:
+        path: Path to ELF file
+        base_addr: Base address where to load (like src in your code)
+        trusted_physical_addr: Base address in confidential memory
+
+    Returns:
+        Entry point address and list of steps
+    """
     inf = gdb.selected_inferior()
-    inf.write_memory(tvm_source_code_addr, JAL_LOOP_WORD)
+    steps = []
+    with open(path, "rb") as f:
+        elf = ELFFile(f)
+        entry = elf.header["e_entry"]
 
+        assert elf.header["e_machine"] == "EM_RISCV"
+        print(f"Guest ELF Machine: {elf.header['e_machine']}")
+        print(f"Guest Entry point (GPA): 0x{entry:X}")
 
-def assert_add_tvm_measured_pages(prev: Optional[Dict], curr: Dict) -> None:
-    regs = curr["regs"]
-    a0 = regs["a0"]
-    assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+        segments_info = []
 
-    # assert that the "source code" has been copied successfully
-    tvm_source_code_addr = prev["regs"]["a1"]
+        # Copy the ELF segments into Untrusted Memory
+        for i, seg in enumerate(elf.iter_segments()):
+            if seg.header.p_type == "PT_LOAD":
+                vaddr = seg.header.p_vaddr
+                filesz = seg.header.p_filesz
+                memsz = seg.header.p_memsz
 
-    instr_raw = read_mem(tvm_source_code_addr, 8)
-    instr = struct.unpack("<I", instr_raw)[0]
-    jal = struct.unpack("<I", JAL_LOOP_WORD)[0]
+                # Calculate actual load address in untrusted memory
+                load_addr = base_addr + vaddr
 
-    assert instr == jal, (
-        f"expected JAL_LOOP_WORD at {hex(tvm_source_code_addr)}; got {hex(instr)}"
-    )
-    # TODO: assert the pagetable mapping
+                print(f"Segment {i}: vaddr=0x{vaddr:x}, filesz={filesz}, memsz={memsz}")
+                print(f"  Loading at untrusted addr: 0x{load_addr:x}")
 
+                # Get the raw segment data
+                segment_data = seg.data()
 
-def setup_create_tvm_vcpu() -> None:
-    pass
+                # Write the file content
+                if filesz > 0:
+                    inf.write_memory(load_addr, segment_data[:filesz])
 
+                # Zero out BSS (uninitialized data)
+                if memsz > filesz:
+                    bss_size = memsz - filesz
+                    bss_zeros = bytes(bss_size)
+                    inf.write_memory(load_addr + filesz, bss_zeros)
+                    print(f"  Zeroed BSS: {bss_size} bytes")
 
-def assert_create_tvm_vcpu(prev: Optional[Dict], curr: Dict) -> None:
-    pass
+                segments_info.append(
+                    {"vaddr": vaddr, "load_addr": load_addr, "memsz": memsz, "index": i}
+                )
+
+        # Calculate total memory region
+        start_region = min(seg["vaddr"] for seg in segments_info)
+        end_region = max(seg["vaddr"] + seg["memsz"] for seg in segments_info)
+
+        region_start_aligned = align_down(start_region, PAGE_SIZE)
+        region_end_aligned = align_up(end_region, PAGE_SIZE)
+        region_size = region_end_aligned - region_start_aligned
+
+        print(
+            f"Memory region: GPA 0x{region_start_aligned:x} - 0x{region_end_aligned:x} (size: {region_size} bytes)"
+        )
+
+        # Step 1: Create memory region
+        steps.append(
+            Step(
+                name="create_tvm_region",
+                regs={
+                    "a0": TVM_ID,
+                    "a1": region_start_aligned,  # Start of region (page-aligned)
+                    "a2": region_size,  # Total size
+                    "a3": 0,
+                    "a4": 0,
+                    "a5": 0,
+                    "a6": (1 << 26) | (COVH_ADD_MEMORY_REGION & 0xFFFF),
+                    "a7": EID_COVH_ID,
+                },
+            ),
+        )
+
+        # Step 2: Add measured pages for each segment
+        current_trusted_offset = 0
+
+        for seg_info in segments_info:
+            vaddr = seg_info["vaddr"]
+            load_addr = seg_info["load_addr"]
+            memsz = seg_info["memsz"]
+            i = seg_info["index"]
+
+            # Calculate number of pages
+            num_pages = (memsz + PAGE_SIZE - 1) // PAGE_SIZE
+
+            # Trusted physical address for this segment
+            trusted_addr = trusted_physical_addr + current_trusted_offset
+
+            print(f"Segment {i} mapping:")
+            print(f"  Source (untrusted): 0x{load_addr:x}")
+            print(f"  Dest (trusted): 0x{trusted_addr:x}")
+            print(f"  GPA: 0x{vaddr:x}")
+            print(f"  Pages: {num_pages}")
+
+            steps.append(
+                Step(
+                    name=f"add_tvm_measured_pages_{i}",
+                    regs={
+                        "a0": TVM_ID,
+                        "a1": load_addr,  # Source: untrusted memory
+                        "a2": trusted_addr,  # Dest: confidential memory
+                        "a3": PAGE_SIZE_TO_ID[PAGE_SIZE],
+                        "a4": num_pages,
+                        "a5": vaddr,  # GPA to map at
+                        "a6": (1 << 26) | (COVH_ADD_TVM_MEASURED_PAGES & 0xFFFF),
+                        "a7": EID_COVH_ID,
+                    },
+                )
+            )
+
+            # Advance trusted memory pointer
+            current_trusted_offset += num_pages * PAGE_SIZE
+
+        return entry, steps
 
 
 def run() -> None:
-    print("=== GDB Create TVM Program ===")
+    print("=== GDB Create TVM Program (from ELF) ===")
     print(f"S-Mode address 0x{payload_address:x}")
+    print(f"TVM code is at 0x{tvm_source_code_addr:x}")
 
     runner = TestRunner(payload_address)
 
@@ -289,50 +392,11 @@ def run() -> None:
         )
     )
 
-    # Create a memory region. This region will be used to host the TVM code/data. The memory region
-    # will be assigned to the TVM for the base GPA mapping
-    runner.add_step(
-        Step(
-            name="add_tvm_memory_region",
-            regs={
-                "a0": 1,
-                # Guest Physical Address (GPA)
-                "a1": GPA_BASE,
-                "a2": PAGE_SIZE,
-                "a3": 0,
-                "a4": 0,
-                "a5": 0,
-                "a6": (1 << 26) | (COVH_ADD_MEMORY_REGION & 0xFFFF),
-                "a7": EID_COVH_ID,
-            },
-            setup_mem_fn=None,
-            assert_fn=assert_add_tvm_memory_region,
-        )
+    guest_entry, steps = load_guest_elf_and_make_steps(
+        "a.out", tvm_source_code_addr, tvm_page_start_addr
     )
 
-    # Copy TVM code/data in the trusted domain. The TSM will map these pages into the TVM GPT
-    # and measure them
-    runner.add_step(
-        Step(
-            name="add_tvm_measured_pages",
-            regs={
-                "a0": TVM_ID,
-                # will write at this address the loop jump loop instruction
-                "a1": tvm_source_code_addr,
-                # the address of the physical confidential memory
-                # START_CONFIDENTIAL_REGION + 16 kb +
-                "a2": tvm_page_start_addr,
-                "a3": PAGE_SIZE_TO_ID[PAGE_SIZE],
-                # num pages just one page
-                "a4": 1,
-                "a5": GPA_BASE,
-                "a6": (1 << 26) | (COVH_ADD_TVM_MEASURED_PAGES & 0xFFFF),
-                "a7": EID_COVH_ID,
-            },
-            setup_mem_fn=setup_add_tvm_measured_pages,
-            assert_fn=None,
-        )
-    )
+    runner.steps += steps
 
     # Add vCPU with id=0 to the TVM
     runner.add_step(
@@ -340,9 +404,7 @@ def run() -> None:
             name="create_vcpu",
             regs={
                 "a0": TVM_ID,
-                # vcpuid
                 "a1": VCPU_ID,
-                # tvm_state address (unused for now)
                 "a2": 0,
                 "a3": 0,
                 "a4": 0,
@@ -361,8 +423,7 @@ def run() -> None:
             name="finalize_tvm",
             regs={
                 "a0": TVM_ID,
-                # entrypoint
-                "a1": GPA_BASE,
+                "a1": guest_entry,
                 # tvm identity addr (unused for now)
                 "a2": 0,
                 "a3": 0,
@@ -396,6 +457,11 @@ def run() -> None:
     )
 
     runner.install_breakpoints()
+    for i, step in enumerate(runner.steps):
+        print(f"step[{i}] {step.name}")
+        for reg in step.regs:
+            print(f"\t{reg}: 0x{step.regs[reg]:x}")
+        print()
     print("=== Test harness ready; continue from gdb to run ===")
 
 

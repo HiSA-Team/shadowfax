@@ -1,15 +1,13 @@
 # The goal of this Dockerfile is to create a consistent build environment.
 # The base image is rust:bookworm which is based on Debian 12.
+#
 # Project dependencies are:
-# - rust toolchain (with riscv64imac target)
+# - rust toolchain
 # - gcc riscv toolchain
 # - qemu
 #
 # Usage: run this image in a container mounting the project directory as a bind volume.
-#
-#   docker build -t shadowfax-build \
-#     --build-arg USER_ID=$(id -u) \
-#     --build-arg PLATFORM=generic
+#   docker build -t shadowfax-build --build-arg USER_ID=$(id -u) .
 #
 # Default starts a shell environment:
 #   docker run -v $(pwd):/shadowfax -it shadowfax-build
@@ -23,14 +21,14 @@ FROM rust:1-bookworm
 
 # Build args for UID matching and other options
 ARG USER_ID=1000
-ARG PLATFORM=generic
 
-# Install system dependencies for RISC-V dev
+# Install required dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-    autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
-    device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
-    libexpat-dev libgmp-dev libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
-    make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev \
+      libssl-dev qemu-system-riscv64 curl build-essential make ca-certificates git libglib2.0-dev \
+      libfdt-dev libpixman-1-dev zlib1g-dev ninja-build autoconf automake autotools-dev curl python3 \
+      python3-pip python3-tomli libmpc-dev libmpfr-dev libgmp-dev gawk build-essential bison flex \
+      texinfo gperf libtool patchutils bc zlib1g-dev libexpat-dev ninja-build git cmake libglib2.0-dev \
+      libslirp-dev sudo device-tree-compiler libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and build QEMU
@@ -41,13 +39,19 @@ WORKDIR /tmp/qemu-10.1.1
 RUN ./configure --target-list=riscv64-softmmu \
     && make -j $(nproc) && make install
 
+# Download and build GCC-RISC-V toolchain
+RUN git clone https://github.com/riscv/riscv-gnu-toolchain /tmp/riscv-gnu-toolchain --branch 2025.10.28
+WORKDIR /tmp/riscv-gnu-toolchain
+RUN ./configure --prefix=/opt/riscv --with-abi=lp64 --with-languages=c \
+    && make linux -j $(nproc)
+
+# Clean up build directory
+RUN rm -rf /tmp/riscv-gnu-toolchain /tmp/qemu-10.1.1
+
 # Create non-root user matching host UID
 RUN useradd -m -u ${USER_ID} -s /bin/bash devuser \
     && usermod -aG sudo devuser \
     && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-
-# Copy environment setup
-COPY environment.sh /environment.sh
 
 # Workdir for project
 WORKDIR /shadowfax
@@ -59,13 +63,4 @@ USER devuser
 COPY --chown=devuser:devuser rust-toolchain.toml .
 RUN rustup show
 
-USER root
-RUN echo '#!/bin/sh' > /entrypoint.sh \
-    && echo ". /environment.sh" >> /entrypoint.sh \
-    && echo 'exec "$@"' >> /entrypoint.sh
-RUN cp /entrypoint.sh /etc/profile.d/shadowfax.sh
-RUN chmod +x /entrypoint.sh
-USER devuser
-
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["bash"]
+ENV PATH="$PATH:/opt/riscv/bin"
