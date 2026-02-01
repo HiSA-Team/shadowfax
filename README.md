@@ -33,7 +33,6 @@ which are:
 
 - SUPD: supervisor doamin extension to enumerate active supervisor domain and get capabilities information on them;
 - CoVE-H: cove host extension. It allows **TVM** management for hosts;
-- CoVE-G (upcoming): confidential features for Guests
 
 The CoVE specification also introduces the **CoVE-I** SBI extension. It allows to supplements CoVE-H with hardware-assisted
 interrupt virtualization using RISC-V **Advanced Interrupt Architecture**(*AIA*), if the platform supports it.
@@ -41,9 +40,22 @@ For now, shadowfax **does not** implement this part of the specification.
 
 ## Environment setup
 
-Users will have to make sure that they have a working `riscv64` toolchain.
-Users on Ubuntu 22.04 or 24.04 or Debian 12 can install their dependencies using the `setup.sh` script
-by running:
+To export relevant environment variables, users will need to source the `environment.sh` file specifing
+an OpenSBI path. This script does not install anything but configures the current shell with correct
+settings for platform detection.
+
+```
+source environment.sh
+```
+
+### Dependency installation
+
+Shadowfax generates automatically OpenSBI bindings using `bindgen` API in `build.rs`.
+
+The `scripts` directory contains utilities to help setup the shadowafax build environment.
+More information [here](/scripts/README.md).
+
+All dependencies can be installed with the `scripts/setup.sh` script.
 
 ```sh
 sudo ./scripts/setup.sh
@@ -52,77 +64,40 @@ sudo ./scripts/setup.sh
 > [!TIP]
 > everything related to `build-dependencies` and `build.rs` affect the host building system and not the `ŧarget` itself.
 
-Configuring, building and running examples are performed through the single `Makefile`.
-
-### Using a musl system as a host
-If users have are on a musl system they will have to specify 2 extra environment variables pointing to
-their `libclang.a`. This is required by the (`clang-sys`)[https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#static]
-crate which is used to generate Opensbi bindings. Basically, users will have to build llvm from source in
-order to provide `libclang.a`. After the build, users will have to provide:
-
-- **LLVM_CONFIG_PATH**: pointing to their llvm-config binary in the build directory
-- **LIBCLANG_STATIC_PATH**: pointing to the `lib` directory contains all static library built from LLVM.
-
-As an example, users will have to do something like this:
+The `environment.sh` will setup extra clang variables to point to the new built `libclang`:
 ```sh
-git clone git@github.com:llvm/llvm-project.git
-cd llvm-project
-
-cmake -S llvm -B build -G Ninja -DLLVM_ENABLE_PROJECTS=clang -DLIBCLANG_BUILD_STATIC=ON
-ninja -C build
+export LIBCLANG_STATIC=1
+export LIBCLANG_PATH=$(pwd)/llvm-project-${LLVM_VERSION}.src/build/lib
+export LIBCLANG_STATIC_PATH=$(pwd)/llvm-project-${LLVM_VERSION}.src/build/lib
+export LLVM_CONFIG_PATH=$(pwd)/scripts/llvm-config.sh
 ```
+
+Due to some bugs in [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#environment-variables), the `scripts/llvm-config.sh` is needed as a workaround as described [here](https://github.com/rust-lang/rust-bindgen/issues/2360).
 
 ### Unsupported distributions
-If users are on a different distribution they will need to install required packages according to
-their system. A list of complete dependencies can be obtained by looking at the list of installed
-packages in the `scripts/setup.sh`:
+If your distribution is not supported by the script, you can install required dependencies by
+yourself or refer to the [Docker setup](#docker-setup). You need:
 
-```
-$ apt-get install libssl-dev qemu-system-riscv64 curl build-essential make ca-certificates git
-```
+- a riscv64 toolchain: to compile source code and examples;
+- qemu (for riscv64): to run programs in an emulated machine;
+- dependencies to build the Linux Kernel;
+- rust with the riscv64imac target;
 
-Otherwise they can leverage the provided `Dockerfile` to build a dedicated development environment.
-
-> [!NOTE]
-> The Docker image will build a QEMU (v10.1.1) and the riscv-toolchain (2025-10-28) from source.
+### Docker and devcontainer setup
+For unsupported distributions or for users that want a consistent build environment,
+a debian-based Docker image can be built and executed in container using `Dockerfile`:
 
 ```sh
-# build the Docker image
-docker build -t shadowfax-build --build-arg USER_ID=$(id -u)
-
-# run a test container
-docker run -v $(pwd):/shadowfax -w /shadowfax -it shadowfax-build sh -c "make build-info"
+docker build -t shadowfax-build \
+    --build-arg USER_ID=$(id -u) \
+    --build-arg PLATFORM=generic \
+docker run -v $(pwd):/shadowfax -w /shadowfax -it shadowfax-build
 ```
 
 If using modern editors like VS-code, the repository supports [devcontainer workspaces](https://containers.dev/) and should automatically
-ask to create a new workspace using the `.devcontainer/devcontainer.json` file.
+ask you to create a new workspace when creating using the `.devcontainer/devcontainer.json` file.
 
-## Building
-
-The build process is managed through the `Makefile` in the root directory which will auto-detect
-the host platform and settings.  To check the detected settings:
-
-```sh
-make build-info
-```
-
-First, users will need to generate RSA keypairs to sign the TSM:
-
-```sh
-make generate-keys
-```
-
-Finally, issue a full compilation:
-```sh
-make
-```
-
-Users may want to specify the following variables for their needs:
- - RV_PREFIX:           specify with the path to the target riscv toolchain prefix
- - BOOT_DOMAIN_ADDRESS: specify the address of the untrusted domain which should start the execution
- - PLATFORM:            target platform, this is used for OpenSBI initialization
-
-## Running examples on QEMU
+## Running on QEMU
 Users can run the firmware on QEMU using:
 
 ```sh
@@ -133,12 +108,12 @@ qemu-system-riscv64 -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait -nog
     -s -S
 ```
 
-This will stop the emulator on start. Setup a basic TEECALL/TEERET example in another terminal with
-a remote GDB session.
-For example, to test a basic program that calls `sbi_covh_get_tsm_info` function:
+This will stop the emulator on the first instruction. You can setup a basic teecall/teeret example
+in another terminal with a remote gdb session. For example, to test a basic program that calls
+`sbi_covh_get_tsm_info` function run:
 
 ```sh
-make debug GDB_COVE_SCRIPT=scripts/sbi_covh_get_tsm_info.py
+gdb -x scripts/gdb_settings -x scripts/sbi_covh_get_tsm_info.py
 
 # step through multiple breakpoints
 (gdb) continue
@@ -146,7 +121,7 @@ make debug GDB_COVE_SCRIPT=scripts/sbi_covh_get_tsm_info.py
 
 A more complicated example with a _synthetic_ TVM can be executed by running:
 ```sh
-make debug GDB_COVE_SCRIPTscripts/sbi_covh_create_tvm.py
+gdb -x scripts/gdb_settings -x scripts/sbi_covh_create_tvm.py
 
 # step through multiple breakpoints
 (gdb) continue
@@ -165,9 +140,6 @@ trusted virtual machine which will be performed by a CoVE-aware (untrusted) OS/H
 - run the TVM vCPU
 
 The TVM code is just an infinite loop for demonstration purposes.
-
-## Reference projects
-Rust H-CSR implementation has been taken from [Hikami](https://github.com/Alignof/hikami).
 
 ## Contributing
 This repository uses [pre-commit](https://pre-commit.com/). Before contributing, setup your environment

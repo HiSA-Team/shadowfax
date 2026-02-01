@@ -1,5 +1,11 @@
+use core::{error::Error, fmt::Display};
+
 use alloc::vec::Vec;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
+use fdt_rs::{
+    base::DevTreeNode,
+    prelude::{FallibleIterator, PropReader},
+};
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
     pkcs1v15::{Signature, VerifyingKey},
@@ -7,50 +13,69 @@ use rsa::{
 };
 use sha2::Sha256;
 
-use crate::{context::Context, error::TsmError};
-
-mod tsm {
-    #[link_section = ".rodata"]
-    pub static DEFAULT_TSM: &[u8] =
-        include_bytes!("../../target/riscv64imac-unknown-none-elf/debug/tsm");
-
-    #[link_section = ".rodata"]
-    pub static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../../bin/tsm.bin.signature");
-
-    #[link_section = ".rodata"]
-    pub static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey.pem");
-}
-
 #[derive(Clone)]
-pub struct MemoryRegion {
-    pub base_addr: usize,
-    pub order: u32,
-    pub mmio: bool,
-    pub permissions: u8,
-}
-
-#[derive(Clone)]
-pub struct Domain {
+pub struct TsmDomain {
+    pub id: usize,
     pub trust_map: usize,
-    pub memory_regions: Vec<MemoryRegion>,
+    pub start_region_addr: usize,
+    pub end_region_addr: usize,
 
     pub context_addr: usize,
-    pub security_context: Option<[u8; 256]>,
+    pub state_addr: usize,
+    pub next_pmp_slot: usize,
 }
 
-impl Domain {
-    pub fn empty() -> Self {
+impl TsmDomain {
+    fn empty() -> Self {
         Self {
+            id: 0,
             trust_map: 0,
-            memory_regions: Vec::new(),
+            start_region_addr: 0,
+            end_region_addr: 0,
             context_addr: 0,
-            security_context: None,
+            state_addr: 0,
+            next_pmp_slot: 0,
         }
     }
 
+    pub fn from_fdt_node(node: &DevTreeNode) -> Self {
+        let mut tsm = TsmDomain::empty();
+        for prop in node.props().iterator() {
+            if let Ok(prop) = prop {
+                let prop_name = prop.name().unwrap_or("");
+                match prop_name {
+                    "id" => tsm.id = prop.u32(0).unwrap() as usize,
+                    "memory" => {
+                        tsm.start_region_addr = prop.u64(0).unwrap() as usize;
+                        tsm.end_region_addr = prop.u64(1).unwrap() as usize;
+                    }
+                    "trust" => {
+                        let node = node
+                            .props()
+                            .iterator()
+                            .find(|c| c.as_ref().unwrap().name().unwrap_or("") == "trust")
+                            .unwrap()
+                            .unwrap();
+
+                        let mut i = 0;
+                        let mut trust = 0;
+                        while let Ok(d) = node.u32(i) {
+                            trust |= 1 << (d as usize);
+                            i += 1
+                        }
+                        tsm.trust_map = trust;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        tsm
+    }
+
     /// Loads the TSM elf, verify it's signature
-    pub fn verify_and_load_tsm(
+    pub fn verify_and_load(
         bin: &[u8],
+        _start_addr: usize,
         signature: &[u8],
         public_key: &[u8],
     ) -> Result<(), anyhow::Error> {
@@ -131,55 +156,19 @@ impl Domain {
     }
 }
 
-pub fn create_confidential_domain(context_addr: usize) -> Domain {
-    // Assume that the specified domain is a trusted domain -> need to load the TSM in it
-    // TODO: parse domain from FDT
-    let tsm_ctx = context_addr as *mut Context;
-    let mut domain = Domain::empty();
-
-    // Trust both root and untrusted domains
-    domain.trust_map = (1 << 2) | (1 << 0);
-
-    // Hardcoded memory regions for now
-    domain.memory_regions = [
-        MemoryRegion {
-            base_addr: 0x8200_0000,
-            order: 24,
-            permissions: 0x3f,
-            mmio: false,
-        },
-        MemoryRegion {
-            base_addr: 0x1000_0000,
-            order: 12,
-            permissions: 0x3f,
-            mmio: true,
-        },
-    ]
-    .to_vec();
-
-    // Save the context address and the state address
-    domain.context_addr = context_addr;
-    domain.security_context = Some([0; 256]);
-
-    // Configure PMP entry for TMem
-    let tmem_region = &domain.memory_regions[0];
-
-    // zero out the tsm supervisor state area
-    // setup basic registers for first context switch
-    unsafe {
-        // zero out memory
-        core::ptr::write_bytes(tsm_ctx, 0, 1);
-
-        // init values
-        (*tsm_ctx).mepc = tmem_region.base_addr;
-    }
-
-    Domain::verify_and_load_tsm(
-        tsm::DEFAULT_TSM,
-        tsm::DEFAULT_TSM_SIGN,
-        tsm::DEFAULT_TSM_PUBKEY,
-    )
-    .unwrap();
-
-    return domain;
+#[derive(Debug)]
+pub enum TsmError {
+    RsaPublicKeyError(rsa::pkcs1::Error),
+    SignatureError(rsa::signature::Error),
 }
+
+impl Display for TsmError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::RsaPublicKeyError(err) => write!(f, "verification error: {}", err),
+            Self::SignatureError(err) => write!(f, "signature error: {}", err),
+        }
+    }
+}
+
+impl Error for TsmError {}
