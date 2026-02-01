@@ -82,4 +82,5 @@ jobs:
 
     - name: Build and test
       run: |
+        . environment.sh
         make build-info generate-keys test

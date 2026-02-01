@@ -16,11 +16,11 @@
 use core::mem::offset_of;
 
 use common::sbi::{
-    COVH_DEFAULT_PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_EXT_ID, SBI_COVH_GET_TSM_INFO,
+    SBI_COVH_CONVERT_PAGES, SBI_COVH_EXT_ID, SBI_COVH_GET_TSM_INFO,
     SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
 
-use crate::{_tee_stack_top, context::Context, domain::MemoryRegion, opensbi, state::STATE};
+use crate::{_tee_stack_top, context::Context, opensbi, state::STATE};
 
 macro_rules! cove_unpack_fid {
     ($fid:expr) => {
@@ -84,7 +84,7 @@ pub fn tee_handler_entry() -> ! {
         sd x29, 8 * 29 (sp)
         sd x30, 8 * 30 (sp)
         sd x31, 8 * 31 (sp)
-    ",
+        ",
     // save csrs
     "
         csrr t0, sstatus
@@ -106,7 +106,27 @@ pub fn tee_handler_entry() -> ! {
         csrr t0, mepc
         sd t0, 40*8(sp)
     ",
+    // save pmp config
     "
+        csrr t0, pmpcfg0
+        sd t0, 41*8(sp)
+        csrr t0, pmpaddr0
+        sd t0, 42*8(sp)
+        csrr t0, pmpaddr1
+        sd t0, 43*8(sp)
+        csrr t0, pmpaddr2
+        sd t0, 44*8(sp)
+        csrr t0, pmpaddr3
+        sd t0, 45*8(sp)
+        csrr t0, pmpaddr4
+        sd t0, 46*8(sp)
+        csrr t0, pmpaddr5
+        sd t0, 47*8(sp)
+        csrr t0, pmpaddr6
+        sd t0, 48*8(sp)
+        csrr t0, pmpaddr7
+        sd t0, 49*8(sp)
+
         // call tee handler
         la sp, {tee_stack}
         add a0, a6, zero
@@ -114,6 +134,7 @@ pub fn tee_handler_entry() -> ! {
 
         // restore the target supervisor domain
         add sp, a0, zero
+        li a0, 1
         j {tee_handler_exit}
         ",
         tee_stack = sym _tee_stack_top,
@@ -141,142 +162,165 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
 
-    let (dst_id, fid) = cove_unpack_fid!(fid);
-    let domain = state.domains.get_mut(dst_id);
-
-    // Scratch space
+    // scratch context base pointer
     let scratch_start = &raw const _tee_stack_top as *const u8 as usize;
     let base_ctx = scratch_start - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let scratch_ctx = base_ctx as *mut Context;
 
-    // Invalid domain id, go back with an error
-    if domain.is_none() {
-        return unsafe { return_error(base_ctx, -1) };
-    }
-
-    // Get destination domain
-    let domain = domain.unwrap();
+    let (dst_id, fid) = cove_unpack_fid!(fid);
+    let tsm = state.tsms.iter_mut().find(|d| d.id == dst_id);
 
     // TEECALL
-    if domain.security_context.is_some() {
-        let domain_ctx = domain.context_addr as *mut Context;
-        // TODO: get current domain
-        let src_id = 2;
+    if let Some(tsm) = tsm {
+        let src_id = state.current_id;
         // check if the domain is trusted. If not just return an error to the caller
-        if !domain.is_trusted(src_id) {
-            return unsafe { return_error(base_ctx, -1) };
+        if !tsm.is_trusted(src_id) {
+            unsafe {
+                (*scratch_ctx).regs[10] = usize::MAX;
+                (*scratch_ctx).regs[11] = 0;
+                // increment mepc to avoid loop
+                (*scratch_ctx).mepc += 4;
+            }
+            return base_ctx;
         }
         // We need to store the calling context into the right structure
-        let caller_ctx_addr = base_ctx - (src_id) * size_of::<Context>();
+        let caller_ctx_addr = base_ctx - (src_id + 1) * size_of::<Context>();
         let caller_ctx = caller_ctx_addr as *mut Context;
         unsafe {
             core::ptr::copy_nonoverlapping(scratch_ctx, caller_ctx, 1);
         }
 
-        // we need to preserve all a0-a7 registers as they are input of the ecall
+        let tsm_ctx = tsm.context_addr as *mut Context;
+
+        // we need to preserve all a0-a4 and a6--a7 registers.
         unsafe {
             // a0 is the 10th general purpose register
             // a7 is the 17th general purpose register
             for i in 10..18 {
-                (*domain_ctx).regs[i] = (*caller_ctx).regs[i];
+                (*tsm_ctx).regs[i] = (*caller_ctx).regs[i];
             }
 
-            // Save the caller id into a6 register, but we must preserve the EID. This is used for
-            // the TEERET
+            // save the caller into a6 register, but we must preserve the EID.
             // The caller id must be saved in bits [31:26]
-            let eid = (*domain_ctx).regs[16] & 0xFFFF;
-            (*domain_ctx).regs[16] = ((src_id) << 26) | eid;
+            let eid = (*tsm_ctx).regs[16] & 0xFFFF;
+            (*tsm_ctx).regs[16] = ((src_id & 0x3F) << 26) | eid;
 
-            // save the caller context address into domain context
-            (*domain_ctx).caller_ctx = caller_ctx_addr;
+            // save the TSM state into t0
+            (*tsm_ctx).regs[5] = tsm.state_addr;
+
+            // save the caller context address into TSM context
+            (*tsm_ctx).caller_ctx = caller_ctx_addr;
         }
 
         // Perform operations to allow the specific functionality
         match fid {
-            // For sbi_covh_get_domain_info we need to give the TSM access to the memory space
-            // where he will write the domain_info struct (a0) for the necessary size (a1).
+            // For sbi_covh_get_tsm_info we need to give the TSM access to the memory space
+            // where he will write the tsm_info struct (a0) for the necessary size (a1).
             SBI_COVH_GET_TSM_INFO => {
-                let base_addr = unsafe { (*domain_ctx).regs[10] };
-                let size = unsafe { (*domain_ctx).regs[11] };
+                let addr = unsafe { (*tsm_ctx).regs[10] };
+                let size = unsafe { (*tsm_ctx).regs[11] };
 
-                // Base address must be page aligned, we cannot exceed number of available pmp
-                // registers
-                assert!(base_addr % COVH_DEFAULT_PAGE_SIZE == 0);
-                assert!(domain.memory_regions.len() < 8);
+                let slot = 7;
 
-                let order = if (size & (size - 1)) == 0 {
-                    size.trailing_zeros()
-                } else {
-                    size.next_power_of_two().trailing_zeros()
+                // Build the CFG byte for TOR + RW (not locked)
+                let range = riscv::register::Range::TOR as usize;
+                let perm = riscv::register::Permission::RW as usize;
+                let locked = false as usize;
+                let cfg_byte = (locked << 7) | (range << 3) | (perm);
+
+                // Mask out old byte for slot 1 in pmpcfg0
+                let byte_mask = 0xFF << (slot * 8);
+
+                unsafe {
+                    (*tsm_ctx).pmpaddr[slot - 1] = addr >> 2;
+                    (*tsm_ctx).pmpaddr[slot] = (addr + size) >> 2;
+
+                    (*tsm_ctx).pmpcfg &= !byte_mask;
+                    (*tsm_ctx).pmpcfg |= cfg_byte << (slot * 8);
                 }
-                .max(3);
-
-                domain.memory_regions.push(MemoryRegion {
-                    base_addr,
-                    order,
-                    mmio: false,
-                    permissions: 0x3f,
-                });
             }
             SBI_COVH_CONVERT_PAGES => {
-                let base_addr = unsafe { (*domain_ctx).regs[10] };
-                let num_pages = unsafe { (*domain_ctx).regs[11] };
+                let start_addr = unsafe { (*tsm_ctx).regs[10] };
+                let num_pages = unsafe { (*tsm_ctx).regs[11] };
+                let slot = tsm.next_pmp_slot;
 
-                // Base address must be page aligned, we cannot exceed number of available pmp
-                // registers
-                assert!(base_addr % COVH_DEFAULT_PAGE_SIZE == 0);
-                assert!(domain.memory_regions.len() < 8);
+                if slot < 6 {
+                    // TODO: remove these pages from the caller PMP
+                    // setup pmp entry for the block of pages requested
+                    let end_addr = start_addr + num_pages * 4096;
 
-                let order = (num_pages * COVH_DEFAULT_PAGE_SIZE).trailing_zeros();
+                    let size = (end_addr - start_addr).next_power_of_two();
+                    let base = start_addr & !(size - 1);
 
-                domain.memory_regions.push(MemoryRegion {
-                    base_addr,
-                    order,
-                    mmio: false,
-                    permissions: 0x3f,
-                });
+                    let k = size.trailing_zeros() as usize;
+                    let ones = (1 << (k - 3)) - 1;
+
+                    let pmpaddr = ((base >> 2) as usize) | ones;
+                    let locked = false;
+                    let range = riscv::register::Range::NAPOT;
+                    let permission = riscv::register::Permission::RWX;
+                    let byte =
+                        (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
+                    let pmpcfg = byte << (8 * slot);
+
+                    unsafe {
+                        (*tsm_ctx).pmpcfg |= pmpcfg;
+                        (*tsm_ctx).pmpaddr[slot] = pmpaddr;
+                    }
+
+                    tsm.next_pmp_slot += 1;
+                } else {
+                    // no more pmp slot available, return an error
+                    unsafe {
+                        (*scratch_ctx).regs[10] = usize::MAX;
+                        (*scratch_ctx).regs[11] = 0;
+                        // increment mepc to avoid loop
+                        (*scratch_ctx).mepc += 4;
+                    }
+                    return base_ctx;
+                }
             }
             _ => {}
         }
-        unsafe {
-            let ret = opensbi::sbi_domain_change_active(dst_id as u32);
-            assert!(ret == 0);
-        }
-        program_pmp_from_regions(&domain.memory_regions);
-        return domain.context_addr;
+        // mark the new tsm as the current domain
+        state.current_id = tsm.id;
+        return tsm.context_addr;
     }
 
     // TEERET
+    // Retrive the TSM ID as the current running
     // We don't need to store the calling context since we are implementing the
-    // non reentrant TSM. We need a0 and a1 registers to deliver the result
+    // non interruptible TSM. We need a0 and a1 registers to deliver the result
+    let tsm = state
+        .tsms
+        .iter()
+        .find(|t| t.id == state.current_id)
+        .unwrap();
 
-    // Restore the original TSM id
-    // TODO make this dynamic
-    let tsmid = 1;
+    let tsm_ctx = tsm.context_addr as *mut Context;
+    let caller_ctx = unsafe { (*tsm_ctx).caller_ctx as *mut Context };
 
     unsafe {
-        let domain_ctx = domain.context_addr as *mut Context;
-        let eid = (*scratch_ctx).regs[16] & 0xFFFF;
-        (*domain_ctx).regs[10] = (*scratch_ctx).regs[10];
-        (*domain_ctx).regs[11] = (*scratch_ctx).regs[11];
-        (*domain_ctx).regs[16] = (tsmid << 26) | eid;
+        (*caller_ctx).regs[10] = (*scratch_ctx).regs[10];
+        (*caller_ctx).regs[11] = (*scratch_ctx).regs[11];
+        (*caller_ctx).regs[16] = (*scratch_ctx).regs[16];
         // increment mepc to avoid loop
-        (*domain_ctx).mepc += 4;
+        (*caller_ctx).mepc += 4;
     }
-
     // Perform operations to cleanup specific to the functionality
     match fid {
-        // Remove the last memory region
-        SBI_COVH_GET_TSM_INFO => {}
-        SBI_COVH_CONVERT_PAGES => {}
+        // Reset the PMP address to the shared memory
+        SBI_COVH_GET_TSM_INFO => unsafe {
+            let slot = 7;
+            let byte_mask = 0xFF << (slot * 8);
+            (*tsm_ctx).pmpaddr[slot - 1] = 0;
+            (*tsm_ctx).pmpaddr[slot] = 0;
+            (*tsm_ctx).pmpcfg &= !byte_mask;
+        },
         _ => {}
     }
-    unsafe {
-        let ret = opensbi::sbi_domain_change_active(dst_id as u32);
-        assert!(ret == 0);
-    }
-    program_pmp_from_regions(&domain.memory_regions);
-    return domain.context_addr;
+    state.current_id = dst_id;
+    return unsafe { (*tsm_ctx).caller_ctx };
 }
 
 #[unsafe(naked)]
@@ -355,6 +399,7 @@ pub fn supd_handler_entry() -> ! {
         call {handler}
 
         add sp, a0, zero
+        li a0, 0
         j {tee_handler_exit}
     ",
         tee_stack = sym _tee_stack_top,
@@ -377,18 +422,25 @@ fn supd_handler(fid: usize) -> usize {
     if fid == SBI_EXT_SUPD_GET_ACTIVE_DOMAINS {
         // root supervisor domain is mandatory
         let mut ret: usize = 1;
-        for i in 0..state.domains.len() {
-            ret |= 1 << i;
+        for d in state.tsms.iter() {
+            ret |= 1 << d.id;
         }
-
         unsafe {
             (*dst_ctx).regs[10] = 0;
             (*dst_ctx).regs[11] = ret;
-            (*dst_ctx).mepc += 4;
-            return dst_addr;
+        }
+    } else {
+        unsafe {
+            (*dst_ctx).regs[10] = usize::MAX - 1;
+            (*dst_ctx).regs[11] = 0;
         }
     }
-    return unsafe { return_error(dst_addr, -1) };
+
+    unsafe {
+        (*dst_ctx).mepc += 4;
+    }
+
+    return dst_addr;
 }
 
 #[unsafe(naked)]
@@ -446,101 +498,41 @@ fn tee_handler_exit() -> ! {
             ld t0, 40*8(sp)
             csrw mepc, t0
         ",
-        // restore t0, a0, sp
+        // restore pmp
         "
+            // check if we need to restore the PMP
+            beqz a0, 1f
+            ld t0, 42*8(sp)
+            csrw pmpaddr0, t0
+            ld t0, 43*8(sp)
+            csrw pmpaddr1, t0
+            ld t0, 44*8(sp)
+            csrw pmpaddr2, t0
+            ld t0, 45*8(sp)
+            csrw pmpaddr3, t0
+            ld t0, 46*8(sp)
+            csrw pmpaddr4, t0
+            ld t0, 47*8(sp)
+            csrw pmpaddr5, t0
+            ld t0, 48*8(sp)
+            csrw pmpaddr6, t0
+            ld t0, 49*8(sp)
+            csrw pmpaddr7, t0
+
+            ld t0, 41*8(sp)
+            csrw pmpcfg0, t0
+
+            fence
+            fence.i
+
+            1:
+            // restore t0, a0, sp
             ld t0, 5*8(sp)
             ld a0, 10*8(sp)
             ld sp, 2*8(sp)
+        ",
+        "
             mret
         ",
     )
-}
-
-// Encode an error code to the a0 register of the calling context and increment mepc
-unsafe fn return_error(ctx_addr: usize, code: isize) -> usize {
-    let ctx = ctx_addr as *mut Context;
-
-    (*ctx).regs[10] = code as usize;
-    (*ctx).regs[11] = 0;
-    (*ctx).mepc += 4;
-
-    return ctx_addr;
-}
-
-// Program the PMP as stated in 3.7 in Privileged ISA
-fn program_pmp_from_regions(regions: &[MemoryRegion]) {
-    for (i, r) in regions.iter().enumerate() {
-        let ones = (1 << (r.order - 3)) - 1;
-        let range = riscv::register::Range::NAPOT as usize;
-        let permission = riscv::register::Permission::RWX as usize;
-
-        // This should be a byte and be shifted by index
-        let pmpcfg = ((0) << 7 | (range) << 3 | (permission)) & 0xFF;
-        let pmpaddr = ((r.base_addr >> 2) as usize) | ones as usize;
-
-        write_pmpaddr(i, pmpaddr);
-        write_pmpcfg(i, pmpcfg);
-    }
-}
-
-fn write_pmpaddr(index: usize, val: usize) {
-    unsafe {
-        match index {
-            0 => core::arch::asm!("csrw pmpaddr0, {0}", in(reg) val),
-            1 => core::arch::asm!("csrw pmpaddr1, {0}", in(reg) val),
-            2 => core::arch::asm!("csrw pmpaddr2, {0}", in(reg) val),
-            3 => core::arch::asm!("csrw pmpaddr3, {0}", in(reg) val),
-            4 => core::arch::asm!("csrw pmpaddr4, {0}", in(reg) val),
-            5 => core::arch::asm!("csrw pmpaddr5, {0}", in(reg) val),
-            6 => core::arch::asm!("csrw pmpaddr6, {0}", in(reg) val),
-            7 => core::arch::asm!("csrw pmpaddr7, {0}", in(reg) val),
-            8 => core::arch::asm!("csrw pmpaddr8, {0}", in(reg) val),
-            9 => core::arch::asm!("csrw pmpaddr9, {0}", in(reg) val),
-            10 => core::arch::asm!("csrw pmpaddr10, {0}", in(reg) val),
-            11 => core::arch::asm!("csrw pmpaddr11, {0}", in(reg) val),
-            12 => core::arch::asm!("csrw pmpaddr12, {0}", in(reg) val),
-            13 => core::arch::asm!("csrw pmpaddr13, {0}", in(reg) val),
-            14 => core::arch::asm!("csrw pmpaddr14, {0}", in(reg) val),
-            15 => core::arch::asm!("csrw pmpaddr15, {0}", in(reg) val),
-            _ => unreachable!(),
-        }
-    }
-}
-
-// TODO: adapt this for 32bit
-// According to the spec, RV64 has only even numbers for pmpcfgX. pmpcfg0, pmpcfg2,
-// pmpcfg4...pmpcfg14
-fn write_pmpcfg(index: usize, val: usize) {
-    let n = index / 8;
-    let shift = (index % 8) * 8;
-    let old: usize;
-
-    unsafe {
-        match n {
-            0 => core::arch::asm!("csrr {0}, pmpcfg0", out(reg) old),
-            2 => core::arch::asm!("csrr {0}, pmpcfg2", out(reg) old),
-            4 => core::arch::asm!("csrr {0}, pmpcfg4", out(reg) old),
-            8 => core::arch::asm!("csrr {0}, pmpcfg8", out(reg) old),
-            10 => core::arch::asm!("csrr {0}, pmpcfg10", out(reg) old),
-            12 => core::arch::asm!("csrr {0}, pmpcfg12", out(reg) old),
-            14 => core::arch::asm!("csrr {0}, pmpcfg14", out(reg) old),
-            _ => unreachable!(),
-        };
-    }
-
-    let mask = !(0xFF << shift);
-    let new = (old & mask) | (val << shift);
-
-    unsafe {
-        match n {
-            0 => core::arch::asm!("csrw pmpcfg0, {0}", in(reg) new),
-            2 => core::arch::asm!("csrw pmpcfg2, {0}", in(reg) new),
-            4 => core::arch::asm!("csrw pmpcfg4, {0}", in(reg) new),
-            8 => core::arch::asm!("csrw pmpcfg8, {0}", in(reg) new),
-            10 => core::arch::asm!("csrw pmpcfg10, {0}", in(reg)new),
-            12 => core::arch::asm!("csrw pmpcfg12, {0}", in(reg) new),
-            14 => core::arch::asm!("csrw pmpcfg14, {0}", in(reg) new),
-            _ => unreachable!(),
-        };
-    }
 }

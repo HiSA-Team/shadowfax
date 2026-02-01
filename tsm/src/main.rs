@@ -3,41 +3,35 @@
 #![feature(never_type)]
 #![feature(fn_align)]
 
-use core::{
-    panic::PanicInfo,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::{cell::OnceCell, panic::PanicInfo, ptr::NonNull};
 
-use common::sbi::{
-    SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
-    SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM,
-    SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RUN_TVM_VCPU,
+use common::{
+    sbi::{
+        SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
+        SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU,
+        SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO,
+        SBI_COVH_RUN_TVM_VCPU,
+    },
+    tsm::{TsmInfo, TsmState, TsmStateData},
 };
 use linked_list_allocator::LockedHeap;
-use spin::Mutex;
 
-use crate::{
-    hyper::HypervisorState,
-    state::{TsmInfo, TSM_IMPL_ID, TSM_VERSION},
-};
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::hyper::HypervisorState;
 
 mod h_extension;
 mod hyper;
 mod log;
-mod state;
 
-extern crate alloc;
 #[global_allocator]
 /// Global allocator.
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
 unsafe extern "C" {
     /// boot stack top (defined in `memory.x`)
-    static _stack_top: u8;
-
-    // Heap
-    static mut _heap_start: u8;
-    static _heap_end: u8;
+    static _top_b_stack: u8;
 }
 
 /*
@@ -77,54 +71,26 @@ extern "C" fn _start() -> ! {
         "#,
 
         stack_size_per_hart = const STACK_SIZE_PER_HART,
-        stack_top = sym _stack_top,
+        stack_top = sym _top_b_stack,
         main = sym main,
     )
 }
 
-struct TsmState {
-    info: TsmInfo,
-    hypervisor: HypervisorState,
-}
+static mut HYPER_STATE: MaybeUninit<HypervisorState> = MaybeUninit::uninit();
+static INIT_DONE: AtomicBool = AtomicBool::new(false);
 
-impl TsmState {
-    fn new() -> Self {
-        Self {
-            info: TsmInfo {
-                tsm_status: state::TsmStatus::TsmReady,
-                tsm_impl_id: TSM_IMPL_ID,
-                tsm_version: TSM_VERSION,
-                _padding: 0,
-                tsm_capabilities: 0,
-                tvm_state_pages: 0,
-                tvm_max_vcpus: 1,
-                tvm_vcpu_state_pages: 0,
-            },
-            hypervisor: HypervisorState::new(),
-        }
-    }
-}
-
-static INIT: AtomicBool = AtomicBool::new(false);
-static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
-
-fn ensure_init() -> spin::MutexGuard<'static, Option<TsmState>> {
-    let mut guard = STATE.lock();
-
-    if !INIT.load(Ordering::Acquire) {
-        // this enables heap allocations
+fn get_or_init_state(state_addr: usize) -> &'static mut HypervisorState {
+    if !INIT_DONE.load(Ordering::Acquire) {
         unsafe {
-            // Initialize global alloca
-            let heap_start = (&raw const _heap_start as *const u8) as usize;
-            let heap_size = ((&raw const _heap_end as *const u8) as usize) - heap_start;
-            ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
-        }
-        let state = TsmState::new(); // heavy init allowed here
-        *guard = Some(state);
-        INIT.store(true, Ordering::Release);
-    }
+            let mut state = unsafe { State::from_addr(state_addr).expect("Invalid state address") };
+            let tsm_state_data = state.as_mut();
+            (*tsm_state_data).info.tsm_state = TsmState::TsmReady;
 
-    guard
+            HYPER_STATE.write(HypervisorState::new());
+        }
+        INIT_DONE.store(true, Ordering::Release);
+    }
+    unsafe { &mut *HYPER_STATE.as_mut_ptr() }
 }
 
 // Since this is a TSM with non reentrant model, an ECALL should be a TEERET
@@ -141,9 +107,12 @@ fn main(
     // The TSM should be called only for CoVH.
     // TODO: the TSM will be invoked also for the CoVG SBI
     assert_eq!(a7, SBI_COVH_EXT_ID);
+    let mut state_addr: usize;
 
-    let mut lock = ensure_init();
-    let state = lock.as_mut().unwrap();
+    unsafe {
+        core::arch::asm!("add {}, t0, zero", out(reg) state_addr, options(readonly, nostack))
+    };
+    let hypervisor_data = get_or_init_state(state_addr);
 
     // fid is formated as:
     // bits[31:26]: SDID target
@@ -152,9 +121,12 @@ fn main(
 
     let ret = match fid {
         SBI_COVH_GET_TSM_INFO => {
-            assert!(a1 >= core::mem::size_of::<TsmInfo>());
+            let state = unsafe { State::from_addr(state_addr).expect("Invalid state address") };
+            let info = state.info_clone();
+
+            assert_eq!(a1, core::mem::size_of::<TsmInfo>());
             unsafe {
-                core::ptr::write(a0 as *mut TsmInfo, state.info.clone());
+                core::ptr::write(a0 as *mut TsmInfo, info);
             }
             SbiRet {
                 a0: 0,
@@ -162,7 +134,7 @@ fn main(
             }
         }
 
-        SBI_COVH_CONVERT_PAGES => match state.hypervisor.add_confidential_pages(a0, a1) {
+        SBI_COVH_CONVERT_PAGES => match hypervisor_data.add_confidential_pages(a0, a1) {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
@@ -175,7 +147,7 @@ fn main(
                 (page_table_address, state_address)
             };
 
-            match state.hypervisor.create_tvm(tvm_params.0, tvm_params.1) {
+            match hypervisor_data.create_tvm(tvm_params.0, tvm_params.1) {
                 Ok(id) => SbiRet {
                     a0: 0,
                     a1: id as isize,
@@ -184,47 +156,35 @@ fn main(
             }
         }
 
-        SBI_COVH_FINALIZE_TVM => match state.hypervisor.finalize_tvm(a0, a1, a2, a3) {
+        SBI_COVH_FINALIZE_TVM => match hypervisor_data.finalize_tvm(a0, a1, a2, a3) {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
 
-        SBI_COVH_ADD_TVM_MEMORY_REGION => {
-            match state.hypervisor.add_tvm_memory_region(a0, a1, a2) {
-                Ok(_) => SbiRet { a0: 0, a1: 0 },
-                Err(_) => SbiRet { a0: -1, a1: 0 },
-            }
-        }
+        SBI_COVH_ADD_TVM_MEMORY_REGION => match hypervisor_data.add_tvm_memory_region(a0, a1, a2) {
+            Ok(_) => SbiRet { a0: 0, a1: 0 },
+            Err(_) => SbiRet { a0: -1, a1: 0 },
+        },
 
         SBI_COVH_ADD_TVM_MEASURED_PAGES => {
-            match state
-                .hypervisor
-                .add_tvm_measured_pages(a0, a1, a2, a3, a4, a5)
-            {
+            match hypervisor_data.add_tvm_measured_pages(a0, a1, a2, a3, a4, a5) {
                 Ok(_) => SbiRet { a0: 0, a1: 0 },
                 Err(_) => SbiRet { a0: -1, a1: 0 },
             }
         }
 
-        SBI_COVH_CREATE_TVM_VCPU => match state.hypervisor.create_tvm_vcpu(a0, a1, a2) {
-            Ok(_) => SbiRet { a0: 0, a1: 0 },
-            Err(_) => SbiRet { a0: -1, a1: 0 },
-        },
-
-        SBI_COVH_RUN_TVM_VCPU => match state.hypervisor.run_tvm_vcpu(a0, a1) {
+        SBI_COVH_CREATE_TVM_VCPU => SbiRet { a0: 0, a1: 0 },
+        SBI_COVH_RUN_TVM_VCPU => match hypervisor_data.tvm_run_vcpu(a0, a1) {
             Ok(_) => unreachable!(),
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
 
-        SBI_COVH_DESTROY_TVM => match state.hypervisor.destroy_tvm() {
+        SBI_COVH_DESTROY_TVM => match hypervisor_data.destroy_tvm() {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
         _ => SbiRet { a0: -1, a1: 0 },
     };
-
-    // Needed because this function does not end gracefully, but with an ECALL
-    drop(lock);
 
     // Issue the TEERET
     unsafe {
@@ -239,4 +199,55 @@ fn main(
             options(noreturn)
         );
     };
+}
+
+/// Small typed wrapper around the firmware-provided pointer.
+///
+/// All `unsafe` pointer casting happens in `from_addr()`; the rest of the code
+/// uses safe methods where possible.
+pub struct State {
+    ptr: NonNull<TsmStateData>,
+}
+
+impl State {
+    /// Try to build `FirmwareState` from the register `t0`.
+    ///
+    /// This performs basic checks (non-null and alignment). It's `unsafe` because
+    /// we cannot guarantee the pointed memory has the correct provenance or lifetime.
+    pub unsafe fn from_addr(addr: usize) -> Option<Self> {
+        if addr == 0 {
+            return None;
+        }
+
+        if addr % align_of::<TsmStateData>() != 0 {
+            return None;
+        }
+
+        // Convert to NonNull; this is safe because addr != 0.
+        Some(Self {
+            ptr: NonNull::new_unchecked(addr as *mut TsmStateData),
+        })
+    }
+
+    /// Obtain an immutable reference. This is safe only if no other party mutates
+    /// the structure concurrently. If the region can be mutated concurrently,
+    /// prefer `read_volatile` or explicit atomics.
+    pub fn as_ref(&self) -> &TsmStateData {
+        unsafe { &*self.ptr.as_ptr() }
+    }
+
+    /// Obtain a mutable reference. This is `unsafe` because aliasing and concurrency
+    /// rules can be violated if another reference exists.
+    pub unsafe fn as_mut(&mut self) -> &mut TsmStateData {
+        &mut *self.ptr.as_ptr()
+    }
+
+    /// Convenience: clone `info` field in a safe manner.
+    pub fn info_clone(&self) -> TsmInfo
+    where
+        TsmInfo: Clone,
+    {
+        // if info is not concurrently mutated, this is fine. Otherwise user must ensure sync.
+        self.as_ref().info.clone()
+    }
 }

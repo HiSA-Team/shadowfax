@@ -11,7 +11,6 @@ if this_dir not in sys.path:
 from gdb_covh_flow import Step, TestRunner, read_mem, read_reg
 
 
-# ================ CoVE Constants ======================= #
 EID_SUPD_ID: int = 0x53555044
 EID_COVH_ID: int = 0x434F5648
 
@@ -26,18 +25,13 @@ COVH_ADD_TVM_MEASURED_PAGES: int = 11
 COVH_CREATE_TVM_VCPU: int = 14
 COVH_RUN_TVM_VCPU: int = 15
 
-# ================ Create TVM Input ======================= #
+
 PAGE_DIRECTORY_SIZE: int = 0x4000  # 16kib
 GPA_BASE: int = 0x1000
 NUM_PAGES_TO_DONATE: int = 16
 JAL_LOOP_WORD = struct.pack("<I", 0x0000006F)  # jal x0, 0  -> tight infinite loop
 
-TVM_ID: int = 1
-VCPU_ID: int = 0
-PAGE_SIZE_TO_ID = {0x1000: 0}
-PAGE_SIZE: int = 0x1000  # 4096byte 4k
-
-payload_address: int = int(os.environ["BOOT_DOMAIN_ADDRESS"], 16)
+payload_address: int = int(os.environ["ROOT_DOMAIN_JUMP_ADDRESS"], 16)
 confidential_memory_start_addr: int = payload_address + 0x4000
 tvm_source_code_addr: int = payload_address + 0x2000
 tvm_page_start_addr: int = confidential_memory_start_addr + PAGE_DIRECTORY_SIZE + 0x1000
@@ -104,10 +98,10 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
     assert tsm_capabilities == 0, (
         f"tsm_capabilities must be 0; current {tsm_capabilities}"
     )
-    assert tvm_state_pages == 0, f"tvm_state_pages must be 0; current {tvm_state_pages}"
+    assert tvm_state_pages == 1, f"tvm_state_pages must be 1; current {tvm_state_pages}"
     assert tvm_max_vcpus == 1, f"tvm_max_vcpus must be 1; current {tvm_max_vcpus}"
-    assert tvm_vcpu_state_pages == 0, (
-        f"tvm_vcpu_state_pages must be 0; current {tvm_vcpu_state_pages}"
+    assert tvm_vcpu_state_pages == 1, (
+        f"tvm_vcpu_state_pages must be 1; current {tvm_vcpu_state_pages}"
     )
 
 
@@ -141,9 +135,7 @@ def setup_create_tvm() -> None:
 def assert_create_tvm(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
-    a1 = regs["a1"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-    assert a1 == TVM_ID, f"expected tvm_id={TVM_ID}in a1({a1})"
 
     # assert that the pagetable is zero
     params_addr = prev["regs"]["a0"]
@@ -210,8 +202,6 @@ def run() -> None:
 
     runner = TestRunner(payload_address)
 
-    # Enumerate supervsisor domain: our untruste domain should discover the trusted domain
-    # which contains a TSM with id 1
     runner.add_step(
         Step(
             name="enumerate_supervisor_domains",
@@ -230,7 +220,6 @@ def run() -> None:
         )
     )
 
-    # Get the TSM capabilities. The TSM will write its capabilities in a structure we provide
     runner.add_step(
         Step(
             name="get_tsm_info",
@@ -249,8 +238,6 @@ def run() -> None:
         )
     )
 
-    # Donate pages to the untrusted domain. These will be used to host the TVM by the TSM hypervisor component
-    # Each page has size 4k
     runner.add_step(
         Step(
             name="convert_pages",
@@ -269,8 +256,6 @@ def run() -> None:
         )
     )
 
-    # Create a TVM object. The Host will tell where to create the GPT. The TSM will respond with the id
-    # of the trusted VM
     runner.add_step(
         Step(
             name="create_tvm",
@@ -289,8 +274,6 @@ def run() -> None:
         )
     )
 
-    # Create a memory region. This region will be used to host the TVM code/data. The memory region
-    # will be assigned to the TVM for the base GPA mapping
     runner.add_step(
         Step(
             name="add_tvm_memory_region",
@@ -298,7 +281,7 @@ def run() -> None:
                 "a0": 1,
                 # Guest Physical Address (GPA)
                 "a1": GPA_BASE,
-                "a2": PAGE_SIZE,
+                "a2": 0x1000,
                 "a3": 0,
                 "a4": 0,
                 "a5": 0,
@@ -310,19 +293,18 @@ def run() -> None:
         )
     )
 
-    # Copy TVM code/data in the trusted domain. The TSM will map these pages into the TVM GPT
-    # and measure them
     runner.add_step(
         Step(
             name="add_tvm_measured_pages",
             regs={
-                "a0": TVM_ID,
+                "a0": 1,
                 # will write at this address the loop jump loop instruction
                 "a1": tvm_source_code_addr,
                 # the address of the physical confidential memory
                 # START_CONFIDENTIAL_REGION + 16 kb +
                 "a2": tvm_page_start_addr,
-                "a3": PAGE_SIZE_TO_ID[PAGE_SIZE],
+                # 0 for 4kb page
+                "a3": 0,
                 # num pages just one page
                 "a4": 1,
                 "a5": GPA_BASE,
@@ -334,15 +316,12 @@ def run() -> None:
         )
     )
 
-    # Add vCPU with id=0 to the TVM
     runner.add_step(
         Step(
             name="create_vcpu",
             regs={
-                "a0": TVM_ID,
-                # vcpuid
-                "a1": VCPU_ID,
-                # tvm_state address (unused for now)
+                "a0": payload_address + 0x1000,
+                "a1": 48,
                 "a2": 0,
                 "a3": 0,
                 "a4": 0,
@@ -355,15 +334,12 @@ def run() -> None:
         )
     )
 
-    # Finalize the TVM. Provide GPA_BASE as the entrypoint
     runner.add_step(
         Step(
             name="finalize_tvm",
             regs={
-                "a0": TVM_ID,
-                # entrypoint
+                "a0": 1,
                 "a1": GPA_BASE,
-                # tvm identity addr (unused for now)
                 "a2": 0,
                 "a3": 0,
                 "a4": 0,
@@ -376,13 +352,12 @@ def run() -> None:
         )
     )
 
-    # Start the TVM vCPU.
     runner.add_step(
         Step(
             name="run_tvm_vcpu",
             regs={
-                "a0": TVM_ID,
-                "a1": VCPU_ID,
+                "a0": 1,
+                "a1": 0,
                 "a2": 0,
                 "a3": 0,
                 "a4": 0,
