@@ -22,9 +22,7 @@ def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
     a0 = regs["a0"]
     a1 = regs["a1"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-    assert a1 & 0x3 == 3, (
-        f"a1 must be contains tsm (id=1) and the root domain (id=0) bit set (0x3) (current {a1})"
-    )
+    assert a1 == 0b111, f"a1 must be 0b111 (current {a1})"
 
 
 def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:

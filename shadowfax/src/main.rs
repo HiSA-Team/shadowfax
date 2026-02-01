@@ -54,9 +54,10 @@ mod opensbi {
 }
 
 mod context;
+mod domain;
+mod error;
 mod state;
 mod trap;
-mod tsm;
 
 extern crate alloc;
 #[global_allocator]

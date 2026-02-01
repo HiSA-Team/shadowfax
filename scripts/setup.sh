@@ -55,17 +55,11 @@ install_dependencies() {
     device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
     libexpat-dev libgmp-dev libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
     make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev
-    if [ "$architecture" != "riscv64" ]; then
-      DEBIAN_FRONTEND=noninteractive apt-get -y install gcc-riscv64-linux-"$LIBC_PREFIX"
-    fi
     ;;
   void)
     xbps-install -Sy gawk bc gperf autoconf automake bison make base-devel bison flex \
       openssl-devel libelf elfutils-devel libdwarf-devel curl git file cpio clang cmake ninja \
       python3 python3-tomli ninja sudo texinfo lzlib-devel
-    if [ "$architecture" != "riscv64" ]; then
-      xbps-install -Sy cross-riscv64-linux-"$LIBC_PREFIX"
-    fi
     ;;
   *)
     print_err "unsupported distribution: $DISTRO_CODENAME. Make sure you install dependencies according to your distribution"
