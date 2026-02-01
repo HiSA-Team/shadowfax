@@ -2,17 +2,21 @@ use alloc::vec::Vec;
 use common::attestation::{DiceLayer, TvmAttestationContext};
 use core::alloc::Layout;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
-use riscv::register::{
-    sepc,
-    sstatus::{self, FS, SPP},
-    stvec::{self, Stvec},
+use riscv::{
+    interrupt::Trap,
+    register::{
+        sepc,
+        sstatus::{self, FS, SPP},
+        stvec::{self, Stvec},
+    },
 };
 use sha2::{Digest, Sha384};
 
 use crate::{
     h_extension::{
-        csrs::{hgatp, hstatus, vsatp},
+        csrs::{hgatp, hstatus, htval, vsatp},
         instruction::hfence_gvma_all,
+        HvException,
     },
     println, TsmState,
 };
@@ -28,6 +32,30 @@ const PTE_X: u64 = 1 << 3;
 const PTE_U: u64 = 1 << 4;
 const PTE_A: u64 = 1 << 6;
 const PTE_D: u64 = 1 << 7;
+
+// -----------------------------
+// SBI Helper
+// -----------------------------
+struct SbiRet {
+    error: usize,
+    value: usize,
+}
+
+fn sbi_call(eid: usize, fid: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> SbiRet {
+    let (error, value);
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") eid,
+            in("a6") fid,
+            inout("a0") a0 => error,
+            inout("a1") a1 => value,
+            in("a2") a2,
+            in("a3") a3,
+        );
+    }
+    SbiRet { error, value }
+}
 
 // -----------------------------
 // Helper functions for SV39
@@ -775,54 +803,66 @@ pub unsafe extern "C" fn hyper_trap() -> ! {
 }
 
 #[no_mangle]
+
 extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapContext {
-    // We use the 'riscv' crate style CSR access or core::arch::asm
     let scause = riscv::register::scause::read();
+    let stval = riscv::register::stval::read(); // GPA on Guest Page Fault
     let mut sepc = riscv::register::sepc::read();
 
-    // 10 = Environment call from VS-mode
-    if scause.bits() == 10 {
-        let regs = unsafe { &mut (*ctx).regs };
-
-        // 1. Forward to OpenSBI (M-mode)
-        // eid = a7 (regs[17]), fid = a6 (regs[16])
-        let sbi_ret = sbi_call(regs[17], regs[16], regs[10], regs[11], regs[12], regs[13]);
-
-        // 2. Write return values back to Guest a0, a1
-        regs[10] = sbi_ret.error;
-        regs[11] = sbi_ret.value;
-
-        // 3. Skip the 'ecall' instruction in the guest
-        sepc += 4;
-        unsafe {
-            riscv::register::sepc::write(sepc);
+    match scause.cause() {
+        Trap::Interrupt(interrupt_number) => {
+            panic!("Interrupt {} not handled", interrupt_number);
         }
-    } else {
-        panic!("Unhandled Trap: {:?}, SEPC: {:#x}", scause.cause(), sepc);
+
+        Trap::Exception(exception_number) => match exception_number {
+            _ => match HvException::from(scause.code()) {
+                HvException::EcallFromVsMode => {
+                    let regs = unsafe { &mut (*ctx).regs };
+
+                    // 1. Forward to OpenSBI (M-mode)
+
+                    // eid = a7 (regs[17]), fid = a6 (regs[16])
+
+                    let sbi_ret =
+                        sbi_call(regs[17], regs[16], regs[10], regs[11], regs[12], regs[13]);
+
+                    // 2. Write return values back to Guest a0, a1
+
+                    regs[10] = sbi_ret.error;
+
+                    regs[11] = sbi_ret.value;
+
+                    // 3. Skip the 'ecall' instruction in the guest
+
+                    sepc += 4;
+
+                    unsafe {
+                        riscv::register::sepc::write(sepc);
+                    }
+                }
+
+                HvException::InstructionGuestPageFault => {
+                    panic!(
+                        "Instruction guest-page fault\nfault gpa: {:#x}\nfault hpa: {:#x}",
+                        stval,
+                        htval::read().bits() << 2,
+                    );
+                }
+
+                HvException::LoadGuestPageFault => {}
+                HvException::StoreAmoGuestPageFault => {}
+                _ => {
+                    panic!(
+                        "Unhandled Exception: {:?}, SEPC: {:#x}",
+                        scause.cause(),
+                        sepc
+                    );
+                }
+            },
+        },
     }
 
     ctx
-}
-
-fn sbi_call(eid: usize, fid: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> SbiRet {
-    let (error, value);
-    unsafe {
-        core::arch::asm!(
-            "ecall",
-            in("a7") eid,
-            in("a6") fid,
-            inout("a0") a0 => error,
-            inout("a1") a1 => value,
-            in("a2") a2,
-            in("a3") a3,
-        );
-    }
-    SbiRet { error, value }
-}
-
-struct SbiRet {
-    error: usize,
-    value: usize,
 }
 
 pub fn bootstrap_load_elf(
@@ -941,10 +981,6 @@ pub fn bootstrap_load_elf(
     // 5. Finalize TVM
     let entry_point = elf.ehdr.e_entry as usize;
     state.hypervisor.finalize_tvm(tvm_id, entry_point, 0, 0)?;
-    println!(
-        "[OLORIN] Mapping stack/gap: GPA 0x{:x} to 0x{:x}",
-        highest_gpa_mapped, ram_end_gpa
-    );
 
     Ok(tvm_id)
 }
