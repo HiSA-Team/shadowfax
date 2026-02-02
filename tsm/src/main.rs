@@ -80,7 +80,7 @@ extern "C" fn _start() -> ! {
 
         stack_size_per_hart = const STACK_SIZE_PER_HART,
         stack_top = sym _stack_top,
-        main = sym test_tvm_bootstrap,
+        main = sym test_tvm_bootstrap_perf,
     )
 }
 
@@ -272,6 +272,7 @@ fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Starting Mapping TVM from ELF");
     // 1. Initialize the TSM state manually (if _secure_init wasn't called by a driver)
     // We'll simulate a dummy attestation context for testing.
+
     let dummy_context = TsmAttestationContext::default();
     _secure_init(&dummy_context as *const _ as usize);
 
@@ -323,4 +324,102 @@ fn test_tvm_bootstrap() -> ! {
         .hypervisor
         .run_tvm_vcpu(tvm_id, 0)
         .expect("Failed to run VCPU");
+}
+
+#[inline(always)]
+fn read_cycle() -> u64 {
+    let value: u64;
+    unsafe {
+        core::arch::asm!("csrr {}, cycle", out(reg) value);
+    }
+    value
+}
+
+#[inline(always)]
+fn read_instret() -> u64 {
+    let value: u64;
+    unsafe {
+        core::arch::asm!("csrr {}, instret", out(reg) value);
+    }
+    value
+}
+
+#[inline(always)]
+fn read_time() -> u64 {
+    let value: u64;
+    unsafe {
+        core::arch::asm!("csrr {}, time", out(reg) value);
+    }
+    value
+}
+
+fn test_tvm_bootstrap_perf() -> ! {
+    println!("[OLORIN] Starting Mapping TVM from ELF");
+    // 1. Initialize the TSM state manually (if _secure_init wasn't called by a driver)
+    // We'll simulate a dummy attestation context for testing.
+    // --- Start TVM measurement ---
+    let cycle_start = read_cycle();
+    let instret_start = read_instret();
+    let time_start = read_time();
+
+    let dummy_context = TsmAttestationContext::default();
+    _secure_init(&dummy_context as *const _ as usize);
+
+    let mut lock = STATE.lock();
+    let state = lock.as_mut().expect("State not initialized");
+
+    // 2. Define Memory Layout for Testing (Adjust based on your QEMU RAM)
+    // Assuming TSM is at 0x80200000, let's put TVM structures higher up.
+    let tvm_page_table_addr = 0x80800000; // Must be 16KB aligned
+    let tvm_state_addr = 0x80810000;
+    let tvm_confidential_pool = 0x80900000; // Where guest RAM actually sits
+    let pool_size_pages = 512; // 2MB test pool
+
+    // 3. Convert pages to confidential
+    state
+        .hypervisor
+        .add_confidential_pages(tvm_page_table_addr, 4)
+        .unwrap(); // 16KB
+    state
+        .hypervisor
+        .add_confidential_pages(tvm_state_addr, 1)
+        .unwrap();
+    state
+        .hypervisor
+        .add_confidential_pages(tvm_confidential_pool, pool_size_pages)
+        .unwrap();
+
+    // 4. Use the ELF loading procedure
+    // This helper parses GUEST_ELF and maps it into the TVM
+    let tvm_id = hyper::bootstrap_load_elf(
+        state,
+        GUEST_ELF,
+        tvm_page_table_addr,
+        tvm_state_addr,
+        tvm_confidential_pool,
+    )
+    .expect("Failed to load ELF");
+
+    // 5. Create VCPU (ID 0)
+    state
+        .hypervisor
+        .create_tvm_vcpu(tvm_id, 0, 0)
+        .expect("Failed to create VCPU");
+
+    println!("[OLORIN] Bootstrap complete. Entering Guest...");
+    // --- End TVM measurement ---
+    let cycle_end = read_cycle();
+    let instret_end = read_instret();
+    let time_end = read_time();
+
+    let delta = time_end - time_start;
+    println!(
+        "cycle = {}\ninstret = {}\ntime = {}\ndelta = {}",
+        cycle_end - cycle_start,
+        instret_end - instret_start,
+        delta * (1_000_000_000) / 10000000,
+        delta
+    );
+    println!("[OLORIN] TVM bootstrap completed");
+    loop {}
 }
