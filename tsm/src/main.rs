@@ -28,7 +28,7 @@ mod log;
 mod state;
 
 #[link_section = ".rodata"]
-pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/riscv-tests/benchmarks/towers.riscv");
+pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/coremark/coremark.bin");
 
 extern crate alloc;
 #[global_allocator]
@@ -301,7 +301,7 @@ fn test_tvm_bootstrap() -> ! {
 
     // 4. Use the ELF loading procedure
     // This helper parses GUEST_ELF and maps it into the TVM
-    let tvm_id = hyper::bootstrap_load_elf(
+    let tvm_id = hyper::bootstrap_load_elf_lazy(
         state,
         GUEST_ELF,
         tvm_page_table_addr,

@@ -11,6 +11,7 @@ use riscv::{
     },
 };
 use sha2::{Digest, Sha384};
+use spin::Mutex;
 
 use crate::{
     h_extension::{
@@ -803,7 +804,6 @@ pub unsafe extern "C" fn hyper_trap() -> ! {
 }
 
 #[no_mangle]
-
 extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapContext {
     let scause = riscv::register::scause::read();
     let stval = riscv::register::stval::read(); // GPA on Guest Page Fault
@@ -820,20 +820,15 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                     let regs = unsafe { &mut (*ctx).regs };
 
                     // 1. Forward to OpenSBI (M-mode)
-
                     // eid = a7 (regs[17]), fid = a6 (regs[16])
-
                     let sbi_ret =
                         sbi_call(regs[17], regs[16], regs[10], regs[11], regs[12], regs[13]);
 
                     // 2. Write return values back to Guest a0, a1
-
                     regs[10] = sbi_ret.error;
-
                     regs[11] = sbi_ret.value;
 
                     // 3. Skip the 'ecall' instruction in the guest
-
                     sepc += 4;
 
                     unsafe {
@@ -841,16 +836,13 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                     }
                 }
 
-                HvException::InstructionGuestPageFault => {
-                    panic!(
-                        "Instruction guest-page fault\nfault gpa: {:#x}\nfault hpa: {:#x}",
-                        stval,
-                        htval::read().bits() << 2,
-                    );
+                HvException::InstructionGuestPageFault
+                | HvException::LoadGuestPageFault
+                | HvException::StoreAmoGuestPageFault => {
+                    // 'stval' holds the Guest Physical Address that caused the fault
+                    handle_lazy_fault(stval);
+                    // We do NOT increment sepc; we want to retry the instruction
                 }
-
-                HvException::LoadGuestPageFault => {}
-                HvException::StoreAmoGuestPageFault => {}
                 _ => {
                     panic!(
                         "Unhandled Exception: {:?}, SEPC: {:#x}",
@@ -864,6 +856,25 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
 
     ctx
 }
+
+// Track ELF segments to know what to copy where
+struct LazySegment {
+    vaddr: usize,
+    memsz: usize,
+    filesz: usize,
+    offset: usize,
+}
+
+// Global state accessible by the trap handler
+struct LazyState {
+    segments: Vec<LazySegment>,
+    elf_data: &'static [u8], // Reference to the raw ELF bytes
+    next_free_phys: usize,   // Simple bump allocator for physical pages
+    phys_limit: usize,
+}
+
+// Mutex to safely access this from the trap handler
+static LAZY_STATE: Mutex<Option<LazyState>> = Mutex::new(None);
 
 pub fn bootstrap_load_elf(
     state: &mut TsmState,
@@ -979,6 +990,148 @@ pub fn bootstrap_load_elf(
     }
 
     // 5. Finalize TVM
+    let entry_point = elf.ehdr.e_entry as usize;
+    state.hypervisor.finalize_tvm(tvm_id, entry_point, 0, 0)?;
+
+    Ok(tvm_id)
+}
+
+fn handle_lazy_fault(gpa: usize) {
+    let mut lock = LAZY_STATE.lock();
+
+    if let Some(lazy) = lock.as_mut() {
+        // 1. Align the faulting GPA to a 4KB page boundary
+        let gpa_page = gpa & !(PAGE_SIZE - 1);
+
+        // 2. Allocate a physical page (simple bump allocation)
+        if lazy.next_free_phys >= lazy.phys_limit {
+            panic!("OOM: Run out of confidential memory for lazy loading");
+        }
+        let pa = lazy.next_free_phys;
+        lazy.next_free_phys += PAGE_SIZE;
+
+        // 3. Initialize page with zeros (important for BSS or partial pages)
+        unsafe { core::ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE) };
+
+        // 4. Fill with ELF data if the page overlaps a segment
+        for seg in &lazy.segments {
+            let seg_start = seg.vaddr;
+            let seg_end = seg.vaddr + seg.memsz;
+
+            // Check overlap
+            if gpa_page >= seg_start && gpa_page < seg_end {
+                // Calculate offsets to copy the correct slice
+                let start_in_page = if seg_start > gpa_page {
+                    seg_start - gpa_page
+                } else {
+                    0
+                };
+                let end_in_page = if seg_end < gpa_page + PAGE_SIZE {
+                    seg_end - gpa_page
+                } else {
+                    PAGE_SIZE
+                };
+
+                let copy_start = gpa_page + start_in_page;
+                let copy_end = gpa_page + end_in_page;
+
+                // Ensure we don't copy past the file size (bss section is zero-filled)
+                let seg_file_end = seg.vaddr + seg.filesz;
+                let effective_end = core::cmp::min(copy_end, seg_file_end);
+
+                if effective_end > copy_start {
+                    let len = effective_end - copy_start;
+                    let file_off = seg.offset + (copy_start - seg.vaddr);
+
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(
+                            lazy.elf_data.as_ptr().add(file_off),
+                            (pa as *mut u8).add(start_in_page),
+                            len,
+                        );
+                    }
+                }
+            }
+        }
+
+        // 5. Map the page into the Guest Page Table
+        // Retrieve the root PPN from HGATP to find the page table location
+        let hgatp_val = hgatp::read().bits();
+        let root_ppn = hgatp_val & 0xFF_FFFF_FFFF_F;
+        let root_pt = (root_ppn << 12) as usize;
+
+        // Map with full permissions (R/W/X/U)
+        // Note: You must ensure map_4k_leaf is accessible here
+        map_4k_leaf(
+            root_pt,
+            gpa_page,
+            pa,
+            PTE_R | PTE_W | PTE_X | PTE_U | PTE_A | PTE_D,
+        );
+
+        // 6. Flush TLB so the CPU sees the new mapping immediately
+        hfence_gvma_all();
+    } else {
+        panic!("Guest Page Fault occurred but Lazy Loading state is not initialized!");
+    }
+}
+
+pub fn bootstrap_load_elf_lazy(
+    state: &mut TsmState,
+    data: &'static [u8], // Must be 'static to persist for the trap handler
+    pt_addr: usize,
+    state_addr: usize,
+    conf_pool_base: usize,
+) -> anyhow::Result<usize> {
+    // A. Parse ELF to find PT_LOAD segments
+    let elf = ElfBytes::<AnyEndian>::minimal_parse(data)
+        .map_err(|e| anyhow::anyhow!("ELF parse error: {:?}", e))?;
+
+    let mut segments = Vec::new();
+    if let Some(hdrs) = elf.segments() {
+        for ph in hdrs.iter().filter(|ph| ph.p_type == PT_LOAD) {
+            segments.push(LazySegment {
+                vaddr: ph.p_vaddr as usize,
+                memsz: ph.p_memsz as usize,
+                filesz: ph.p_filesz as usize,
+                offset: ph.p_offset as usize,
+            });
+        }
+    }
+
+    // B. Initialize the Global Lazy State
+    // We reserve the physical memory pool here but don't touch it yet.
+    // The trap handler will allocate from 'next_free_phys' on demand.
+    let ram_size = 2 * 1024 * 1024; // Fixed 2MB for this test setup
+
+    {
+        let mut lock = LAZY_STATE.lock();
+        *lock = Some(LazyState {
+            segments,
+            elf_data: data,
+            next_free_phys: conf_pool_base,
+            phys_limit: conf_pool_base + ram_size,
+        });
+    }
+
+    // C. Standard TVM Creation (Metadata only, NO MAPPING)
+    let attestation = state.attestation_context.compute_next(&[0; 32]);
+    let tvm_id = state
+        .hypervisor
+        .create_tvm(attestation, pt_addr, state_addr)?;
+
+    // Define the guest physical address range (e.g. 0x1000 size 2MB)
+    // This records that the range is valid for the TVM, allowing the
+    // fault handler to proceed later, but we map 0 pages right now.
+    let gpa_base = 0x1000;
+    state
+        .hypervisor
+        .add_tvm_memory_region(tvm_id, gpa_base, ram_size)?;
+
+    // D. Finalize
+    // Set the entry point (e.g. 0x1000).
+    // The Guest will execute the first instruction, immediately Page Fault
+    // (because the page table is empty), and trigger our Lazy Trap Handler.
     let entry_point = elf.ehdr.e_entry as usize;
     state.hypervisor.finalize_tvm(tvm_id, entry_point, 0, 0)?;
 
