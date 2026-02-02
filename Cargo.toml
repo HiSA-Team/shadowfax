@@ -1,8 +1,13 @@
 [workspace]
 resolver = "3"
+default-members = [
+  "common",
+  "shadowfax",
+  "tsm",
+]
 members = [
   "common",
   "shadowfax",
-  "test",
+  "test/functional",
   "tsm",
 ]

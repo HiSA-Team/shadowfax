@@ -20,13 +20,7 @@ use common::sbi::{
     SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
 
-use crate::{
-    _tee_stack_top,
-    context::Context,
-    domain::{build_pmp_configuration_registers, MemoryRegion},
-    opensbi,
-    state::STATE,
-};
+use crate::{_tee_stack_top, context::Context, domain::MemoryRegion, opensbi, state::STATE};
 
 macro_rules! cove_unpack_fid {
     ($fid:expr) => {
@@ -164,7 +158,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let domain = domain.unwrap();
 
     // TEECALL
-    if domain.state_addr.is_some() {
+    if domain.has_tsm {
         let domain_ctx = domain.context_addr as *mut Context;
         // TODO: get current domain
         let src_id = 2;
@@ -192,9 +186,6 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             // The caller id must be saved in bits [31:26]
             let eid = (*domain_ctx).regs[16] & 0xFFFF;
             (*domain_ctx).regs[16] = ((src_id) << 26) | eid;
-
-            // save the domain state into t0
-            (*domain_ctx).regs[5] = domain.state_addr.unwrap();
 
             // save the caller context address into domain context
             (*domain_ctx).caller_ctx = caller_ctx_addr;
@@ -477,7 +468,7 @@ unsafe fn return_error(ctx_addr: usize, code: isize) -> usize {
 }
 
 // Program the PMP as stated in 3.7 in Privileged ISA
-fn program_pmp_from_regions(regions: &[MemoryRegion]) {
+pub fn program_pmp_from_regions(regions: &[MemoryRegion]) {
     for (i, r) in regions.iter().enumerate() {
         let ones = (1 << (r.order - 3)) - 1;
         let range = riscv::register::Range::NAPOT as usize;

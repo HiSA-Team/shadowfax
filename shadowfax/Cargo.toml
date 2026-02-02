@@ -18,13 +18,12 @@ features = ["static"]
 
 [dependencies]
 anyhow = { version = "1.0.98", default-features = false }
+base64ct = "1.8.0"
 common  = { path = "../common/" }
-digest = "0.10.7"
+ed25519-compact = { version = "2.2.0", default-features = false }
 elf = { version = "0.7.2", default-features = false }
 fdt-rs = {version = "0.4", default-features = false }
 heapless = "0.8.0"
 linked_list_allocator = "0.10.5"
 riscv = "0.13.0"
-sha2 = { version = "0.10.9", default-features = false }
-rsa = { version = "0.9.8", default-features = false, features = ["pem", "u64_digit", "sha2"] }
 spin = { version = "0.10.0", features = ["spin_mutex"] }

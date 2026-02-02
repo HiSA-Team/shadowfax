@@ -1,12 +1,14 @@
+# Make the script non interactive
 set confirm off
 set breakpoint pending on
 set pagination off
 
+# Connect to the target
 target remote localhost:1234
 
 # load firwmare and tsm debug symbols
 add-symbol-file target/riscv64imac-unknown-none-elf/debug/shadowfax
-add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm 0x81400000
+add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm 0x82000000
 
 break tsm::main
 

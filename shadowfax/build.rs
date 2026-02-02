@@ -36,15 +36,15 @@ fn main() {
     // - build and link opensbi
     // - link linkerscript
     {
+        let cross_compile =
+            env::var("RV_PREFIX").unwrap_or("riscv64-unknown-linux-gnu-".to_string());
+
         let status = std::process::Command::new("make")
             .args([
                 "-C",
                 &opensbi_path.to_string_lossy(),
                 &format!("PLATFORM={}", &platform),
-                &format!(
-                    "CROSS_COMPILE={}",
-                    &env::var("CROSS_COMPILE").expect("CROSS_COMPILE not set")
-                ),
+                &format!("CROSS_COMPILE={}", cross_compile),
             ])
             .status()
             .expect("failed to build opensbi");
@@ -66,7 +66,7 @@ fn main() {
 
     // Compile the device tree
     {
-        let dts_file = &platform_dir.join("device-tree.dts");
+        let dts_file = &platform_dir.join("device-tree.dts").canonicalize().unwrap();
         let dtb_file = &bin_dir.join("device-tree.dtb");
         let status = Command::new("dtc")
             .args([
@@ -75,8 +75,8 @@ fn main() {
                 "-O",
                 "dtb",
                 "-o",
-                dtb_file.as_path().to_str().unwrap(),
-                dts_file.to_str().unwrap(),
+                &dtb_file.to_str().unwrap(),
+                &dts_file.to_str().unwrap(),
             ])
             .status()
             .expect("Failed to execute dtc");

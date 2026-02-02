@@ -53,6 +53,7 @@ mod opensbi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+mod constants;
 mod context;
 mod domain;
 mod error;
@@ -71,28 +72,24 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
  */
 unsafe extern "C" {
     // Firmware info
-    static _fw_start: u8;
+    pub static _fw_start: u8;
     static _fw_end: u8;
-    static _fw_rw_start: u8;
+    pub static _fw_rw_start: u8;
 
-    // heap
+    // Heap
     static mut _heap_start: u8;
-    static _heap_size: u8;
+    static _heap_end: u8;
 
     // Bss info
     static _start_bss: u8;
     static _end_bss: u8;
 
-    // Boot stack
-    static _boot_stack_top: u8;
-    static _boot_stack_size: u8;
+    // Stack
+    static _stack_top: u8;
 
     // Start of the TEE Scratch Stack
     pub static _tee_stack_top: u8;
 
-    // Space for TSM state
-    pub static _tsm_state_start: u8;
-    pub static _tsm_state_size: u8;
 }
 
 /*
@@ -148,6 +145,7 @@ extern "C" fn _start() -> ! {
 
         // Loop if s4 is less than s5
         blt s4, s5, 0b
+
         // call fw_platform_init
         // save registers a0-a4
         add s0, a0, zero
@@ -171,7 +169,7 @@ extern "C" fn _start() -> ! {
         call {main}
         "#,
         stack_size_per_hart = const STACK_SIZE_PER_HART,
-        stack_top = sym _boot_stack_top,
+        stack_top = sym _stack_top,
         hang = sym hang,
         fw_platform_init = sym opensbi::fw_platform_init,
         main = sym main,
@@ -242,11 +240,10 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 
     // this enables heap allocations
     unsafe {
-        // Initialize global allocator
-        ALLOCATOR.lock().init(
-            core::ptr::addr_of_mut!(_heap_start),
-            core::ptr::addr_of!(_heap_size) as usize,
-        );
+        // Initialize global alloca
+        let heap_start = (&raw const _heap_start as *const u8) as usize;
+        let heap_size = ((&raw const _heap_end as *const u8) as usize) - heap_start;
+        ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
     }
 
     // setup a temporary trap handler (just a busy loop)
@@ -256,21 +253,11 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
-    // prepare the next stage. If SHADOWFAX_JUMP_ADDRESS is specified, jump to that address (the
-    // user will load that payload). Otherwise fallback to empty payload which does nothing
-    let next_stage_address = {
-        let address = env!("ROOT_DOMAIN_JUMP_ADDRESS").strip_prefix("0x").unwrap();
-        usize::from_str_radix(address, 16)
-            .unwrap_or_else(|_| panic!("Invalid memory address: {}", address))
-    };
 
-    dump_linker_symbols(next_stage_address);
-
-    let tsm_state_start = unsafe { &_tsm_state_start as *const u8 as usize };
-    let tsm_state_size = unsafe { &_tsm_state_size as *const u8 as usize };
+    dump_linker_symbols();
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
-    state::init(fdt_addr, tsm_state_start, tsm_state_size).unwrap();
+    let next_stage_address = state::init(fdt_addr).unwrap();
 
     /*
      * This code initializes the scratch space, which is a per-HART data structure
@@ -454,7 +441,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 }
 
 // a small helper to print an address using the print_raw! macro
-fn dump_linker_symbols(next_stage_address: usize) {
+fn dump_linker_symbols() {
     // print header
     print_raw!("\nSHADOWFAX Firmware v0.1\n");
     print_raw!("========================\n");
@@ -476,22 +463,12 @@ fn dump_linker_symbols(next_stage_address: usize) {
 
         print_raw!(
             "Boot Stack Top    : {:#018x}\n",
-            &_boot_stack_top as *const u8 as usize
+            &_stack_top as *const u8 as usize
         );
         print_raw!(
             "TEE Stack Top     : {:#018x}\n",
             &_tee_stack_top as *const u8 as usize
         );
-        print_raw!(
-            "TSM State Start   : {:#018x}\n",
-            &_tsm_state_start as *const u8 as usize
-        );
-        print_raw!(
-            "TSM State Size    : {:#018x}\n",
-            &_tsm_state_size as *const u8 as usize
-        );
-
-        print_raw!("Root Domain Address    : {:#018x}\n", next_stage_address);
     }
 
     // hart and ISA info
@@ -499,11 +476,13 @@ fn dump_linker_symbols(next_stage_address: usize) {
     print_raw!("Boot HART ID      : {}\n", hart_id);
 
     let misa = misa::read();
+
     let xlen = match misa.mxl() {
         misa::XLEN::XLEN32 => 32,
         misa::XLEN::XLEN64 => 64,
         misa::XLEN::XLEN128 => 128,
     };
+
     // TODO build feature string
     print_raw!("Boot HART ISA     : rv{}\n", xlen);
     print_raw!("========================\n\n");

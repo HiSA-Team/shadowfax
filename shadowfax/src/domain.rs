@@ -1,20 +1,9 @@
-use core::{error::Error, fmt::Display};
-
-use alloc::vec::Vec;
-use common::tsm::{TSM_IMPL_ID, TSM_VERSION};
+use alloc::{boxed::Box, vec::Vec};
+use common::attestation::TsmAttestationContext;
+use ed25519_compact::Signature;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
-use fdt_rs::{
-    base::{DevTree, DevTreeNode},
-    prelude::{FallibleIterator, PropReader},
-};
-use rsa::{
-    pkcs1::DecodeRsaPublicKey,
-    pkcs1v15::{Signature, VerifyingKey},
-    signature::Verifier,
-};
-use sha2::Sha256;
 
-use crate::{context::Context, error::TsmError};
+use crate::{constants::memory_layout::TRUSTED_DOMAIN_REGIONS, context::Context, error::TsmError};
 
 mod tsm {
     #[link_section = ".rodata"]
@@ -42,7 +31,7 @@ pub struct Domain {
     pub memory_regions: Vec<MemoryRegion>,
 
     pub context_addr: usize,
-    pub state_addr: Option<usize>,
+    pub has_tsm: bool,
 }
 
 impl Domain {
@@ -51,7 +40,7 @@ impl Domain {
             trust_map: 0,
             memory_regions: Vec::new(),
             context_addr: 0,
-            state_addr: None,
+            has_tsm: false,
         }
     }
 
@@ -63,12 +52,13 @@ impl Domain {
     ) -> Result<(), anyhow::Error> {
         // Verify the tsm signature with the provided payload using the the public key
         let public_key = str::from_utf8(public_key)?;
-        let signature = Signature::try_from(signature).map_err(TsmError::SignatureError)?;
-        let verifying_key = VerifyingKey::<Sha256>::from_pkcs1_pem(&public_key)
-            .map_err(TsmError::RsaPublicKeyError)?;
-        verifying_key
+
+        let signature = Signature::from_slice(signature).map_err(TsmError::SignatureDecode)?;
+        let verifiying_key = from_public_pem(public_key).map_err(TsmError::PublicKeyDecode)?;
+
+        verifiying_key
             .verify(bin, &signature)
-            .map_err(TsmError::SignatureError)?;
+            .map_err(TsmError::SignatureVerification)?;
 
         // load the tsm into the destination address
         let size = Self::load_elf(bin)?;
@@ -138,7 +128,10 @@ impl Domain {
     }
 }
 
-pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Domain {
+pub fn create_confidential_domain(
+    context_addr: usize,
+    attestation_context: TsmAttestationContext,
+) -> Domain {
     // Assume that the specified domain is a trusted domain -> need to load the TSM in it
     // TODO: parse domain from FDT
     let tsm_ctx = context_addr as *mut Context;
@@ -148,46 +141,13 @@ pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Dom
     domain.trust_map = (1 << 2) | (1 << 0);
 
     // Hardcoded memory regions for now
-    domain.memory_regions = [
-        MemoryRegion {
-            base_addr: 0x8140_0000,
-            order: 24,
-            permissions: 0x3f,
-            mmio: false,
-        },
-        MemoryRegion {
-            base_addr: 0x1000_0000,
-            order: 12,
-            permissions: 0x3f,
-            mmio: true,
-        },
-    ]
-    .to_vec();
+    domain.memory_regions = TRUSTED_DOMAIN_REGIONS.to_vec();
 
     // Save the context address and the state address
     domain.context_addr = context_addr;
-    domain.state_addr = Some(state_addr);
 
-    // init the TSM state
-    let tsm_initial_state = common::tsm::TsmStateData {
-        info: common::tsm::TsmInfo {
-            tsm_state: common::tsm::TsmState::TsmNotLoaded,
-            tsm_impl_id: TSM_IMPL_ID,
-            tsm_version: TSM_VERSION,
-            _padding: 0,
-            tsm_capabilities: 0,
-            tvm_state_pages: 1,
-            tvm_vcpu_state_pages: 1,
-            tvm_max_vcpus: 1,
-        },
-    };
-
-    unsafe {
-        core::ptr::write(
-            state_addr as *mut common::tsm::TsmStateData,
-            tsm_initial_state,
-        );
-    }
+    // Mark the domain as a TSM containing domain -> can accept TEECALL
+    domain.has_tsm = true;
 
     // Configure PMP entry for TMem
     let tmem_region = &domain.memory_regions[0];
@@ -209,30 +169,71 @@ pub fn create_confidential_domain(context_addr: usize, state_addr: usize) -> Dom
     )
     .unwrap();
 
+    // Boot and initialize secure_init safely
+    boot_tsm(attestation_context);
+
     return domain;
 }
 
-// TODO expand this to support TOR address mode
-// Source: https://www.five-embeddev.com/riscv-priv-isa-manual/latest-adoc/machine.html#pmp
-pub fn build_pmp_configuration_registers(
-    index: usize,
-    base_address: usize,
-    size: usize,
-    permission: riscv::register::Permission,
-    range: riscv::register::Range,
-) -> (usize, usize) {
-    let start_addr = base_address;
+/// This function looks for the _secure_init symbol and invoke it as a function
+fn boot_tsm(attestation_context: TsmAttestationContext) {
+    // parse ELF
+    let elf = ElfBytes::<AnyEndian>::minimal_parse(tsm::DEFAULT_TSM).unwrap();
 
-    let size = size.next_power_of_two();
-    let base = start_addr & !(size - 1);
+    // get static symbol table instead of dynsym
+    let (symtab, strtab) = elf
+        .symbol_table()
+        .expect("no .symtab section in ELF")
+        .unwrap();
 
-    let k = size.trailing_zeros() as usize;
-    let ones = (1 << (k - 3)) - 1;
+    // find symbol by iterating static symbols
+    let name = b"_secure_init";
 
-    let pmpaddr = ((base >> 2) as usize) | ones;
-    let locked = false;
-    let byte = (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
-    let pmpcfg = byte << (8 * index);
+    let mut found = None;
+    for sym in symtab {
+        if let Ok(a) = strtab.get(sym.st_name as usize) {
+            if a.as_bytes() == name {
+                found = Some(sym);
+                break;
+            }
+        }
+    }
 
-    return (pmpaddr, pmpcfg);
+    let sym = found.expect("cannot find _secure_init");
+
+    let boxed = Box::new(attestation_context);
+    let addr = Box::into_raw(boxed) as usize;
+    unsafe {
+        // Reinterpret the address as a function
+        let secure_init_fn = core::mem::transmute::<u64, fn(addr: usize)>(sym.st_value);
+        secure_init_fn(addr);
+    }
+}
+
+/// THIS FUNCTION SHOULD NOT EXISTS. IT IS A TEMPORARY FIX SINCE THE ED25519 LIBRARY DEPENDS ON
+/// STD TO PARSE THE PEM
+use base64ct::Encoding;
+
+const DER_HEADER_PK: [u8; 12] = [48, 42, 48, 5, 6, 3, 43, 101, 112, 3, 33, 0];
+
+fn from_public_pem(pem: &str) -> Result<ed25519_compact::PublicKey, ed25519_compact::Error> {
+    let mut it = pem.split("-----BEGIN PUBLIC KEY-----");
+    let _ = it.next().ok_or(ed25519_compact::Error::ParseError)?;
+    let inner = it.next().ok_or(ed25519_compact::Error::ParseError)?;
+    let mut it = inner.split("-----END PUBLIC KEY-----");
+    let b64 = it.next().ok_or(ed25519_compact::Error::ParseError)?;
+    let _ = it.next().ok_or(ed25519_compact::Error::ParseError)?;
+
+    let mut der = [0u8; DER_HEADER_PK.len() + 32]; // 32-byte public key
+    let b64_clean = b64.trim();
+    base64ct::Base64::decode(b64_clean.as_bytes(), &mut der)
+        .map_err(|_| ed25519_compact::Error::ParseError)?;
+
+    if der.len() != DER_HEADER_PK.len() + 32 || der[0..DER_HEADER_PK.len()] != DER_HEADER_PK {
+        return Err(ed25519_compact::Error::ParseError);
+    }
+
+    let mut pk_bytes = [0u8; 32];
+    pk_bytes.copy_from_slice(&der[DER_HEADER_PK.len()..]);
+    Ok(ed25519_compact::PublicKey::from_slice(&pk_bytes)?)
 }
