@@ -8,15 +8,19 @@ confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC
 computing is defined in the RISC-V AP-TEE specification, also known as CoVE
 (**Co**nfidential **V**irtualization **E**xtension).
 
-This code is tested on `riscv64imac` with Privilege ISA **v1.12** with OpenSBI **v1.6**.
+This code is tested on `riscv64imac` with Privilege ISA **v1.12** with OpenSBI **v1.7**.
 
-Further details can be found in the [documentation](https://granp4sso.github.io/shadowfax/).
+The repository has the following layout:
+- tsm: contains all the TSM and trusted hypervisor code;
+- shadowfax: contains all data for the TSM-driver including OpenSBI firmware;
+- benchmark: benchmark results and a script to process them with [**marimo**]("https://marimo.io/");
+- test: contains test material;
 
 ### Goals
 The codename `shadowfax project` has the following goals:
 - Develop an open-source TSM-Driver that runs alongside OpenSBI.
 - Implement the core functionalities of the CoVE SBI specification.
-- Enable Supervisor Domain management using the MPT if available, or the PMP as a fallback.
+- Enable Supervisor Domain management using the PMP (switch to MPT if available).
 - Write the implementation in a memory-safe language (e.g., Rust).
 
 ### OpenSBI integration
@@ -25,15 +29,15 @@ as static library. OpenSBI is included as a _git submodule_ in `shadowfax/opensb
 built together with the firmware using `shadowfax/build.rs` script. Thus, users will need to clone:
 
 ```sh
-git clone --recursive https://github.com/HiSA-Team/shadowfax
+git clone --recurse-submodules https://github.com/HiSA-Team/shadowfax
 ```
 
-Shadowfax registers 2 SBI extensions described in the [CoVE specification](https://github.com/riscv-non-isa/riscv-ap-tee)
+Shadowfax implements (partially) 3 SBI extensions described in the [CoVE specification](https://github.com/riscv-non-isa/riscv-ap-tee)
 which are:
 
 - SUPD: supervisor doamin extension to enumerate active supervisor domain and get capabilities information on them;
 - CoVE-H: cove host extension. It allows **TVM** management for hosts;
-- CoVE-G (upcoming): confidential features for Guests
+- CoVE-G: confidential features for Guests
 
 The CoVE specification also introduces the **CoVE-I** SBI extension. It allows to supplements CoVE-H with hardware-assisted
 interrupt virtualization using RISC-V **Advanced Interrupt Architecture**(*AIA*), if the platform supports it.
@@ -107,7 +111,7 @@ the host platform and settings.  To check the detected settings:
 make build-info
 ```
 
-First, users will need to generate RSA keypairs to sign the TSM:
+First, users will need to generate ED25519 keypairs to sign the TSM:
 
 ```sh
 make generate-keys
@@ -124,22 +128,28 @@ Users may want to specify the following variables for their needs:
  - PLATFORM:            target platform, this is used for OpenSBI initialization
 
 ## Running examples on QEMU
-Users can run the firmware on QEMU using:
+Users can run the firmware on QEMU using. This will make the TSM-driver spawn a test workload:
 
 ```sh
-qemu-system-riscv64 -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait -nographic \
-    -M virt -m 64M -smp 1 \
-    -dtb bin/device-tree.dtb \
-    -bios target/riscv64imac-unknown-none-elf/debug/shadowfax \
-    -s -S
+make qemu-run
 ```
+
+### Test and debug
+To test the full CoVE scenario, users can rely on the synthetic program generation to create an OS/VMM
+emulation for simple programs. These programs are meant to be executed in GDB and run in a step by
+step mode to inspect precise behaviour upon TEECALL/TEERET. Main programs are:
+
+-  `sbi_covh_get_tsm_info`: gets the trusted hypervisor capabilities.
+- `sbi_covh_create_tvm`: create a simple TVM that runs an endless loop.
+- `sbi_covh_create_tvm_from_elf`: create a simple TVM from an ELF (maps each ELF segment in confidential
+memory).
 
 This will stop the emulator on start. Setup a basic TEECALL/TEERET example in another terminal with
 a remote GDB session.
 For example, to test a basic program that calls `sbi_covh_get_tsm_info` function:
 
 ```sh
-make debug GDB_COVE_SCRIPT=scripts/sbi_covh_get_tsm_info.py
+make debug GDB_COVE_SCRIPT=test/debug/sbi_covh_get_tsm_info.py
 
 # step through multiple breakpoints
 (gdb) continue
@@ -147,7 +157,7 @@ make debug GDB_COVE_SCRIPT=scripts/sbi_covh_get_tsm_info.py
 
 A more complicated example with a _synthetic_ TVM can be executed by running:
 ```sh
-make debug GDB_COVE_SCRIPTscripts/sbi_covh_create_tvm.py
+make debug GDB_COVE_SCRIPT=test/debug/sbi_covh_create_tvm.py
 
 # step through multiple breakpoints
 (gdb) continue
@@ -169,6 +179,8 @@ The TVM code is just an infinite loop for demonstration purposes.
 
 ## Reference projects
 Rust H-CSR implementation has been taken from [Hikami](https://github.com/Alignof/hikami).
+Coremark benchmark has been taken from [Coremeark](https://github.com/eembc/coremark).
+RISC-V benchmarks have been taken from [Riscv-tests](https://github.com/riscv-software-src/riscv-tests).
 
 ## Contributing
 This repository uses [pre-commit](https://pre-commit.com/). Before contributing, setup your environment
