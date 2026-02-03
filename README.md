@@ -11,10 +11,10 @@ computing is defined in the RISC-V AP-TEE specification, also known as CoVE
 This code is tested on `riscv64imac` with Privilege ISA **v1.12** with OpenSBI **v1.7**.
 
 The repository has the following layout:
-- tsm: contains all the TSM and trusted hypervisor code;
-- shadowfax: contains all data for the TSM-driver including OpenSBI firmware;
-- benchmark: benchmark results and a script to process them with [**marimo**]("https://marimo.io/");
-- test: contains test material;
+- [**tsm**](tsm/): contains all the TSM and trusted hypervisor code;
+- [**shadowfax**](shadowfax/): contains all data for the TSM-driver including OpenSBI firmware;
+- [**benchmark**](benchmark/): benchmark results and a script to process and visualize results with [**marimo**](https://marimo.io/);
+- [**test**](test/): contains test material;
 
 ### Goals
 The codename `shadowfax project` has the following goals:
