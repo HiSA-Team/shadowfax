@@ -179,7 +179,9 @@ The TVM code is just an infinite loop for demonstration purposes.
 
 ## Reference projects
 Rust H-CSR implementation has been taken from [Hikami](https://github.com/Alignof/hikami).
+
 Coremark benchmark has been taken from [Coremeark](https://github.com/eembc/coremark).
+
 RISC-V benchmarks have been taken from [Riscv-tests](https://github.com/riscv-software-src/riscv-tests).
 
 ## Contributing
