@@ -60,7 +60,7 @@ Configuring, building and running examples are performed through the single `Mak
 
 ### Using a musl system as a host
 If users have are on a musl system they will have to specify 2 extra environment variables pointing to
-their `libclang.a`. This is required by the (`clang-sys`)[https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#static]
+their `libclang.a`. This is required by the [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#static)
 crate which is used to generate Opensbi bindings. Basically, users will have to build llvm from source in
 order to provide `libclang.a`. After the build, users will have to provide:
 
