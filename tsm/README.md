@@ -50,3 +50,32 @@ You can choose between a static or dynamic approach by swapping the helper funct
 
 -  Dynamic (Lazy) Approach: `Use bootstrap_load_elf_lazy`. This maps guest memory regions but may defer actual page loading.
 - Static Approach: Use `bootstrap_load_elf`. This performs a full pre-loading of the ELF segments into the TVM's confidential memory.
+
+## Run a simple guest
+Users can run a simple guest to test the hypervisor in stand-alone mode:
+- compile a guest: in `guests/` there are some bare-metal VS-mode kernel
+- adjust the GUEST_ELF variable to point to the ELF
+- build the TSM
+- run on QEMU
+
+```sh
+# compile guest
+cd guests/
+sh compile_guest.sh hellotvm.c
+```
+
+```rust
+// Point the GUEST_ELF to the built guest
+#[link_section = ".rodata"]
+pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/a.out");
+```
+
+```sh
+# build TSM
+
+make -B tsm
+```
+
+```sh
+# run on QEMU
+qemu-system-riscv64 -nographic -smp 1 -m 1G  -M virt -kernel target/riscv64imac-unknown-none-elf/debug/tsm
