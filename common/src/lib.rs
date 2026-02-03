@@ -21,13 +21,19 @@ pub mod sbi {
     pub const SBI_SUPD_EXT_ID: usize = 0x53555044;
     pub const SBI_EXT_SUPD_GET_ACTIVE_DOMAINS: usize = 0;
 
+    // CoVG constants
+    pub const COVG_EXTENSION: usize = 0x434F5647;
+    pub const COVG_GET_EVIDENCE: usize = 8;
+
+    pub const PAGE_SIZE: usize = 4096;
+
     #[repr(C)]
     pub struct SbiRet {
         pub a0: isize,
         pub a1: isize,
     }
 
-    pub fn sbi_call(extid: usize, fid: usize, args: &[usize; 5]) -> SbiRet {
+    pub fn sbi_call(extid: usize, fid: usize, args: &[usize; 6]) -> SbiRet {
         let (a0, a1);
         unsafe {
             core::arch::asm!(
@@ -39,6 +45,7 @@ pub mod sbi {
                 in("a2") args[2],
                 in("a3") args[3],
                 in("a4") args[4],
+                in("a5") args[5],
             );
         }
         SbiRet { a0, a1 }
@@ -360,6 +367,28 @@ pub mod attestation {
         pub platform: CoseSign1,
         pub tsm: CoseSign1,
         pub tvm: CoseSign1,
+    }
+
+    impl Evidence {
+        /// Serializes the Evidence into a CBOR byte vector.
+        /// Format: CBOR Array [PlatformToken, TsmToken, TvmToken]
+        pub fn to_bytes(&self) -> Result<Vec<u8>, coset::CoseError> {
+            let value = self.to_cbor_value()?;
+            let mut bytes = Vec::new();
+            // Serialize the CBOR Value to bytes
+            coset::cbor::ser::into_writer(&value, &mut bytes)
+                .map_err(|e| coset::CoseError::EncodeFailed)?;
+            Ok(bytes)
+        }
+
+        /// Converts the Evidence struct into a generic CBOR Value.
+        fn to_cbor_value(&self) -> Result<Value, coset::CoseError> {
+            Ok(Value::Array(alloc::vec![
+                self.platform.clone().to_cbor_value()?,
+                self.tsm.clone().to_cbor_value()?,
+                self.tvm.clone().to_cbor_value()?,
+            ]))
+        }
     }
 
     /// Verify a COSE_Sign1 token using an external Ed25519 public key bytes.
