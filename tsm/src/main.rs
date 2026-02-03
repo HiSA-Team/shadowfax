@@ -27,11 +27,12 @@ mod h_extension;
 mod hyper;
 mod log;
 mod perf;
+mod sbi;
 mod state;
 
 #[link_section = ".rodata"]
 pub static GUEST_ELF: &[u8] =
-    include_bytes!("../../guests/riscv-tests/benchmarks/guests/multiply.riscv");
+    include_bytes!("../../guests/riscv-tests/benchmarks/guests/median.riscv");
 
 extern crate alloc;
 #[global_allocator]
@@ -87,10 +88,10 @@ extern "C" fn _start() -> ! {
     )
 }
 
-struct TsmState {
+pub struct TsmState {
     info: TsmInfo,
-    hypervisor: HypervisorState,
-    attestation_context: TsmAttestationContext,
+    pub hypervisor: HypervisorState,
+    pub attestation_context: TsmAttestationContext,
 }
 
 impl TsmState {
@@ -112,7 +113,7 @@ impl TsmState {
     }
 }
 
-static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
+pub static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
 
 #[no_mangle]
 #[allow(dead_code)]

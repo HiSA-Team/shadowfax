@@ -1,5 +1,8 @@
 use alloc::vec::Vec;
-use common::attestation::{DiceLayer, TvmAttestationContext};
+use common::{
+    attestation::{DiceLayer, TvmAttestationContext},
+    sbi::{sbi_call, COVG_EXTENSION, PAGE_SIZE},
+};
 use core::alloc::Layout;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 use riscv::{
@@ -20,10 +23,11 @@ use crate::{
         HvException,
     },
     perf::{self, read_cycle},
-    println, TsmState,
+    println,
+    sbi::{self, handle_covg},
+    TsmState,
 };
 
-const PAGE_SIZE: usize = 4096;
 const PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
 
 const PTE_SIZE: usize = 8;
@@ -34,30 +38,6 @@ const PTE_X: u64 = 1 << 3;
 const PTE_U: u64 = 1 << 4;
 const PTE_A: u64 = 1 << 6;
 const PTE_D: u64 = 1 << 7;
-
-// -----------------------------
-// SBI Helper
-// -----------------------------
-struct SbiRet {
-    error: usize,
-    value: usize,
-}
-
-fn sbi_call(eid: usize, fid: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> SbiRet {
-    let (error, value);
-    unsafe {
-        core::arch::asm!(
-            "ecall",
-            in("a7") eid,
-            in("a6") fid,
-            inout("a0") a0 => error,
-            inout("a1") a1 => value,
-            in("a2") a2,
-            in("a3") a3,
-        );
-    }
-    SbiRet { error, value }
-}
 
 // -----------------------------
 // Helper functions for SV39
@@ -171,7 +151,7 @@ pub struct MemoryRegion {
 }
 
 pub struct HypervisorState {
-    tvm: Option<Tvm>,
+    pub tvm: Option<Tvm>,
     confidential_memory: Vec<(usize, usize, Option<usize>)>,
 }
 
@@ -563,7 +543,7 @@ impl HypervisorState {
 }
 
 #[repr(C)]
-struct Tvm {
+pub struct Tvm {
     id: usize,
     page_table_addr: usize,
     state_addr: usize,
@@ -617,6 +597,10 @@ impl Tvm {
 
     fn extend_measure(&mut self, data: &[u8]) {
         self.hasher.update(data);
+    }
+
+    pub fn get_measure(&self) -> Vec<u8> {
+        self.measure.clone()
     }
 }
 
@@ -820,14 +804,24 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                 HvException::EcallFromVsMode => {
                     let regs = unsafe { &mut (*ctx).regs };
 
-                    // 1. Forward to OpenSBI (M-mode)
-                    // eid = a7 (regs[17]), fid = a6 (regs[16])
-                    let sbi_ret =
-                        sbi_call(regs[17], regs[16], regs[10], regs[11], regs[12], regs[13]);
+                    // 1.Check if the call was a CoVE-G
+                    let sbi_ret = if regs[17] == COVG_EXTENSION {
+                        handle_covg(
+                            regs[17],
+                            regs[16],
+                            &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
+                        )
+                    } else {
+                        sbi_call(
+                            regs[17],
+                            regs[16],
+                            &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
+                        )
+                    };
 
-                    // 2. Write return values back to Guest a0, a1
-                    regs[10] = sbi_ret.error;
-                    regs[11] = sbi_ret.value;
+                    // 3. Write return values back to Guest a0, a1
+                    regs[10] = sbi_ret.a0 as usize;
+                    regs[11] = sbi_ret.a1 as usize;
 
                     // 3. Skip the 'ecall' instruction in the guest
                     sepc += 4;
@@ -1016,11 +1010,11 @@ fn handle_page_fault(gpa: usize) {
         // 3. Initialize page with zeros (important for BSS or partial pages)
         unsafe { core::ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE) };
 
-        unsafe {
-            PAGE_FAULT_COUNTER += 1;
-            let a = PAGE_FAULT_COUNTER;
-            println!("PAGE_FAULT_COUNTER = {}", a);
-        }
+        // unsafe {
+        //     PAGE_FAULT_COUNTER += 1;
+        //     let a = PAGE_FAULT_COUNTER;
+        //     println!("PAGE_FAULT_COUNTER = {}", a);
+        // }
         // 4. Fill with ELF data if the page overlaps a segment
         for seg in &lazy.segments {
             let seg_start = seg.vaddr;

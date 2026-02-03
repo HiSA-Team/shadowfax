@@ -20,6 +20,7 @@ impl core::fmt::Write for Writer {
                 (s.as_ptr() as usize >> 32) & 0xffff_ffff,
                 0,
                 0,
+                0,
             ],
         );
         Ok(())
