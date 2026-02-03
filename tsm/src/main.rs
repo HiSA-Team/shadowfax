@@ -19,16 +19,19 @@ use spin::Mutex;
 
 use crate::{
     hyper::HypervisorState,
+    perf::{read_cycle, read_instret, read_time},
     state::{TsmInfo, TSM_IMPL_ID, TSM_VERSION},
 };
 
 mod h_extension;
 mod hyper;
 mod log;
+mod perf;
 mod state;
 
 #[link_section = ".rodata"]
-pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/coremark/coremark.bin");
+pub static GUEST_ELF: &[u8] =
+    include_bytes!("../../guests/riscv-tests/benchmarks/guests/multiply.riscv");
 
 extern crate alloc;
 #[global_allocator]
@@ -80,7 +83,7 @@ extern "C" fn _start() -> ! {
 
         stack_size_per_hart = const STACK_SIZE_PER_HART,
         stack_top = sym _stack_top,
-        main = sym test_tvm_bootstrap_perf,
+        main = sym test_tvm_bootstrap,
     )
 }
 
@@ -272,7 +275,6 @@ fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Starting Mapping TVM from ELF");
     // 1. Initialize the TSM state manually (if _secure_init wasn't called by a driver)
     // We'll simulate a dummy attestation context for testing.
-
     let dummy_context = TsmAttestationContext::default();
     _secure_init(&dummy_context as *const _ as usize);
 
@@ -326,33 +328,6 @@ fn test_tvm_bootstrap() -> ! {
         .expect("Failed to run VCPU");
 }
 
-#[inline(always)]
-fn read_cycle() -> u64 {
-    let value: u64;
-    unsafe {
-        core::arch::asm!("csrr {}, cycle", out(reg) value);
-    }
-    value
-}
-
-#[inline(always)]
-fn read_instret() -> u64 {
-    let value: u64;
-    unsafe {
-        core::arch::asm!("csrr {}, instret", out(reg) value);
-    }
-    value
-}
-
-#[inline(always)]
-fn read_time() -> u64 {
-    let value: u64;
-    unsafe {
-        core::arch::asm!("csrr {}, time", out(reg) value);
-    }
-    value
-}
-
 fn test_tvm_bootstrap_perf() -> ! {
     println!("[OLORIN] Starting Mapping TVM from ELF");
     // 1. Initialize the TSM state manually (if _secure_init wasn't called by a driver)
@@ -391,7 +366,7 @@ fn test_tvm_bootstrap_perf() -> ! {
 
     // 4. Use the ELF loading procedure
     // This helper parses GUEST_ELF and maps it into the TVM
-    let tvm_id = hyper::bootstrap_load_elf(
+    let tvm_id = hyper::bootstrap_load_elf_lazy(
         state,
         GUEST_ELF,
         tvm_page_table_addr,
@@ -414,10 +389,9 @@ fn test_tvm_bootstrap_perf() -> ! {
 
     let delta = time_end - time_start;
     println!(
-        "cycle = {}\ninstret = {}\ntime = {}\ndelta = {}",
+        "cycle = {}\ninstret = {}\ndelta = {}",
         cycle_end - cycle_start,
         instret_end - instret_start,
-        delta * (1_000_000_000) / 10000000,
         delta
     );
     println!("[OLORIN] TVM bootstrap completed");

@@ -19,6 +19,7 @@ use crate::{
         instruction::hfence_gvma_all,
         HvException,
     },
+    perf::{self, read_cycle},
     println, TsmState,
 };
 
@@ -840,7 +841,7 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                 | HvException::LoadGuestPageFault
                 | HvException::StoreAmoGuestPageFault => {
                     // 'stval' holds the Guest Physical Address that caused the fault
-                    handle_lazy_fault(stval);
+                    handle_page_fault(stval);
                     // We do NOT increment sepc; we want to retry the instruction
                 }
                 _ => {
@@ -875,6 +876,7 @@ struct LazyState {
 
 // Mutex to safely access this from the trap handler
 static LAZY_STATE: Mutex<Option<LazyState>> = Mutex::new(None);
+static mut PAGE_FAULT_COUNTER: usize = 0;
 
 pub fn bootstrap_load_elf(
     state: &mut TsmState,
@@ -996,7 +998,8 @@ pub fn bootstrap_load_elf(
     Ok(tvm_id)
 }
 
-fn handle_lazy_fault(gpa: usize) {
+fn handle_page_fault(gpa: usize) {
+    // let cycle_start = read_cycle();
     let mut lock = LAZY_STATE.lock();
 
     if let Some(lazy) = lock.as_mut() {
@@ -1013,6 +1016,11 @@ fn handle_lazy_fault(gpa: usize) {
         // 3. Initialize page with zeros (important for BSS or partial pages)
         unsafe { core::ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE) };
 
+        unsafe {
+            PAGE_FAULT_COUNTER += 1;
+            let a = PAGE_FAULT_COUNTER;
+            println!("PAGE_FAULT_COUNTER = {}", a);
+        }
         // 4. Fill with ELF data if the page overlaps a segment
         for seg in &lazy.segments {
             let seg_start = seg.vaddr;
@@ -1074,6 +1082,8 @@ fn handle_lazy_fault(gpa: usize) {
     } else {
         panic!("Guest Page Fault occurred but Lazy Loading state is not initialized!");
     }
+    // let cycle_end = read_cycle();
+    // println!("pfaultcycle = {}", cycle_end - cycle_start);
 }
 
 pub fn bootstrap_load_elf_lazy(
