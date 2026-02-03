@@ -889,7 +889,7 @@ pub fn bootstrap_load_elf(
         .create_tvm(attestation, pt_addr, state_addr)?;
 
     // 2. Define Guest RAM - MATCH LINKER SCRIPT (ORIGIN = 0x1000)
-    let gpa_base = 0x1000;
+    let gpa_base = 0x0;
     let ram_size = 2 * 1024 * 1024; // 2MB
     state
         .hypervisor

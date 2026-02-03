@@ -31,8 +31,7 @@ mod sbi;
 mod state;
 
 #[link_section = ".rodata"]
-pub static GUEST_ELF: &[u8] =
-    include_bytes!("../../guests/riscv-tests/benchmarks/guests/median.riscv");
+pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/a.out");
 
 extern crate alloc;
 #[global_allocator]
