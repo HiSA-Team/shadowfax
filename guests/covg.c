@@ -32,7 +32,7 @@ struct sbiret {
 };
 
 #define SBI_EXT_COVG            0x434F5647UL  /* 'C' 'O' 'V' 'G' */
-#define SBI_EXT_COVG_GET_EVIDENCE_FID  7UL     /* FID #7 (per spec fragment provided) */
+#define SBI_EXT_COVG_GET_EVIDENCE_FID  8UL     /* FID #8 (per spec fragment provided) */
 
 /* Publick Key */
 static const unsigned char PUBLIC_KEY[] = {
