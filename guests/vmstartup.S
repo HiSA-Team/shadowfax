@@ -32,10 +32,6 @@ _start:
     mv t5, zero
     mv t6, zero
 
-    /* Dummy trap handler */
-    la a0, __hang
-    csrw vstvec, a0
-
     /* Load stack pointer */
     la sp, __stack_top
 
