@@ -1,4 +1,4 @@
-pub const DICE_INPUT_ADDR: usize = 0x8200_0000;
+pub const DICE_INPUT_ADDR: usize = 0x8800_0000;
 
 pub mod memory_layout {
     use crate::domain::MemoryRegion;
@@ -11,7 +11,7 @@ pub mod memory_layout {
     }];
 
     pub const UNTRUSTED_DOMAIN_REGIONS: [MemoryRegion; 1] = [MemoryRegion {
-        base_addr: 0x82800_0000,
+        base_addr: 0x8A00_0000,
         order: 24,
         mmio: false,
         permissions: 0x3F,
@@ -19,8 +19,8 @@ pub mod memory_layout {
 
     pub const TRUSTED_DOMAIN_REGIONS: [MemoryRegion; 2] = [
         MemoryRegion {
-            base_addr: 0x8200_0000,
-            order: 24,
+            base_addr: 0x8800_0000,
+            order: 26,
             permissions: 0x3f,
             mmio: false,
         },

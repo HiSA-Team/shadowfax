@@ -36,9 +36,12 @@ use riscv::{
     register::{mhartid, misa},
 };
 
+use crate::scheduler::set_timer;
+
 #[macro_use]
 mod debug;
 mod cove;
+mod scheduler;
 
 /// This module includes the `bindings.rs` generated
 /// using `build.rs` which translates opensbi C definitions
@@ -258,7 +261,20 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
     let next_stage_address = state::init(fdt_addr).unwrap();
-
+    print_raw!("State initialized correctly\r\n");
+    // unsafe {
+    //     // Clear the Timer Delegation (ensure bit 5 of mideleg is 0)
+    //     // STIP (Supervisor Timer Interrupt) is bit 5.
+    //     // If set, S-mode handles it. We want M-mode to handle it.
+    //     let mut mideleg: usize;
+    //     core::arch::asm!("csrr {}, mideleg", out(reg) mideleg);
+    //     mideleg &= !(1 << 5);
+    //     core::arch::asm!("csrw mideleg, {}", in(reg) mideleg);
+    //
+    //     // Kick off the first timer event
+    //     set_timer(10_000_000); // 10ms
+    // }
+    //
     /*
      * This code initializes the scratch space, which is a per-HART data structure
      * defined in <sbi/sbi_scratch.h>. The scratch space is used to store various firmware-related
