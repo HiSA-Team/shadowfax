@@ -16,6 +16,14 @@ The repository has the following layout:
 - [**benchmark**](benchmark/): benchmark results and a script to process and visualize results with [**marimo**](https://marimo.io/);
 - [**test**](test/): contains test material;
 
+### Overview
+The repository provides a trusted firmware (Shadowfax, TSM-driver) built together with OpenSBI. To ensure easy of
+use, the Firmware is bundled together with the trusted hypervisor. Domain configuration happens statically.
+Currently 3 domains are supported:
+- Root Domain: has access to all memory, but owns all unused resources (its never used)
+- Untrusted Domain: the domain booted by opensbi. Contains the untrusted OS/VMM that initiate CoVE operations
+- Trusted Domain: the domain used by the TSM-driver to spawn the TSM
+
 ### Goals
 The codename `shadowfax project` has the following goals:
 - Develop an open-source TSM-Driver that runs alongside OpenSBI.
@@ -37,7 +45,7 @@ which are:
 
 - SUPD: supervisor doamin extension to enumerate active supervisor domain and get capabilities information on them;
 - CoVE-H: cove host extension. It allows **TVM** management for hosts;
-- CoVE-G: confidential features for Guests
+- CoVE-G: confidential features for Guests;
 
 The CoVE specification also introduces the **CoVE-I** SBI extension. It allows to supplements CoVE-H with hardware-assisted
 interrupt virtualization using RISC-V **Advanced Interrupt Architecture**(*AIA*), if the platform supports it.
@@ -126,6 +134,10 @@ Users may want to specify the following variables for their needs:
  - RV_PREFIX:           specify with the path to the target riscv toolchain prefix
  - BOOT_DOMAIN_ADDRESS: specify the address of the untrusted domain which should start the execution
  - PLATFORM:            target platform, this is used for OpenSBI initialization
+
+> [!NOTE]
+> The build process includes creating measurment and attestation payload. To ensure to compile after
+modification use `make -B`.
 
 ## Running examples on QEMU
 Users can run the firmware on QEMU using. This will make the TSM-driver spawn a test workload:
