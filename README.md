@@ -66,6 +66,20 @@ sudo ./scripts/setup.sh
 
 Configuring, building and running examples are performed through the single `Makefile`.
 
+Building process relies on Python using `cbor2` library. Users can create a virtual environment with:
+```sh
+python -m venv .env
+source .venv/bin/activate
+
+pip install cbor2
+```
+
+Or they use `uv` ephemeral environment appending to each `make` command the `PYTHON="uv run --with cbor2"`.
+For example, they can use:
+```sh
+make -B PYTHON="uv run --with cbor2"
+```
+
 ### Using a musl system as a host
 If users have are on a musl system they will have to specify 2 extra environment variables pointing to
 their `libclang.a`. This is required by the [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#static)
