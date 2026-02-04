@@ -23,14 +23,14 @@ TARGET_TRIPLET             ?= riscv64imac-unknown-none-elf
 PROFILE                    ?= debug
 RUSTFLAGS                  := -C target-feature=+h
 QEMU                       := qemu-system-riscv64
-QEMU_FLAGS                 := -M virt -m 64M -smp 1 -nographic -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait
+QEMU_FLAGS                 := -M virt -m 512M -smp 1 -nographic -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait
 ifeq ($(DEBUG), 1)
 QEMU_FLAGS                 +=  -s -S
 endif
 
 # Platform Params
 PLATFORM                   ?= generic
-BOOT_DOMAIN_ADDRESS        ?= 0x82800000
+BOOT_DOMAIN_ADDRESS        ?= 0x86000000
 
 # RISC-V Toolchain
 RV_PREFIX                  ?= riscv64-unknown-linux-$(HOST_LIBC)-
@@ -41,7 +41,6 @@ MAKEFILE_SOURCE_DIR        := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 BIN_DIR                     = bin
 TARGET_DIR                  = target/$(TARGET_TRIPLET)/$(PROFILE)
 KEYS_DIR                    = shadowfax/keys
-TEST_DIR                    = test/functional/
 
 FW_ELF                      = $(TARGET_DIR)/shadowfax
 FW_BIN                      = $(BIN_DIR)/shadowfax.bin
@@ -127,7 +126,7 @@ generate-keys:
 ## qemu-run: runs the script on qemu
 qemu-run: firmware
 	$(QEMU) $(QEMU_FLAGS) -dtb $(BIN_DIR)/device-tree.dtb -bios $(FW_ELF) \
-		-device loader,file=$(DICE_INPUT),addr=0x82000000,force-raw=on
+		-device loader,file=$(DICE_INPUT),addr=0x85000000,force-raw=on
 
 ## debug: attach to a gdb server and load $(GDB_COVE_SCRIPT)
 debug:

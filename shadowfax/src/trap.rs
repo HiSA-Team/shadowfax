@@ -10,7 +10,7 @@
 
 use riscv::interrupt::supervisor::Exception;
 
-use crate::{cove, opensbi};
+use crate::{cove, opensbi, scheduler::scheduler_tick};
 use core::mem::offset_of;
 
 /// The main trap handler function that orchestrates the saving and restoring of registers.
@@ -147,8 +147,30 @@ pub fn handler() -> ! {
          * Call the opensbi trap handler which wraps opensbi trap handler
          */
         "
+            csrr t0, mcause
+            li t1, 1
+            slli t1, t1, 63     // Set MSB
+            addi t1, t1, 7      // Add 7 (Timer Interrupt)
+
+            // If NOT timer, skip to standard OpenSBI handler
+            bne t0, t1, 2f
+
+            // === TIMER EVENT ===
+            // 1. Move current stack pointer (Context*) to a0 as argument
+            mv a0, sp
+
+            // 2. Call Rust Scheduler
+            // This function handles the PMP switch and updating mtimecmp
+            // It returns the NEW Context pointer in a0
+            call {scheduler_tick}
+            // Jump to restore
+            j 3f
+
+            2:
             add a0, sp, zero
             call {trap_handler}
+
+            3:
         ",
 
         /*
@@ -265,6 +287,7 @@ pub fn handler() -> ! {
         sbi_trap_info_offset_tinst = const offset_of!(opensbi::sbi_trap_info, tinst),
         sbi_trap_info_offset_gva = const offset_of!(opensbi::sbi_trap_info, gva),
 
-        trap_handler = sym opensbi::sbi_trap_handler
+        trap_handler = sym opensbi::sbi_trap_handler,
+        scheduler_tick = sym scheduler_tick
     );
 }
