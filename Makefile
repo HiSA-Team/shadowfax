@@ -30,7 +30,7 @@ endif
 
 # Platform Params
 PLATFORM                   ?= generic
-BOOT_DOMAIN_ADDRESS        ?= 0x86000000
+BOOT_DOMAIN_ADDRESS        ?= 0x8A000000
 
 # RISC-V Toolchain
 RV_PREFIX                  ?= riscv64-unknown-linux-$(HOST_LIBC)-
@@ -126,7 +126,7 @@ generate-keys:
 ## qemu-run: runs the script on qemu
 qemu-run: firmware
 	$(QEMU) $(QEMU_FLAGS) -dtb $(BIN_DIR)/device-tree.dtb -bios $(FW_ELF) \
-		-device loader,file=$(DICE_INPUT),addr=0x85000000,force-raw=on
+		-device loader,file=$(DICE_INPUT),addr=0x88000000,force-raw=on
 
 ## debug: attach to a gdb server and load $(GDB_COVE_SCRIPT)
 debug:

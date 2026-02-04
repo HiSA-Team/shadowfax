@@ -83,7 +83,7 @@ extern "C" fn _start() -> ! {
 
         stack_size_per_hart = const STACK_SIZE_PER_HART,
         stack_top = sym _stack_top,
-        main = sym test_tvm_bootstrap,
+        main = sym main,
     )
 }
 

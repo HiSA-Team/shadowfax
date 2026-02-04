@@ -8,7 +8,7 @@ target remote localhost:1234
 
 # load firwmare and tsm debug symbols
 add-symbol-file target/riscv64imac-unknown-none-elf/debug/shadowfax
-add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm 0x85000000
+add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm
 
 break tsm::main
 
