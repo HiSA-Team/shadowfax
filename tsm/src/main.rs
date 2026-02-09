@@ -5,6 +5,7 @@
 
 use core::panic::PanicInfo;
 
+use alloc::vec::Vec;
 use common::{
     attestation::{DiceLayer, TsmAttestationContext},
     sbi::{
@@ -31,7 +32,7 @@ mod sbi;
 mod state;
 
 #[link_section = ".rodata"]
-pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/a.out");
+pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/attestation.out");
 
 extern crate alloc;
 #[global_allocator]
@@ -113,6 +114,8 @@ impl TsmState {
 }
 
 pub static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
+pub static MEASUREMENT: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+pub static ATTESTATION_CONTEXT: Mutex<Option<TsmAttestationContext>> = Mutex::new(None);
 
 #[no_mangle]
 #[allow(dead_code)]
@@ -128,14 +131,28 @@ fn _secure_init(addr: usize) {
 
         ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
     }
+    // 2. Prepare the Initial Context
+    // If addr is 0 (Testing), create a fresh default context ON THE HEAP.
+    // If addr != 0 (Production), we assume it points to valid ROM/Flash/Pre-loaded RAM
+    // that is NOT overlapping with our new Heap.
+    let initial_context = if addr == 0 {
+        TsmAttestationContext::default()
+    } else {
+        unsafe { (*(addr as *const TsmAttestationContext)).clone() }
+    };
+
+    // 3. Update Global State
+    // We clone into State and Attestation Context.
+    // Since heap is Init, these clones allocate safely.
     let mut state = STATE.lock();
+    state.replace(TsmState::new(initial_context.clone()));
 
-    let payload_ptr = addr as *mut TsmAttestationContext;
-    let payload = unsafe { (*payload_ptr).clone() };
-
-    *state = Some(TsmState::new(payload));
+    let mut att = ATTESTATION_CONTEXT.lock();
+    att.replace(initial_context);
+    // *state = Some(TsmState::new(payload.clone()));
 
     drop(state);
+    drop(att);
 }
 
 // Since this is a TSM with non reentrant model, an ECALL should be a TEERET
@@ -275,8 +292,7 @@ fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Starting Mapping TVM from ELF");
     // 1. Initialize the TSM state manually (if _secure_init wasn't called by a driver)
     // We'll simulate a dummy attestation context for testing.
-    let dummy_context = TsmAttestationContext::default();
-    _secure_init(&dummy_context as *const _ as usize);
+    _secure_init(0);
 
     let mut lock = STATE.lock();
     let state = lock.as_mut().expect("State not initialized");

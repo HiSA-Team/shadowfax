@@ -22,7 +22,7 @@
  * The actual service is implemented by the trap handler (hypervisor/TSM).
  * This code only performs the userspace/bare-metal ECALL invocation.
  *
- * Author: Giuseppe Capasso <capassog97@gmail.com>
+ *
  */
 
 

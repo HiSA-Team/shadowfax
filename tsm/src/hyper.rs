@@ -25,7 +25,7 @@ use crate::{
     perf::{self, read_cycle},
     println,
     sbi::{self, handle_covg},
-    TsmState,
+    TsmState, MEASUREMENT,
 };
 
 const PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
@@ -130,6 +130,68 @@ fn map_4k_leaf(root_pt: usize, gpa: usize, pa: usize, perms: u64) {
     }
 }
 
+/// Translates a Guest Physical Address (GPA) to a Host Physical Address (PA)
+/// by walking the SV39 page table structure starting at `root_pt`.
+/// Returns `None` if the address is not mapped.
+pub fn translate_gpa_to_pa(root_pt: usize, gpa: usize) -> Option<usize> {
+    let [vpn2, vpn1, vpn0] = make_vpn_sv39(gpa);
+
+    // --- Level 2 (Root) ---
+    // Calculate address of the PTE in the L2 table
+    let pte2_addr = root_pt + (vpn2 * 8);
+    let pte2 = unsafe { core::ptr::read_volatile(pte2_addr as *const u64) };
+
+    // 1. Check Valid bit
+    if (pte2 & PTE_V) == 0 {
+        return None; // Page fault (not mapped)
+    }
+
+    // 2. Check for Leaf (Huge Page 1GB)
+    // If R, W, or X is set, this is a leaf node, not a pointer to the next level.
+    if (pte2 & (PTE_R | PTE_W | PTE_X)) != 0 {
+        // PPN holds the 1GB aligned base address
+        let ppn = (pte2 >> 10) & 0x003F_FFFF_FFFF_FFFF;
+        // PA = (PPN << 12) | Offset within 1GB (30 bits)
+        return Some(ppn_to_pa(ppn) | (gpa & 0x3FFF_FFFF));
+    }
+
+    // --- Level 1 ---
+    // pte2 was a pointer to the L1 table
+    let l1_base = ppn_to_pa(pte2 >> 10);
+    let pte1_addr = l1_base + (vpn1 * 8);
+    let pte1 = unsafe { core::ptr::read_volatile(pte1_addr as *const u64) };
+
+    if (pte1 & PTE_V) == 0 {
+        return None;
+    }
+
+    // Check for Leaf (Huge Page 2MB)
+    if (pte1 & (PTE_R | PTE_W | PTE_X)) != 0 {
+        let ppn = (pte1 >> 10) & 0x003F_FFFF_FFFF_FFFF;
+        // PA = (PPN << 12) | Offset within 2MB (21 bits)
+        return Some(ppn_to_pa(ppn) | (gpa & 0x1F_FFFF));
+    }
+
+    // --- Level 0 (4KB Page) ---
+    // pte1 was a pointer to the L0 table
+    let l0_base = ppn_to_pa(pte1 >> 10);
+    let pte0_addr = l0_base + (vpn0 * 8);
+    let pte0 = unsafe { core::ptr::read_volatile(pte0_addr as *const u64) };
+
+    if (pte0 & PTE_V) == 0 {
+        return None;
+    }
+
+    // This must be a leaf (standard 4KB page)
+    if (pte0 & (PTE_R | PTE_W | PTE_X)) == 0 {
+        return None; // Invalid format: L0 PTE must be a leaf
+    }
+
+    let ppn = (pte0 >> 10) & 0x003F_FFFF_FFFF_FFFF;
+    // PA = (PPN << 12) | Offset within 4KB (12 bits)
+    Some(ppn_to_pa(ppn) | (gpa & 0xFFF))
+}
+
 /// Map a contiguous region of memory (multiple 4KB pages).
 fn map_region(root_pt: usize, gpa_base: usize, pa_base: usize, num_pages: usize, perms: u64) {
     for i in 0..num_pages {
@@ -138,6 +200,40 @@ fn map_region(root_pt: usize, gpa_base: usize, pa_base: usize, num_pages: usize,
         let pa = pa_base + i * PAGE_SIZE;
         map_4k_leaf(root_pt, gpa, pa, perms);
     }
+}
+
+/// Reads `len` bytes from Guest Physical Address `gpa` into `buf`.
+/// Returns error if translation fails or crosses page boundary.
+pub fn read_guest_memory(root_pt: usize, gpa: usize, buf: &mut [u8]) -> Result<(), ()> {
+    // 1. Check for page crossing (Simplified: fail if it crosses)
+    if (gpa & 0xFFF) + buf.len() > 4096 {
+        return Err(());
+    }
+
+    // 2. Translate
+    let host_pa = translate_gpa_to_pa(root_pt, gpa).ok_or(())?;
+
+    // 3. Copy
+    unsafe {
+        let src = host_pa as *const u8;
+        core::ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), buf.len());
+    }
+    Ok(())
+}
+
+/// Writes `data` to Guest Physical Address `gpa`.
+pub fn write_guest_memory(root_pt: usize, gpa: usize, data: &[u8]) -> Result<(), ()> {
+    if (gpa & 0xFFF) + data.len() > 4096 {
+        return Err(());
+    }
+
+    let host_pa = translate_gpa_to_pa(root_pt, gpa).ok_or(())?;
+
+    unsafe {
+        let dst = host_pa as *mut u8;
+        core::ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
+    }
+    Ok(())
 }
 
 // -----------------------------
@@ -593,6 +689,8 @@ impl Tvm {
         let old_hasher = core::mem::take(&mut self.hasher);
         self.measure = old_hasher.finalize().to_vec();
         self.hasher = Sha384::new();
+        let mut lock = MEASUREMENT.lock();
+        lock.replace(self.measure.clone());
     }
 
     fn extend_measure(&mut self, data: &[u8]) {
@@ -632,7 +730,7 @@ struct TvmVcpuState {
     stval: usize,
     trap_ctx: VmTrapContext,
     // Hypervisor scratch stack (grows downward from end)
-    hs_scratch_stack: [u8; 4096],
+    hs_scratch_stack: [u8; 1024 * 128],
 }
 
 impl TvmVcpuState {
@@ -650,7 +748,7 @@ impl TvmVcpuState {
                 regs: [0; 32],
                 hs_sp: 0,
             },
-            hs_scratch_stack: [0; 4096],
+            hs_scratch_stack: [0; 1024 * 128],
         };
         // We write vhartid in a0
         vcpu.regs[10] = id;
