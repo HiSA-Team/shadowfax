@@ -83,4 +83,6 @@ jobs:
       uses: astral-sh/setup-uv@v7
     - name: Build and test
       run: |
-        make guests build-info generate-keys test PYTHON="uv run --with cbor2"
+        make generate-keys
+        make guests
+        make build-info test PYTHON="uv run --with cbor2"
