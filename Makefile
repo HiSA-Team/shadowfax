@@ -11,7 +11,7 @@
 #   make help # discover available targets
 #   make qemu-run # runs the system on qemu (DEBUG=1 to start gdb server and wait)
 #
-# Author: <capassog97@gmail.com>
+# Author: Giuseppe Capasso <capassog97@gmail.com>
 
 # Toolchain/Platform
 PYTHON                     := python
@@ -41,6 +41,7 @@ MAKEFILE_SOURCE_DIR        := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 BIN_DIR                     = bin
 TARGET_DIR                  = target/$(TARGET_TRIPLET)/$(PROFILE)
 KEYS_DIR                    = shadowfax/keys
+TEST_DIR                    = test/functional/
 
 FW_ELF                      = $(TARGET_DIR)/shadowfax
 FW_BIN                      = $(BIN_DIR)/shadowfax.bin
@@ -85,7 +86,11 @@ endif
 $(shell mkdir -p $(BIN_DIR))
 
 ## all: build tsm, firmware and attestation payload
-all: $(DICE_INPUT) build-info
+all: guests $(DICE_INPUT) build-info
+
+## guests: build guests in guests/
+guests:
+	$(MAKE) -C guests/
 
 ## firmware: builds the firmware alongisde TSM elf and its signature
 firmware: $(DICE_INPUT)
