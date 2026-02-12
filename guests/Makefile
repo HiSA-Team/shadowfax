@@ -1,6 +1,6 @@
 # Toolchain definition
-RV_PREFIX = riscv64-unknown-elf
-CC      = $(RV_PREFIX)-gcc
+RV_PREFIX ?= riscv64-unknown-elf-
+CC         = $(RV_PREFIX)gcc
 
 # Flags
 CFLAGS  = -Wall -nostdlib -nostartfiles -O0 -g
