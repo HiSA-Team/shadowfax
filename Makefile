@@ -80,7 +80,7 @@ endif
 export LLVM_CONFIG_PATH     := $(MAKEFILE_SOURCE_DIR)scripts/llvm-config.sh
 endif
 
-.PHONY: all clean firmware tsm test generate-keys help
+.PHONY: all clean firmware tsm test generate-keys guests help
 
 # ensure the bin directory is created
 $(shell mkdir -p $(BIN_DIR))
@@ -163,7 +163,8 @@ endif
 clean:
 	cargo clean
 	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig
-	$(MAKE) -C shadowfax/opensbi clean
+	$(MAKE) -C shadowfax/opensbi clean distclean
+	$(MAKE) -C guests clean
 
 ## help: display this help message
 help:
