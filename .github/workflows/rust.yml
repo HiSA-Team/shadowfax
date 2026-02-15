@@ -32,6 +32,7 @@ jobs:
         path: |
           /tmp/apt-cache/archives/*.deb
           /tmp/qemu-10.1.1/
+          /tmp/riscv64-elf-ubuntu-24.04-gcc
         key: ${{ runner.os }}-${{ hashFiles('scripts/setup.sh') }}
         restore-keys: |
           ${{ runner.os }}-
@@ -45,8 +46,8 @@ jobs:
         # TODO: reuse scripts/setup.sh
         sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
         autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
-        device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
-        libexpat-dev libgmp-dev  libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
+        device-tree-compiler flex gawk git gperf libclang-dev libelf-dev \
+        libexpat-dev libgmp-dev libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
         make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev
 
         sudo make -C /tmp/qemu-10.1.1 install
@@ -56,15 +57,23 @@ jobs:
       run: |
         sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
         autoconf automake autotools-dev bc bison bsdextrautils build-essential cmake curl \
-        device-tree-compiler flex gawk gcc-riscv64-linux-gnu git gperf libclang-dev libelf-dev \
-        libexpat-dev libgmp-dev  libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
+        device-tree-compiler flex gawk git gperf libclang-dev libelf-dev \
+        libexpat-dev libgmp-dev libmpc-dev libmpfr-dev libglib2.0-dev libslirp-dev libssl-dev libtool \
         make patchutils python3-venv python3-tomli ninja-build sudo texinfo zlib1g-dev
 
+        # Download and build QEMU
         curl -fsSL https://download.qemu.org/qemu-10.1.1.tar.xz -o /tmp/qemu-10.1.1.tar.xz
         tar xvJf /tmp/qemu-10.1.1.tar.xz -C /tmp/
         cd /tmp/qemu-10.1.1 && ./configure --target-list=riscv64-softmmu
         make -C /tmp/qemu-10.1.1 -j $(nproc)
         sudo make -C /tmp/qemu-10.1.1 install
+
+        # Download Riscv toolchain
+        mkdir -p /tmp/riscv-toolchain
+        # Downloading the pre-compiled Ubuntu 22.04 rv64gc elf-gcc tarball
+        curl -fsSL https://github.com/riscv-collab/riscv-gnu-toolchain/releases/latest/download/riscv64-elf-ubuntu-24.04-gcc.tar.xz -o /tmp/riscv64-elf-ubuntu-24.04-gcc.tar.xz
+        mkdir -p /tmp/riscv64-elf-ubuntu-24.04-gcc
+        tar -xvf /tmp/riscv64-elf-ubuntu-24.04-gcc.tar.xz -C /tmp/riscv64-elf-ubuntu-24.04-gcc --strip-components=1
 
     - name: Save cache
       if: steps.cache.outputs.cache-hit != 'true'
@@ -84,5 +93,5 @@ jobs:
     - name: Build and test
       run: |
         make generate-keys PYTHON="uv run --with cbor2"
-        make -C guests RV_PREFIX=riscv64-linux-gnu-
+        make -C guests RV_PREFIX=/tmp/riscv64-elf-ubuntu-24.04-gcc/bin/riscv64-unknown-elf-
         make build-info test
