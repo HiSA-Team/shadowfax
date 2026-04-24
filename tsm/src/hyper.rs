@@ -15,6 +15,7 @@ use riscv::{
 };
 use sha2::{Digest, Sha384};
 use spin::Mutex;
+use zeroize::Zeroize;
 
 use crate::{
     h_extension::{
@@ -248,6 +249,7 @@ pub struct MemoryRegion {
 
 pub struct HypervisorState {
     pub tvm: Option<Tvm>,
+    /* Base page address, num pages, vmid */
     confidential_memory: Vec<(usize, usize, Option<usize>)>,
 }
 
@@ -607,6 +609,33 @@ impl HypervisorState {
         self.setup_h_extension(&tvm)?;
 
         unsafe { vcpu.enter(tvm.entry_sepc, tvm.entry_arg) }
+    }
+
+    pub fn reclaim_pages(
+        &mut self,
+        base_page_address: usize,
+        num_pages: usize,
+    ) -> anyhow::Result<()> {
+        if self.tvm.is_some() {
+            anyhow::bail!("TVM is still running");
+        }
+
+        let idx = self
+            .confidential_memory
+            .iter()
+            .position(|(addr, npages, _)| *addr == base_page_address && *npages == num_pages)
+            .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
+
+        let total_bytes = num_pages * PAGE_SIZE;
+
+        unsafe {
+            let slice = core::slice::from_raw_parts_mut(base_page_address as *mut u8, total_bytes);
+            // This ensures the compiler doesn't optimize away the zeroing operation
+            slice.zeroize();
+        }
+        self.confidential_memory.remove(idx);
+
+        Ok(())
     }
 
     /// Setup H-extension CSRs for guest execution

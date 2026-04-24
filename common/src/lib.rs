@@ -8,6 +8,7 @@ pub mod sbi {
 
     pub const SBI_COVH_GET_TSM_INFO: usize = 0;
     pub const SBI_COVH_CONVERT_PAGES: usize = 1;
+    pub const SBI_COVH_RECLAIM_PAGES: usize = 2;
     pub const SBI_COVH_CREATE_TVM: usize = 5;
     pub const SBI_COVH_FINALIZE_TVM: usize = 6;
     pub const SBI_COVH_DESTROY_TVM: usize = 8;

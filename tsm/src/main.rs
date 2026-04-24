@@ -12,7 +12,7 @@ use common::{
         SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
         SBI_COVH_ADD_ZERO_PAGES, SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM,
         SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM,
-        SBI_COVH_GET_TSM_INFO, SBI_COVH_RUN_TVM_VCPU,
+        SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES, SBI_COVH_RUN_TVM_VCPU,
     },
 };
 use linked_list_allocator::LockedHeap;
@@ -216,6 +216,11 @@ fn handle_covh(
         }
 
         SBI_COVH_CONVERT_PAGES => match state.hypervisor.add_confidential_pages(a0, a1) {
+            Ok(_) => SbiRet { a0: 0, a1: 0 },
+            Err(_) => SbiRet { a0: -1, a1: 0 },
+        },
+
+        SBI_COVH_RECLAIM_PAGES => match state.hypervisor.reclaim_pages(a0, a1) {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
