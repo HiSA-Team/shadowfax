@@ -71,6 +71,8 @@ pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 pub struct State {
     pub domains: Vec<Domain>,
     pub attestation_context: PlatformAttestationContext,
+    // Ongoing trusted memory: base_address, num_pages, original owner
+    memory_allocations: Vec<(usize, usize, usize)>,
 }
 
 impl State {
@@ -78,7 +80,31 @@ impl State {
         Self {
             domains: Vec::new(),
             attestation_context,
+            memory_allocations: Vec::new(),
         }
+    }
+
+    pub fn reclaim(&mut self, d: usize, base_addr: usize, num_pages: usize) -> anyhow::Result<()> {
+        let idx = self
+            .memory_allocations
+            .iter
+            .enumerate()
+            .position(|addr, npages, owner| {
+                *addr == base_addr && *npages == num_pages && *owner == d
+            })
+            .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
+
+        self.memory_allocations.remove(idx);
+        Ok(())
+    }
+
+    pub fn track_borrow(
+        &mut self,
+        d: usize,
+        base_addr: usize,
+        num_pages: usize,
+    ) -> anyhow::Result<()> {
+        self.memory_allocations.push((base_addr, num_pages, d));
     }
 }
 

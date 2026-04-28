@@ -17,7 +17,7 @@ use core::mem::offset_of;
 
 use common::sbi::{
     COVH_DEFAULT_PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_EXT_ID, SBI_COVH_GET_TSM_INFO,
-    SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
+    SBI_COVH_RECLAIM_PAGES, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
 
 use crate::{_tee_stack_top, context::Context, domain::MemoryRegion, opensbi, state::STATE};
@@ -235,6 +235,22 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     mmio: false,
                     permissions: 0x3f,
                 });
+
+                state.track_borrow(src_id, base_addr, num_pages);
+
+                remove_region(domain, base_addr, num_pages);
+            }
+
+            SBI_COVH_RECLAIM_PAGES => {
+                let base_addr = unsafe { (*domain_ctx).regs[10] };
+                let num_pages = unsafe { (*domain_ctx).regs[11] };
+                match state.reclaim(src_id, base_addr, num_pages) {
+                    Ok(_) => {}
+                    Err(e) => panic!("memory stealing detected"),
+                }
+                // Remove the pages from the trusted domain
+                let domain = state.domains.get_mut(1).unwrap();
+                remove_region(domain, base_addr, num_pages);
             }
             _ => {}
         }
@@ -543,4 +559,40 @@ fn write_pmpcfg(index: usize, val: usize) {
             _ => unreachable!(),
         };
     }
+}
+
+fn remove_region(domain: &mut Domain, target_start: usize, target_end: usize) {
+    let mut new_regions = Vec::new();
+
+    for region in domain.memory_regions {
+        let region_start = region.base_addr;
+        let region_end = region_start + (1 << region.order);
+
+        // Case 1: No overlap -
+        // keep the region as is
+        if region_end <= target_start || region_start >= target_end {
+            new_regions.push(region);
+        } else {
+            // Case 2: Partial overlap
+            // - fragment exists BEFORE target
+            if region_start < target_start {
+                new_regions.push(MemoryRegion {
+                    base_addr: region_start,
+                    order: calculate_order(target_start - region_start),
+                    ..region // Copy mmio, permissions, etc.
+                });
+            }
+
+            // Case 3: Partial overlap
+            // - fragment exists AFTER target
+            if region_end > target_end {
+                new_regions.push(MemoryRegion {
+                    base_addr: target_end,
+                    order: calculate_order(region_end - target_end),
+                    ..region // Copy mmio, permissions, etc.
+                });
+            }
+        }
+    }
+    domain.memory_regions = new_regions;
 }
