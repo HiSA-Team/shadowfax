@@ -15,6 +15,7 @@ The repository has the following layout:
 - [**shadowfax**](shadowfax/): contains all data for the TSM-driver including OpenSBI firmware;
 - [**benchmark**](benchmark/): benchmark results and a script to process and visualize results with [**marimo**](https://marimo.io/);
 - [**test**](test/): contains test material;
+- [**video**](video/): contains videos demonstrating the solution. Each video is available in edited and unedited version;
 
 ### Overview
 The repository provides a trusted firmware (Shadowfax, TSM-driver) built together with OpenSBI. To ensure easy of
