@@ -347,7 +347,9 @@ int main(void) {
     } else {
         size_t evidence_len = (size_t)ret.value;
         print_str("[GUEST] Success! Evidence received.\n");
-        print_str("[GUEST] Total Size: "); print_uint(evidence_len); print_str(" bytes.\n");
+        print_str("[GUEST] Total Size: ");
+        print_uint(evidence_len);
+        print_str(" bytes.\n");
 
         // 5. Parse and Print Details
         parse_and_print_evidence(CERT_BUFFER, evidence_len);
