@@ -3,15 +3,14 @@
 #
 # Memory Layout:
 # Untrusted OS:
-#   - Total memory: 4 KB for code, 4 KB scratch space, 4KB for the program.
 #   - Code section (4 KB) at UNTRUSTED_RAM_BASE contains ECALL and NOP instructions.
 #   - Scratch memory (4 KB) for temporary computations which is at UNTRUSTED_RAM_BASE + 0x1000
-#   - Program (ELF) is loaded at UNTRUSTED_RAM_BASE + 0x2000.
+#   - Program (ELF) staging starts after the donated confidential-memory pool.
 #
 # Trusted OS (TVM):
 #   - Receives 1024 pages (4 KB each) donated by the Untrusted OS, totaling 4 MB.
 #   - First 16 KB of Trusted memory reserved for page tables.
-#   - 4 KB reserved for the guest image.
+#   - 4 KB reserved for TVM state, followed by guest physical memory.
 #   - Trusted memory starts at UNTRUSTED_RAM_BASE + 0x4000.
 #
 # Author: Giuseppe Capasso <capassog97@gmail.com>
@@ -315,12 +314,31 @@ def run() -> None:
 
     untrusted_ram_start: int = domain_address
     untrusted_ram_scratch: int = untrusted_ram_start + 0x1000
-    untrusted_tvm_source_code: int = untrusted_ram_start + 0x2000
-    confidential_ram_start: int = untrusted_ram_start + 0x4000
+    confidential_ram_start: int = align_up(
+        untrusted_ram_start + 0x4000, PAGE_DIRECTORY_SIZE
+    )
+    confidential_ram_end: int = (
+        confidential_ram_start + NUM_PAGES_TO_DONATE * PAGE_SIZE
+    )
+
+    # The measured-pages source must remain untrusted until the TSM copies it.
+    # Keep it outside the complete range converted by COVH_CONVERT_PAGES.
+    untrusted_tvm_source_code: int = align_up(confidential_ram_end, PAGE_SIZE)
+
+    assert untrusted_tvm_source_code >= confidential_ram_end, (
+        "ELF staging memory overlaps the donated confidential-memory pool"
+    )
+
     trusted_tvm_state_start: int = confidential_ram_start + PAGE_DIRECTORY_SIZE
     trusted_tvm_ram_start: int = (
         confidential_ram_start + PAGE_DIRECTORY_SIZE + TVM_VCPU_STATE_SIZE
     )
+
+    print(
+        f"Confidential memory: 0x{confidential_ram_start:x}-"
+        f"0x{confidential_ram_end - 1:x}"
+    )
+    print(f"Guest ELF staging base: 0x{untrusted_tvm_source_code:x}")
 
     runner = Runner(commit_on_add=True)
 
