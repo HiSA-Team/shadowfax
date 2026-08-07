@@ -109,8 +109,8 @@ const STACK_SIZE_PER_HART: usize = 1024 * 8;
 /// the linkerscript. This function:
 ///
 /// - setup a the stack pointer
-/// - loads the custom device tree in `a1` register overwriting the default one
-/// provided by qemu
+/// - loads the fixed custom device tree address in `a1`, ignoring the device
+/// tree address provided by the previous boot stage
 /// - zero bss section
 /// - call `fw_platform_init` provided by opensbi
 /// - jump to main
@@ -146,6 +146,10 @@ extern "C" fn _start() -> ! {
         // Loop if s4 is less than s5
         blt s4, s5, 0b
 
+        // Ignore the previous boot stage's FDT and use the DTB loaded at our
+        // fixed supervisor-domain address.
+        li a1, {fdt_addr}
+
         // call fw_platform_init
         // save registers a0-a4
         add s0, a0, zero
@@ -176,6 +180,7 @@ extern "C" fn _start() -> ! {
         bss_start = sym _start_bss,
         bss_end = sym _end_bss,
         pointer_size = const size_of::<usize>(),
+        fdt_addr = const constants::FDT_ADDR,
     )
 }
 
@@ -254,7 +259,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
 
-    dump_linker_symbols();
+    dump_linker_symbols(fdt_addr);
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
     let next_stage_address = state::init(fdt_addr).unwrap();
@@ -441,8 +446,8 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     }
 }
 
-// a small helper to print an address using the print_raw! macro
-fn dump_linker_symbols() {
+/// Prints the firmware, boot-hart, FDT, and supervisor-domain memory layout.
+fn dump_linker_symbols(fdt_addr: usize) {
     // print header
     print_raw!("\nSHADOWFAX Firmware v0.1\n");
     print_raw!("========================\n");
@@ -469,6 +474,40 @@ fn dump_linker_symbols() {
         print_raw!(
             "TEE Stack Top     : {:#018x}\n",
             &_tee_stack_top as *const u8 as usize
+        );
+    }
+
+    // fw_platform_init() has already validated the FDT header at this point.
+    let fdt_magic = u32::from_be(unsafe { (fdt_addr as *const u32).read_unaligned() });
+    let fdt_size =
+        u32::from_be(unsafe { ((fdt_addr + size_of::<u32>()) as *const u32).read_unaligned() });
+    print_raw!(
+        "DICE Input Address : {:#018x}\n",
+        constants::DICE_INPUT_ADDR
+    );
+    print_raw!("FDT Address        : {:#018x}\n", fdt_addr);
+    print_raw!("FDT Magic          : {:#010x}\n", fdt_magic);
+    print_raw!("FDT Size           : {} bytes\n", fdt_size);
+    print_raw!(
+        "Supervisor Entry   : {:#018x}\n",
+        constants::memory_layout::UNTRUSTED_DOMAIN_REGIONS[0].base_addr
+    );
+
+    for (index, region) in constants::memory_layout::UNTRUSTED_DOMAIN_REGIONS
+        .iter()
+        .enumerate()
+    {
+        let size = 1usize << region.order;
+        let end = region.base_addr + size - 1;
+        let kind = if region.mmio { "MMIO" } else { "RAM" };
+
+        print_raw!(
+            "Supervisor Region{} : {:#018x}-{:#018x} {} P:{:#04x}\n",
+            index,
+            region.base_addr,
+            end,
+            kind,
+            region.permissions
         );
     }
 

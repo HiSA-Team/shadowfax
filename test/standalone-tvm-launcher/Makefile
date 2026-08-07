@@ -15,6 +15,7 @@ GUEST_ELF       ?= $(ROOT)/guests/attestation.out
 FW_ELF          := $(ROOT)/target/$(TARGET)/$(PROFILE)/shadowfax
 DICE_INPUT      := $(ROOT)/bin/shadowfax.dice.bin
 DTB             := $(ROOT)/bin/device-tree.dtb
+FDT_ADDR        := 0x8AF00000
 
 ELF             := $(BUILD_DIR)/standalone-tvm-launcher
 BIN             := $(ELF).bin
@@ -60,7 +61,8 @@ firmware:
 
 run: all firmware
 	$(QEMU) -M virt -m 512M -smp 1 -nographic \
-		-dtb $(DTB) -bios $(FW_ELF) \
+		-bios $(FW_ELF) \
+		-device loader,file=$(DTB),addr=$(FDT_ADDR),force-raw=on \
 		-device loader,file=$(DICE_INPUT),addr=0x88000000,force-raw=on \
 		-device loader,file=$(BIN),addr=0x8A000000,force-raw=on
 

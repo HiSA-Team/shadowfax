@@ -6,6 +6,7 @@
 # - BOOT_DOMAIN_ADDRESS: specify the address of the untrusted domain which should start the execution
 # - PLATFORM:            target platform, this is used for OpenSBI initialization
 # - GDB_COVE_SCRIPT:     path to the example to run
+# - QEMU_DEVICES:        additional QEMU device/loader arguments
 #
 # Usage:
 #   make help # discover available targets
@@ -22,8 +23,9 @@ OPENSBI_VERSION            := $(shell git -C shadowfax/opensbi describe)
 TARGET_TRIPLET             ?= riscv64imac-unknown-none-elf
 PROFILE                    ?= debug
 RUSTFLAGS                  := -C target-feature=+h
-QEMU                       := qemu-system-riscv64
+QEMU                       ?= qemu-system-riscv64
 QEMU_FLAGS                 := -M virt -m 512M -smp 1 -nographic -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait
+QEMU_DEVICES               ?=
 ifeq ($(DEBUG), 1)
 QEMU_FLAGS                 +=  -s -S
 endif
@@ -31,6 +33,7 @@ endif
 # Platform Params
 PLATFORM                   ?= generic
 BOOT_DOMAIN_ADDRESS        ?= 0x8A000000
+FDT_ADDR                    := 0x8AF00000
 
 # RISC-V Toolchain
 RV_PREFIX                  ?= riscv64-unknown-linux-$(HOST_LIBC)-
@@ -50,6 +53,7 @@ TSM_SIG                     = $(BIN_DIR)/tsm.bin.signature
 
 # Keys and Dice files
 DICE_INPUT                  = $(BIN_DIR)/shadowfax.dice.bin
+FDT_IMAGE                  ?= $(BIN_DIR)/device-tree.dtb
 PRIVATE_KEY                 = $(KEYS_DIR)/privatekey.pem
 PUBLIC_KEY                  = $(KEYS_DIR)/publickey.pem
 DICE_PLATFORM_PUBLIC_KEY    = $(KEYS_DIR)/root_of_trust_pub.bin
@@ -130,8 +134,9 @@ generate-keys:
 
 ## qemu-run: runs the script on qemu
 qemu-run: firmware
-	$(QEMU) $(QEMU_FLAGS) -dtb $(BIN_DIR)/device-tree.dtb -bios $(FW_ELF) \
-		-device loader,file=$(DICE_INPUT),addr=0x88000000,force-raw=on
+	$(QEMU) $(QEMU_FLAGS) -bios $(FW_ELF) \
+		-device loader,file=$(FDT_IMAGE),addr=$(FDT_ADDR),force-raw=on \
+		-device loader,file=$(DICE_INPUT),addr=0x88000000,force-raw=on $(QEMU_DEVICES)
 
 ## debug: attach to a gdb server and load $(GDB_COVE_SCRIPT)
 debug:

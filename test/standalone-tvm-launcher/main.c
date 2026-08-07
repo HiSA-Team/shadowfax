@@ -70,8 +70,7 @@ static unsigned char segment_staging[GUEST_RAM_SIZE]
 static struct sbiret sbi_call(uintptr_t eid, uintptr_t fid,
                               uintptr_t arg0, uintptr_t arg1,
                               uintptr_t arg2, uintptr_t arg3,
-                              uintptr_t arg4, uintptr_t arg5)
-{
+                              uintptr_t arg4, uintptr_t arg5) {
     register uintptr_t a0 asm("a0") = arg0;
     register uintptr_t a1 asm("a1") = arg1;
     register uintptr_t a2 asm("a2") = arg2;
@@ -93,26 +92,22 @@ static struct sbiret sbi_call(uintptr_t eid, uintptr_t fid,
 static struct sbiret covh_call(uintptr_t fid,
                                uintptr_t a0, uintptr_t a1,
                                uintptr_t a2, uintptr_t a3,
-                               uintptr_t a4, uintptr_t a5)
-{
+                               uintptr_t a4, uintptr_t a5) {
     return sbi_call(SBI_EXT_COVH, COVH_TARGET_TSM | fid,
                     a0, a1, a2, a3, a4, a5);
 }
 
-static void putchar(char c)
-{
+static void putchar(char c) {
     (void)sbi_call(SBI_EXT_DBCN, SBI_DBCN_WRITE_BYTE,
                    (uintptr_t)(unsigned char)c, 0, 0, 0, 0, 0);
 }
 
-static void puts(const char *s)
-{
+static void puts(const char *s) {
     while (*s != '\0')
         putchar(*s++);
 }
 
-static void puthex(uintptr_t value)
-{
+static void puthex(uintptr_t value) {
     static const char digits[] = "0123456789abcdef";
 
     puts("0x");
@@ -120,16 +115,14 @@ static void puthex(uintptr_t value)
         putchar(digits[(value >> shift) & 0xf]);
 }
 
-static void clear_bytes(void *address, size_t size)
-{
+static void clear_bytes(void *address, size_t size) {
     volatile unsigned char *p = address;
 
     while (size-- != 0)
         *p++ = 0;
 }
 
-static void copy_bytes(void *destination, const void *source, size_t size)
-{
+static void copy_bytes(void *destination, const void *source, size_t size) {
     unsigned char *dst = destination;
     const unsigned char *src = source;
 
@@ -138,8 +131,7 @@ static void copy_bytes(void *destination, const void *source, size_t size)
 }
 
 __attribute__((noreturn))
-static void halt(void)
-{
+static void halt(void) {
     for (;;)
         asm volatile("wfi");
 }

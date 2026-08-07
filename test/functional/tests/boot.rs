@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+const FDT_ADDR: &str = "0x8af00000";
+
 fn spawn_qemu_and_stream(
     firmware: &Path,
     dtb: &Path,
@@ -23,8 +25,13 @@ fn spawn_qemu_and_stream(
             firmware.to_str().unwrap(),
             "-device",
             format!("loader,file={},addr=0x88000000", dice.display()).as_str(),
-            "-dtb",
-            dtb.to_str().unwrap(),
+            "-device",
+            format!(
+                "loader,file={},addr={},force-raw=on",
+                dtb.display(),
+                FDT_ADDR
+            )
+            .as_str(),
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
