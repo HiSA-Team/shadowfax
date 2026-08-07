@@ -45,13 +45,13 @@ COVH_CREATE_TVM_VCPU: int = 14
 COVH_RUN_TVM_VCPU: int = 15
 
 # ================ Create TVM Input ======================= #
-TVM_ELF_PATH: str = "guests/coremark/coremark.bin"
-TVM_BIN_PATH: str = "a.bin"
-DEFAULT_PAGE_SIZE: int = 4096 # 4k
+TVM_ELF_PATH: str = "guests/attestation.out"
+TVM_BIN_PATH: str = "guests/attestation.bin"
+DEFAULT_PAGE_SIZE: int = 4096  # 4k
 PAGE_DIRECTORY_SIZE: int = 0x4000  # 16kib
 NUM_PAGES_TO_DONATE: int = 1024
-TVM_RAM_SIZE: int = 1024 * 128 # 16k Guest RAM
-TVM_VCPU_STATE_SIZE: int = 0x1000 #4k
+TVM_RAM_SIZE: int = 1024 * 128  # 16k Guest RAM
+TVM_VCPU_STATE_SIZE: int = 0x1000  # 4k
 
 TVM_ID: int = 1
 VCPU_ID: int = 0
@@ -60,12 +60,16 @@ PAGE_SIZE_TO_ID = {0x1000: 0}
 
 
 # Asserts to check memory size
-assert os.path.getsize(TVM_BIN_PATH) < TVM_RAM_SIZE, "insufficient Guest RAM (make sure guest ram < 1Mb)"
+assert os.path.getsize(TVM_BIN_PATH) < TVM_RAM_SIZE, (
+    "insufficient Guest RAM (make sure guest ram < 1Mb)"
+)
+
 
 def ecall_ok(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
     a0 = regs["a0"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
+
 
 def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
     regs = curr["regs"]
@@ -129,6 +133,7 @@ def assert_get_tsm_info(prev: Optional[Dict], curr: Dict) -> None:
         f"tvm_vcpu_state_pages must be 1; current {tvm_vcpu_state_pages}"
     )
 
+
 def setup_create_tvm(*args) -> None:
     # ecall parameter where to store the address
     tvm_params_addr = args[0]
@@ -145,7 +150,6 @@ def setup_create_tvm(*args) -> None:
 
     inf.write_memory(tvm_params_addr, tvm_directory_addr)
     inf.write_memory(tvm_params_addr + 8, tvm_state_addr)
-
 
 
 def assert_create_tvm(prev: Optional[Dict], curr: Dict) -> None:
@@ -172,6 +176,7 @@ def assert_create_tvm(prev: Optional[Dict], curr: Dict) -> None:
         "page table must be zero after TVM creation"
     )
 
+
 def align_up(addr: int, align: int) -> int:
     return (addr + align - 1) & ~(align - 1)
 
@@ -181,7 +186,7 @@ def align_down(addr: int, align: int) -> int:
 
 
 def load_guest_elf_and_make_steps(
-        path: str, untrusted_base_addr: int, trusted_physical_addr: int
+    path: str, untrusted_base_addr: int, trusted_physical_addr: int
 ) -> (int, list, int, int):
     """
     Load ELF segments into memory via GDB and creates step to map into confidential domain
@@ -239,18 +244,22 @@ def load_guest_elf_and_make_steps(
             zeros = bytes(total_bytes)
             inf.write_memory(page_aligned_load_addr, zeros)
             if filesz > 0:
-                inf.write_memory(page_aligned_load_addr + page_offset, seg_data[:filesz])
+                inf.write_memory(
+                    page_aligned_load_addr + page_offset, seg_data[:filesz]
+                )
 
-            segments_info.append({
-                "gpa_addr": gpa_addr,
-                "guest_page": guest_page,
-                "page_offset": page_offset,
-                "load_page_addr": page_aligned_load_addr,
-                "memsz": memsz,
-                "filesz": filesz,
-                "num_pages": num_pages,
-                "index": i
-            })
+            segments_info.append(
+                {
+                    "gpa_addr": gpa_addr,
+                    "guest_page": guest_page,
+                    "page_offset": page_offset,
+                    "load_page_addr": page_aligned_load_addr,
+                    "memsz": memsz,
+                    "filesz": filesz,
+                    "num_pages": num_pages,
+                    "index": i,
+                }
+            )
 
         # Step 2: Add measured pages for each segment
         current_trusted_offset = 0
@@ -283,7 +292,7 @@ def load_guest_elf_and_make_steps(
                         "a7": EID_COVH_ID,
                     },
                     setup_mem_fn=None,
-                    assert_fn=ecall_ok
+                    assert_fn=ecall_ok,
                 ),
             )
 
@@ -301,18 +310,17 @@ def run() -> None:
     print(f"Test domain address 0x{domain_address:x}")
 
     domain = Domain(
-            name="testdomain",
-            instr_base=domain_address,
-            data_base=domain_address + 0x1000
+        name="testdomain", instr_base=domain_address, data_base=domain_address + 0x1000
     )
-
 
     untrusted_ram_start: int = domain_address
     untrusted_ram_scratch: int = untrusted_ram_start + 0x1000
     untrusted_tvm_source_code: int = untrusted_ram_start + 0x2000
     confidential_ram_start: int = untrusted_ram_start + 0x4000
     trusted_tvm_state_start: int = confidential_ram_start + PAGE_DIRECTORY_SIZE
-    trusted_tvm_ram_start: int = confidential_ram_start + PAGE_DIRECTORY_SIZE + TVM_VCPU_STATE_SIZE
+    trusted_tvm_ram_start: int = (
+        confidential_ram_start + PAGE_DIRECTORY_SIZE + TVM_VCPU_STATE_SIZE
+    )
 
     runner = Runner(commit_on_add=True)
 
@@ -334,7 +342,7 @@ def run() -> None:
             setup_mem_fn=None,
             assert_fn=assert_get_active_domains,
         ),
-        domain
+        domain,
     )
 
     # Get the TSM capabilities. The TSM will write its capabilities in a structure we provide
@@ -354,7 +362,7 @@ def run() -> None:
             setup_mem_fn=None,
             assert_fn=assert_get_tsm_info,
         ),
-        domain
+        domain,
     )
 
     # Donate pages to the untrusted domain. These will be used to host the TVM by the TSM hypervisor component
@@ -375,7 +383,7 @@ def run() -> None:
             setup_mem_fn=None,
             assert_fn=ecall_ok,
         ),
-        domain
+        domain,
     )
 
     # Create a TVM object. The Host will tell where to create the GPT. The TSM will respond with the id
@@ -397,7 +405,7 @@ def run() -> None:
             setup_mem_args=[domain.data_base + 64, confidential_ram_start],
             assert_fn=assert_create_tvm,
         ),
-        domain
+        domain,
     )
 
     runner.add_step(
@@ -416,7 +424,7 @@ def run() -> None:
             setup_mem_fn=None,
             assert_fn=ecall_ok,
         ),
-        domain
+        domain,
     )
 
     guest_entry, steps, tvm_ram_off = load_guest_elf_and_make_steps(
@@ -429,7 +437,7 @@ def run() -> None:
     # map the rest as zero pages (stack, heap) as they don't are part of the measurement process
     runner.add_step(
         Step(
-            name=f"add_tvm_zero_pages",
+            name="add_tvm_zero_pages",
             regs={
                 "a0": TVM_ID,
                 "a1": trusted_tvm_ram_start + tvm_ram_off,  # Dest: confidential memory
@@ -441,9 +449,9 @@ def run() -> None:
                 "a7": EID_COVH_ID,
             },
             setup_mem_fn=None,
-            assert_fn=ecall_ok
+            assert_fn=ecall_ok,
         ),
-        domain
+        domain,
     )
 
     # Add vCPU with id=0 to the TVM
@@ -465,7 +473,7 @@ def run() -> None:
             setup_mem_fn=None,
             assert_fn=ecall_ok,
         ),
-        domain
+        domain,
     )
 
     # Finalize the TVM. Provide GPA_BASE as the entrypoint
@@ -486,7 +494,7 @@ def run() -> None:
             setup_mem_fn=None,
             assert_fn=ecall_ok,
         ),
-        domain
+        domain,
     )
 
     # Start the TVM vCPU.
@@ -506,7 +514,7 @@ def run() -> None:
             setup_mem_fn=None,
             assert_fn=ecall_ok,
         ),
-        domain
+        domain,
     )
 
     runner.install_breakpoints()
