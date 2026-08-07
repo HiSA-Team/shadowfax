@@ -1,4 +1,5 @@
-    .section .text
+    .section .text._start, "ax"
+    .globl _start
 _start:
     /* Reset registers */
     mv ra, zero
