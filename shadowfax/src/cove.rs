@@ -15,6 +15,7 @@
 
 use core::mem::offset_of;
 
+use alloc::vec::Vec;
 use common::sbi::{
     COVH_DEFAULT_PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_EXT_ID, SBI_COVH_GET_TSM_INFO,
     SBI_COVH_RECLAIM_PAGES, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
@@ -142,28 +143,26 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let state = guard.get_mut().unwrap();
 
     let (dst_id, fid) = cove_unpack_fid!(fid);
-    let domain = state.domains.get_mut(dst_id);
 
     // Scratch space
     let scratch_start = &raw const _tee_stack_top as *const u8 as usize;
     let base_ctx = scratch_start - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let scratch_ctx = base_ctx as *mut Context;
 
-    // Invalid domain id, go back with an error
-    if domain.is_none() {
+    if dst_id >= state.domains.len() {
         return unsafe { return_error(base_ctx, -1) };
     }
 
-    // Get destination domain
-    let domain = domain.unwrap();
+    let has_tsm = state.domains[dst_id].has_tsm;
+    let context_addr = state.domains[dst_id].context_addr;
 
     // TEECALL
-    if domain.has_tsm {
-        let domain_ctx = domain.context_addr as *mut Context;
+    if has_tsm {
+        let domain_ctx = context_addr as *mut Context;
         // TODO: get current domain
         let src_id = 2;
         // check if the domain is trusted. If not just return an error to the caller
-        if !domain.is_trusted(src_id) {
+        if !state.domains[dst_id].is_trusted(src_id) {
             return unsafe { return_error(base_ctx, -1) };
         }
         // We need to store the calling context into the right structure
@@ -202,7 +201,6 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 // Base address must be page aligned, we cannot exceed number of available pmp
                 // registers
                 assert!(base_addr % COVH_DEFAULT_PAGE_SIZE == 0);
-                assert!(domain.memory_regions.len() < 8);
 
                 let order = if (size & (size - 1)) == 0 {
                     size.trailing_zeros()
@@ -211,12 +209,20 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 }
                 .max(3);
 
-                domain.memory_regions.push(MemoryRegion {
-                    base_addr,
-                    order,
-                    mmio: false,
-                    permissions: 0x3f,
-                });
+                /*
+                 * Borrow the domain only for this operation.
+                 */
+                {
+                    let domain = &mut state.domains[dst_id];
+                    assert!(domain.memory_regions.len() < 8);
+
+                    domain.memory_regions.push(MemoryRegion {
+                        base_addr,
+                        order,
+                        mmio: false,
+                        permissions: 0x3f,
+                    });
+                }
             }
             SBI_COVH_CONVERT_PAGES => {
                 let base_addr = unsafe { (*domain_ctx).regs[10] };
@@ -225,20 +231,37 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 // Base address must be page aligned, we cannot exceed number of available pmp
                 // registers
                 assert!(base_addr % COVH_DEFAULT_PAGE_SIZE == 0);
-                assert!(domain.memory_regions.len() < 8);
 
                 let order = (num_pages * COVH_DEFAULT_PAGE_SIZE).trailing_zeros();
 
-                domain.memory_regions.push(MemoryRegion {
-                    base_addr,
-                    order,
-                    mmio: false,
-                    permissions: 0x3f,
-                });
+                /*
+                 * First mutate the domain.
+                 */
+                {
+                    let domain = &mut state.domains[dst_id];
 
-                state.track_borrow(src_id, base_addr, num_pages);
+                    assert!(domain.memory_regions.len() < 8);
 
-                remove_region(domain, base_addr, num_pages);
+                    domain.memory_regions.push(MemoryRegion {
+                        base_addr,
+                        order,
+                        mmio: false,
+                        permissions: 0x3f,
+                    });
+                }
+
+                state.track_borrow(src_id, base_addr, num_pages).unwrap();
+
+                /*
+                 * Borrow the domain again afterward.
+                 */
+                {
+                    let domain = &mut state.domains[dst_id];
+                    assert!(domain.memory_regions.len() < 8);
+
+                    domain.memory_regions =
+                        compute_new_regions(&domain.memory_regions, base_addr, num_pages);
+                }
             }
 
             SBI_COVH_RECLAIM_PAGES => {
@@ -246,11 +269,12 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let num_pages = unsafe { (*domain_ctx).regs[11] };
                 match state.reclaim(src_id, base_addr, num_pages) {
                     Ok(_) => {}
-                    Err(e) => panic!("memory stealing detected"),
+                    Err(_e) => panic!("memory stealing detected"),
                 }
                 // Remove the pages from the trusted domain
                 let domain = state.domains.get_mut(1).unwrap();
-                remove_region(domain, base_addr, num_pages);
+                domain.memory_regions =
+                    compute_new_regions(&domain.memory_regions, base_addr, num_pages);
             }
             _ => {}
         }
@@ -258,8 +282,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             let ret = opensbi::sbi_domain_change_active(dst_id as u32);
             assert!(ret == 0);
         }
-        program_pmp_from_regions(&domain.memory_regions);
-        return domain.context_addr;
+        program_pmp_from_regions(&state.domains[dst_id].memory_regions);
+        return context_addr;
     }
 
     // TEERET
@@ -271,7 +295,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let tsmid = 1;
 
     unsafe {
-        let domain_ctx = domain.context_addr as *mut Context;
+        let domain_ctx = context_addr as *mut Context;
         let eid = (*scratch_ctx).regs[16] & 0xFFFF;
         (*domain_ctx).regs[10] = (*scratch_ctx).regs[10];
         (*domain_ctx).regs[11] = (*scratch_ctx).regs[11];
@@ -291,8 +315,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         let ret = opensbi::sbi_domain_change_active(dst_id as u32);
         assert!(ret == 0);
     }
-    program_pmp_from_regions(&domain.memory_regions);
-    return domain.context_addr;
+    program_pmp_from_regions(&state.domains[dst_id].memory_regions);
+    return context_addr;
 }
 
 #[unsafe(naked)]
@@ -561,38 +585,78 @@ fn write_pmpcfg(index: usize, val: usize) {
     }
 }
 
-fn remove_region(domain: &mut Domain, target_start: usize, target_end: usize) {
+/* Remove the given memory range from Domain region list. It addresses overlapping before and after.
+ * If a region contains the target start and target end it will be split into 2 regions
+ * */
+fn compute_new_regions(
+    regions: &Vec<MemoryRegion>,
+    target_start: usize,
+    target_end: usize,
+) -> Vec<MemoryRegion> {
     let mut new_regions = Vec::new();
 
-    for region in domain.memory_regions {
+    for region in regions {
         let region_start = region.base_addr;
         let region_end = region_start + (1 << region.order);
 
-        // Case 1: No overlap -
-        // keep the region as is
+        // Case 1: No overlap - keep the region as is
         if region_end <= target_start || region_start >= target_end {
-            new_regions.push(region);
-        } else {
-            // Case 2: Partial overlap
-            // - fragment exists BEFORE target
-            if region_start < target_start {
-                new_regions.push(MemoryRegion {
-                    base_addr: region_start,
-                    order: calculate_order(target_start - region_start),
-                    ..region // Copy mmio, permissions, etc.
-                });
-            }
+            new_regions.push(region.clone());
+            continue;
+        }
 
-            // Case 3: Partial overlap
-            // - fragment exists AFTER target
-            if region_end > target_end {
-                new_regions.push(MemoryRegion {
-                    base_addr: target_end,
-                    order: calculate_order(region_end - target_end),
-                    ..region // Copy mmio, permissions, etc.
-                });
-            }
+        // Case 2: Keep the fragment before the removed range
+        if region_start < target_start {
+            let before_end = target_start.min(region_end);
+
+            add_region_range(
+                &mut new_regions,
+                region_start,
+                before_end,
+                region.mmio,
+                region.permissions,
+            );
+        }
+        // Case 3: Keep the fragment after the removed range
+        if region_end > target_end {
+            let after_start = target_end.max(region_start);
+            add_region_range(
+                &mut new_regions,
+                after_start,
+                region_end,
+                region.mmio,
+                region.permissions,
+            );
         }
     }
-    domain.memory_regions = new_regions;
+    new_regions
+}
+
+fn add_region_range(
+    regions: &mut Vec<MemoryRegion>,
+    mut start: usize,
+    end: usize,
+    mmio: bool,
+    permissions: u8,
+) {
+    while start < end {
+        let remaining = end - start;
+
+        // Largest block allowed by the start address alignment.
+        let alignment_order = start.trailing_zeros() as usize;
+
+        // Largest power-of-two that fits in the remaining range.
+        let size_order = (usize::BITS - 1 - remaining.leading_zeros()) as usize;
+
+        let order = alignment_order.min(size_order);
+
+        regions.push(MemoryRegion {
+            base_addr: start,
+            order: order as u32,
+            mmio,
+            permissions,
+        });
+
+        start += 1usize << order;
+    }
 }

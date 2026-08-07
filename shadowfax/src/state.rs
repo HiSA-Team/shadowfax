@@ -87,9 +87,9 @@ impl State {
     pub fn reclaim(&mut self, d: usize, base_addr: usize, num_pages: usize) -> anyhow::Result<()> {
         let idx = self
             .memory_allocations
-            .iter
+            .iter()
             .enumerate()
-            .position(|addr, npages, owner| {
+            .position(|(_, (addr, npages, owner))| {
                 *addr == base_addr && *npages == num_pages && *owner == d
             })
             .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
@@ -104,7 +104,7 @@ impl State {
         base_addr: usize,
         num_pages: usize,
     ) -> anyhow::Result<()> {
-        self.memory_allocations.push((base_addr, num_pages, d));
+        Ok(self.memory_allocations.push((base_addr, num_pages, d)))
     }
 }
 
