@@ -180,8 +180,6 @@ docker run --rm -it -v "$PWD:/shadowfax" -w /shadowfax \
     shadowfax-build sh -c 'make build-info'
 ```
 
-The repository also includes a devcontainer configuration for compatible editors.
-
 ## musl hosts
 
 On musl hosts, `clang-sys` requires static libclang artifacts. Build LLVM/Clang with
