@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const FDT_ADDR: &str = "0x8df00000";
+const FDT_ADDR: &str = "0x8bf00000";
 
 fn spawn_qemu_and_stream(
     firmware: &Path,

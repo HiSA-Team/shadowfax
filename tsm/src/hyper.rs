@@ -29,7 +29,7 @@ use crate::{
     TsmState, MEASUREMENT,
 };
 
-const PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
+const MIN_PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
 
 const PTE_SIZE: usize = 8;
 const PTE_V: u64 = 1 << 0;
@@ -65,16 +65,15 @@ fn ppn_to_pa(ppn: u64) -> usize {
 }
 
 /// Map a single 4 KiB page in SV39 page tables.
-/// Dynamically allocates page tables within the 16KB region as needed.
+/// Dynamically allocates page tables within the region supplied by the host.
 ///
 /// Memory layout:
 ///   root_pt + 0x0000: L2 table (root)
 ///   root_pt + 0x1000: L1 table (shared for all VPN[2]=0)
-///   root_pt + 0x2000: First L0 table
-///   root_pt + 0x3000: Second L0 table (if needed for different VPN[1])
+///   root_pt + 0x2000 + VPN[1] * 0x1000: L0 tables
 ///
 /// Note: This assumes all mappings use VPN[2]=0 (addresses < 1GB)
-fn map_4k_leaf(root_pt: usize, gpa: usize, pa: usize, perms: u64) {
+fn map_4k_leaf(root_pt: usize, page_table_size: usize, gpa: usize, pa: usize, perms: u64) {
     // assert_eq!(gpa % PAGE_SIZE, 0, "GPA must be page-aligned");
     // assert_eq!(pa % PAGE_SIZE, 0, "PA must be page-aligned");
 
@@ -103,12 +102,12 @@ fn map_4k_leaf(root_pt: usize, gpa: usize, pa: usize, perms: u64) {
 
     let l0_base = if pte1 & PTE_V == 0 {
         // L0 table doesn't exist, allocate it
-        // For simplicity: L0 for VPN[1]=0 at root+0x2000, VPN[1]=1 at root+0x3000
+        // Allocate one L0 table for each populated VPN[1].
         let l0_base = root_pt + 0x2000 + (vpn1 * PAGE_SIZE);
 
-        // Check we don't exceed our 16KB region
+        // Check that the host supplied enough space for another L0 table.
         assert!(
-            l0_base + PAGE_SIZE <= root_pt + PAGE_DIRECTORY_SIZE,
+            l0_base + PAGE_SIZE <= root_pt + page_table_size,
             "Insufficient space for L0 table at VPN[1]={}",
             vpn1
         );
@@ -194,12 +193,19 @@ pub fn translate_gpa_to_pa(root_pt: usize, gpa: usize) -> Option<usize> {
 }
 
 /// Map a contiguous region of memory (multiple 4KB pages).
-fn map_region(root_pt: usize, gpa_base: usize, pa_base: usize, num_pages: usize, perms: u64) {
+fn map_region(
+    root_pt: usize,
+    page_table_size: usize,
+    gpa_base: usize,
+    pa_base: usize,
+    num_pages: usize,
+    perms: u64,
+) {
     for i in 0..num_pages {
         // TODO align GPA to PAGE
         let gpa = gpa_base + i * PAGE_SIZE;
         let pa = pa_base + i * PAGE_SIZE;
-        map_4k_leaf(root_pt, gpa, pa, perms);
+        map_4k_leaf(root_pt, page_table_size, gpa, pa, perms);
     }
 }
 
@@ -281,17 +287,19 @@ impl HypervisorState {
             anyhow::bail!("already created tvm");
         }
 
-        if page_table_addr % PAGE_DIRECTORY_SIZE != 0 {
+        if page_table_addr % MIN_PAGE_DIRECTORY_SIZE != 0 {
             anyhow::bail!("page table addr must be 16KB-aligned");
         }
 
-        assert!(
-            state_addr < page_table_addr
-                || state_addr > (page_table_addr + PAGE_DIRECTORY_SIZE - 8)
-        );
+        let page_table_size = state_addr
+            .checked_sub(page_table_addr)
+            .ok_or_else(|| anyhow::anyhow!("state address precedes page table"))?;
+        if page_table_size < MIN_PAGE_DIRECTORY_SIZE || page_table_size % PAGE_SIZE != 0 {
+            anyhow::bail!("invalid page table size");
+        }
 
         let pd_block_idx = self
-            .find_confidential_block_idx_covering(page_table_addr, PAGE_DIRECTORY_SIZE)
+            .find_confidential_block_idx_covering(page_table_addr, page_table_size)
             .ok_or_else(|| anyhow::anyhow!("page directory addr not in confidential memory"))?;
 
         let state_block_idx = self
@@ -315,10 +323,15 @@ impl HypervisorState {
 
         unsafe {
             let ptr = page_table_addr as *mut u8;
-            core::ptr::write_bytes(ptr, 0, PAGE_DIRECTORY_SIZE);
+            core::ptr::write_bytes(ptr, 0, page_table_size);
         }
 
-        let tvm = Tvm::new(attestation_context, page_table_addr, state_addr);
+        let tvm = Tvm::new(
+            attestation_context,
+            page_table_addr,
+            page_table_size,
+            state_addr,
+        );
         let tvm_id = tvm.id;
         self.tvm = Some(tvm);
         Ok(tvm_id)
@@ -344,7 +357,7 @@ impl HypervisorState {
         if let Some(tvm) = &self.tvm {
             unsafe {
                 let ptr = tvm.page_table_addr as *mut u8;
-                core::ptr::write_bytes(ptr, 0, PAGE_DIRECTORY_SIZE);
+                core::ptr::write_bytes(ptr, 0, tvm.page_table_size);
             }
         }
         self.tvm = None;
@@ -485,6 +498,7 @@ impl HypervisorState {
         // Map each page in the TVM's page table
         map_region(
             tvm.page_table_addr,
+            tvm.page_table_size,
             tvm_guest_gpa,
             dest_addr,
             num_pages,
@@ -558,6 +572,7 @@ impl HypervisorState {
 
         map_region(
             tvm.page_table_addr,
+            tvm.page_table_size,
             tvm_base_page_address,
             base_page_address,
             num_pages,
@@ -671,6 +686,7 @@ impl HypervisorState {
 pub struct Tvm {
     id: usize,
     page_table_addr: usize,
+    page_table_size: usize,
     state_addr: usize,
     memory_regions: Vec<MemoryRegion>,
     state_enum: TvmState,
@@ -687,11 +703,13 @@ impl Tvm {
     fn new(
         attestation_context: TvmAttestationContext,
         page_table_addr: usize,
+        page_table_size: usize,
         state_addr: usize,
     ) -> Self {
         Self {
             id: 1,
             page_table_addr,
+            page_table_size,
             state_addr,
             memory_regions: Vec::new(),
             state_enum: TvmState::TvmInitializing,
@@ -993,6 +1011,7 @@ struct LazyState {
     elf_data: &'static [u8], // Reference to the raw ELF bytes
     next_free_phys: usize,   // Simple bump allocator for physical pages
     phys_limit: usize,
+    page_table_size: usize,
 }
 
 // Mutex to safely access this from the trap handler
@@ -1193,6 +1212,7 @@ fn handle_page_fault(gpa: usize) {
         // Note: You must ensure map_4k_leaf is accessible here
         map_4k_leaf(
             root_pt,
+            lazy.page_table_size,
             gpa_page,
             pa,
             PTE_R | PTE_W | PTE_X | PTE_U | PTE_A | PTE_D,
@@ -1242,6 +1262,7 @@ pub fn bootstrap_load_elf_lazy(
             elf_data: data,
             next_free_phys: conf_pool_base,
             phys_limit: conf_pool_base + ram_size,
+            page_table_size: state_addr - pt_addr,
         });
     }
 

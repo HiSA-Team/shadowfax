@@ -1,5 +1,5 @@
 pub const DICE_INPUT_ADDR: usize = 0x8800_0000;
-pub const FDT_ADDR: usize = 0x8DF0_0000;
+pub const FDT_ADDR: usize = 0x8BF0_0000;
 
 pub mod memory_layout {
     use crate::domain::MemoryRegion;
@@ -20,7 +20,7 @@ pub mod memory_layout {
         },
         MemoryRegion {
             base_addr: 0x8C00_0000,
-            order: 25,
+            order: 26,
             mmio: false,
             permissions: 0x3F,
         },

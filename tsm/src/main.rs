@@ -304,16 +304,16 @@ fn test_tvm_bootstrap() -> ! {
 
     // 2. Define Memory Layout for Testing (Adjust based on your QEMU RAM)
     // Assuming TSM is at 0x80200000, let's put TVM structures higher up.
-    let tvm_page_table_addr = 0x80800000; // Must be 16KB aligned
-    let tvm_state_addr = 0x80810000;
+    let tvm_page_table_addr = 0x80800000;
+    let tvm_state_addr = tvm_page_table_addr + 256 * 1024;
     let tvm_confidential_pool = 0x80900000; // Where guest RAM actually sits
     let pool_size_pages = 512; // 2MB test pool
 
     // 3. Convert pages to confidential
     state
         .hypervisor
-        .add_confidential_pages(tvm_page_table_addr, 4)
-        .unwrap(); // 16KB
+        .add_confidential_pages(tvm_page_table_addr, 64)
+        .unwrap(); // 256KB
     state
         .hypervisor
         .add_confidential_pages(tvm_state_addr, 1)
@@ -366,16 +366,16 @@ fn test_tvm_bootstrap_perf() -> ! {
 
     // 2. Define Memory Layout for Testing (Adjust based on your QEMU RAM)
     // Assuming TSM is at 0x80200000, let's put TVM structures higher up.
-    let tvm_page_table_addr = 0x80800000; // Must be 16KB aligned
-    let tvm_state_addr = 0x80810000;
+    let tvm_page_table_addr = 0x80800000;
+    let tvm_state_addr = tvm_page_table_addr + 256 * 1024;
     let tvm_confidential_pool = 0x80900000; // Where guest RAM actually sits
     let pool_size_pages = 512; // 2MB test pool
 
     // 3. Convert pages to confidential
     state
         .hypervisor
-        .add_confidential_pages(tvm_page_table_addr, 4)
-        .unwrap(); // 16KB
+        .add_confidential_pages(tvm_page_table_addr, 64)
+        .unwrap(); // 256KB
     state
         .hypervisor
         .add_confidential_pages(tvm_state_addr, 1)
