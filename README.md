@@ -1,229 +1,129 @@
-# shadowfax
+# Shadowfax
 
 > [!WARNING]
-> `shadowfax` is an early development project.
+> Shadowfax is an early-stage research project. Interfaces and memory layouts may change.
 
-The codename `shadowfax project` aims to establish the foundation for an open-source software ecosystem for
-confidential computing on RISC-V, similar to ARM TrustFirmware. The current RISC-V standard for confidential
-computing is defined in the RISC-V AP-TEE specification, also known as CoVE
-(**Co**nfidential **V**irtualization **E**xtension).
+Shadowfax is an open-source RISC-V confidential-computing firmware stack based on the
+Application-TEE (CoVE) specification. It combines an M-mode TSM driver, OpenSBI, and a trusted
+security monitor (TSM) capable of creating and running trusted virtual machines (TVMs).
 
-This code is tested on `riscv64imac` with Privilege ISA **v1.12** with OpenSBI **v1.7**.
+The project is tested with the `riscv64imac` target, RISC-V Privileged ISA v1.12, OpenSBI v1.7,
+and QEMU's `virt` machine.
 
-The repository has the following layout:
-- [**tsm**](tsm/): contains all the TSM and trusted hypervisor code;
-- [**shadowfax**](shadowfax/): contains all data for the TSM-driver including OpenSBI firmware;
-- [**benchmark**](benchmark/): benchmark results and a script to process and visualize results with [**marimo**](https://marimo.io/);
-- [**test**](test/): contains test material;
-- [**video**](video/): contains videos demonstrating the solution. Each video is available in edited and unedited version;
+## Documentation index
 
-### Overview
-The repository provides a trusted firmware (Shadowfax, TSM-driver) built together with OpenSBI. To ensure easy of
-use, the Firmware is bundled together with the trusted hypervisor. Domain configuration happens statically.
-Currently 3 domains are supported:
-- Root Domain: has access to all memory, but owns all unused resources (its never used)
-- Untrusted Domain: the domain booted by opensbi. Contains the untrusted OS/VMM that initiate CoVE operations
-- Trusted Domain: the domain used by the TSM-driver to spawn the TSM
+- [Quick setup](#quick-setup): clone the project, generate keys, and verify the toolchain.
+- [Bare-metal TVM attestation](#the-holy-grail-bare-metal-host-and-tvm-attestation): run the
+  complete host-to-TVM demonstration.
+- [Linux host](#boot-linux-as-the-untrusted-host): boot Linux with an initramfs and SSH forwarding.
+- [SETUP.md](SETUP.md): detailed dependencies, toolchains, keys, Linux, initramfs, Docker, and musl
+  instructions.
+- [DEBUG.md](DEBUG.md): QEMU/GDB startup, synthetic CoVE-H scenarios, and debugger commands.
 
-### Goals
-The codename `shadowfax project` has the following goals:
-- Develop an open-source TSM-Driver that runs alongside OpenSBI.
-- Implement the core functionalities of the CoVE SBI specification.
-- Enable Supervisor Domain management using the PMP (switch to MPT if available).
-- Write the implementation in a memory-safe language (e.g., Rust).
+## Repository structure
 
-### OpenSBI integration
-Shadowfax is an *M-mode* firmware which uses [**OpenSBI**](https://github.com/riscv-software-src/opensbi)
-as static library. OpenSBI is included as a _git submodule_ in `shadowfax/opensbi` and it will be
-built together with the firmware using `shadowfax/build.rs` script. Thus, users will need to clone:
+- `shadowfax/`: M-mode firmware, static domain setup, and the OpenSBI submodule.
+- `tsm/`: trusted security monitor and TVM lifecycle implementation.
+- `common/`: SBI definitions and attestation structures shared by firmware and TSM.
+- `guests/`: bare-metal TVM workloads, including the attestation guest.
+- `test/`: standalone launchers, functional tests, GDB scripts, and security scenarios.
+- `scripts/`: host setup, DICE tooling, and the Linux/QEMU launcher.
+- `docs/source/`: Sphinx reference documentation.
+- `bin/` and `target/`: generated firmware, signatures, payloads, and build artifacts.
+
+## Architecture
+
+Shadowfax configures three static OpenSBI domains:
+
+- **Root domain:** owns resources not assigned to another domain and is not used as a workload.
+- **Untrusted domain:** runs the host OS, VMM, or bare-metal CoVE-H client.
+- **Trusted domain:** runs the TSM and owns confidential TVM memory.
+
+The implementation currently covers parts of SUPD, CoVE-H, and CoVE-G. CoVE-I and hardware-assisted
+interrupt virtualization are not implemented.
+
+## Quick setup
+
+Clone the submodules, install the dependencies described in [SETUP.md](SETUP.md), and generate the
+local development keys:
 
 ```sh
 git clone --recurse-submodules https://github.com/HiSA-Team/shadowfax
+cd shadowfax
+make generate-keys PYTHON='uv run --with cbor2'
 ```
 
-Shadowfax implements (partially) 3 SBI extensions described in the [CoVE specification](https://github.com/riscv-non-isa/riscv-ap-tee)
-which are:
+Use `make build-info` to check the detected toolchain and platform. Pass `RV_PREFIX` explicitly if
+the RISC-V tools are not available under the default prefix.
 
-- SUPD: supervisor doamin extension to enumerate active supervisor domain and get capabilities information on them;
-- CoVE-H: cove host extension. It allows **TVM** management for hosts;
-- CoVE-G: confidential features for Guests;
+## The holy grail: bare-metal host and TVM attestation
 
-The CoVE specification also introduces the **CoVE-I** SBI extension. It allows to supplements CoVE-H with hardware-assisted
-interrupt virtualization using RISC-V **Advanced Interrupt Architecture**(*AIA*), if the platform supports it.
-For now, shadowfax **does not** implement this part of the specification.
-
-## Environment setup
-
-Users will have to make sure that they have a working `riscv64` toolchain.
-Users on Ubuntu 22.04 or 24.04 or Debian 12 can install their dependencies using the `setup.sh` script
-by running:
+The most complete standalone demonstration runs a bare-metal CoVE host, creates a bare-metal TVM,
+and retrieves the layered attestation evidence containing the platform certificate:
 
 ```sh
-sudo ./scripts/setup.sh
+make -C test/standalone-tvm-launcher/ run
 ```
 
-> [!TIP]
-> everything related to `build-dependencies` and `build.rs` affect the host building system and not the `ŧarget` itself.
-
-Configuring, building and running examples are performed through the single `Makefile`.
-
-Building process relies on Python using `cbor2` library. Users can create a virtual environment with:
-```sh
-python -m venv .env
-source .venv/bin/activate
-
-pip install cbor2
-```
-
-Or they use `uv` ephemeral environment appending to each `make` command the `PYTHON="uv run --with cbor2"`.
-For example, they can use:
-```sh
-make -B PYTHON="uv run --with cbor2"
-```
-
-### Using a musl system as a host
-If users have are on a musl system they will have to specify 2 extra environment variables pointing to
-their `libclang.a`. This is required by the [`clang-sys`](https://github.com/KyleMayes/clang-sys?tab=readme-ov-file#static)
-crate which is used to generate Opensbi bindings. Basically, users will have to build llvm from source in
-order to provide `libclang.a`. After the build, users will have to provide:
-
-- **LLVM_CONFIG_PATH**: pointing to their llvm-config binary in the build directory
-- **LIBCLANG_STATIC_PATH**: pointing to the `lib` directory contains all static library built from LLVM.
-
-As an example, users will have to do something like this:
+If `cbor2` is not installed globally, run:
 
 ```sh
-git clone git@github.com:llvm/llvm-project.git
-cd llvm-project
-
-cmake -S llvm -B build -G Ninja -DLLVM_ENABLE_PROJECTS=clang -DLIBCLANG_BUILD_STATIC=ON
-ninja -C build
+make -C test/standalone-tvm-launcher/ run PYTHON='uv run --with cbor2'
 ```
 
-### Unsupported distributions
-If users are on a different distribution they will need to install required packages according to
-their system. A list of complete dependencies can be obtained by looking at the list of installed
-packages in the `scripts/setup.sh`:
+Behind the scenes, the launcher Makefile:
 
-```
-$ apt-get install libssl-dev qemu-system-riscv64 curl build-essential make ca-certificates git
-```
+1. Builds `guests/attestation.out` and embeds the complete ELF in the host executable's
+   `.guest_elf` section.
+2. Builds Shadowfax, the TSM, its signature, and the DICE-derived platform attestation input.
+3. Loads the firmware, device tree, DICE input, and bare-metal host into QEMU.
+4. Uses SUPD to discover the TSM, then CoVE-H calls to donate confidential pages, create the TVM,
+   map measured ELF segments, create a vCPU, finalize the measurement, and enter the TVM.
+5. The guest invokes CoVE-G `GET_EVIDENCE`; the TSM returns the platform, TSM, and TVM evidence,
+   which the guest prints to the QEMU console.
 
-Otherwise they can leverage the provided `Dockerfile` to build a dedicated development environment.
+Use `GUEST_ELF=/path/to/guest.out` to embed another RISC-V ELF.
 
-> [!NOTE]
-> The Docker image will build a QEMU (v10.1.1) and the riscv-toolchain (2025-10-28) from source.
+## Boot Linux as the untrusted host
+
+Prepare these local artifacts as described in [SETUP.md](SETUP.md#linux-host):
+
+- `linux/host/arch/riscv/boot/Image`
+- `bin/initramfs.cpio.gz`
+
+Then run:
 
 ```sh
-# build the Docker image
-docker build -t shadowfax-build --build-arg USER_ID=$(id -u)
-
-# run a test container
-docker run -v $(pwd):/shadowfax -w /shadowfax -it shadowfax-build sh -c "make build-info"
+./scripts/run-linux.sh
 ```
 
-If using modern editors like VS-code, the repository supports [devcontainer workspaces](https://containers.dev/) and should automatically
-ask to create a new workspace using the `.devcontainer/devcontainer.json` file.
-
-## Building
-
-The build process is managed through the `Makefile` in the root directory which will auto-detect
-the host platform and settings.  To check the detected settings:
+The script validates the kernel, initramfs, and DTB address ranges, rebuilds the firmware, starts
+QEMU user networking, obtains the guest address through DHCP, and forwards host port 2222 to SSH:
 
 ```sh
-make build-info
+ssh -p 2222 root@127.0.0.1
 ```
 
-First, users will need to generate ED25519 keypairs to sign the TSM:
+## Common commands
 
 ```sh
-make generate-keys
+make help                                      # list supported targets
+make build-info                                # show detected build settings
+make -B PYTHON='uv run --with cbor2'           # force a complete measured build
+make test PYTHON='uv run --with cbor2'         # run the QEMU boot integration test
+make qemu-run PYTHON='uv run --with cbor2'     # boot the firmware directly
 ```
 
-Finally, issue a full compilation:
-```sh
-make
-```
+See [DEBUG.md](DEBUG.md) for GDB-driven CoVE scenarios.
 
-Users may want to specify the following variables for their needs:
- - RV_PREFIX:           specify with the path to the target riscv toolchain prefix
- - BOOT_DOMAIN_ADDRESS: specify the address of the untrusted domain which should start the execution
- - PLATFORM:            target platform, this is used for OpenSBI initialization
+## Contributing and references
 
-> [!NOTE]
-> The build process includes creating measurment and attestation payload. To ensure to compile after
-modification use `make -B`.
+Keep changes focused and run `make test` before submitting firmware modifications. Install the
+repository's pre-commit hooks when preparing a contribution. Keep unsafe code small and document
+hardware, address-layout, and SBI assumptions near the implementation.
 
-## Running examples on QEMU
-Users can run the firmware on QEMU using. This will make the TSM-driver spawn a test workload:
-
-```sh
-make qemu-run
-```
-
-### Test and debug
-To test the full CoVE scenario, users can rely on the synthetic program generation to create an OS/VMM
-emulation for simple programs. These programs are meant to be executed in GDB and run in a step by
-step mode to inspect precise behaviour upon TEECALL/TEERET. Main programs are:
-
--  `sbi_covh_get_tsm_info`: gets the trusted hypervisor capabilities.
-- `sbi_covh_create_tvm`: create a simple TVM that runs an endless loop.
-- `sbi_covh_create_tvm_from_elf`: create a simple TVM from an ELF (maps each ELF segment in confidential
-memory).
-
-This will stop the emulator on start. Setup a basic TEECALL/TEERET example in another terminal with
-a remote GDB session.
-For example, to test a basic program that calls `sbi_covh_get_tsm_info` function:
-
-```sh
-make debug GDB_COVE_SCRIPT=test/debug/sbi_covh_get_tsm_info.py
-
-# step through multiple breakpoints
-(gdb) continue
-```
-
-A more complicated example with a _synthetic_ TVM can be executed by running:
-```sh
-make debug GDB_COVE_SCRIPT=test/debug/sbi_covh_create_tvm.py
-
-# step through multiple breakpoints
-(gdb) continue
-```
-
-The `sbi_covh_create_tvm.py` script will perform the following action simulating the creation of a
-trusted virtual machine which will be performed by a CoVE-aware (untrusted) OS/Hypervisor:
-
-- perform supervisor domain enumeration (discovers the TSM)
-- check TSM capabilities
-- donate some memory to the TSM (which will become confidential memory)
-- create the TVM objects
-- add TVM memory region
-- copy the src code of the TVM in the donated region
-- create the TVM vCPU
-- run the TVM vCPU
-
-The TVM code is just an infinite loop for demonstration purposes.
-
-## Reference projects
-Rust H-CSR implementation has been taken from [Hikami](https://github.com/Alignof/hikami).
-
-Coremark benchmark has been taken from [Coremeark](https://github.com/eembc/coremark).
-
-RISC-V benchmarks have been taken from [Riscv-tests](https://github.com/riscv-software-src/riscv-tests).
-
-## Contributing
-This repository uses [pre-commit](https://pre-commit.com/). Before contributing, setup your environment
-with the correct hooks. Create a virtual environment for Python using `.python-version` file.
-For example:
-
-```sh
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pre-commit install
-```
-
-If you have `uv` you can use the [tool API](https://docs.astral.sh/uv/concepts/tools/#the-bin-directory).
-```sh
-uv tool install pre-commit
-```
+Shadowfax builds on the RISC-V
+[AP-TEE specification](https://github.com/riscv-non-isa/riscv-ap-tee),
+[OpenSBI](https://github.com/riscv-software-src/opensbi), and selected H-CSR code from
+[Hikami](https://github.com/Alignof/hikami). CoreMark and RISC-V test workloads remain in their
+respective vendored directories.

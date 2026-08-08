@@ -23,6 +23,8 @@
 !/LICENSE
 !/Makefile
 !/README.md
+!/SETUP.md
+!/DEBUG.md
 !/requirements.txt
 !/rust-toolchain.toml
 !/scripts
