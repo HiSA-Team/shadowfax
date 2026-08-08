@@ -8,7 +8,7 @@ PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 # Keep the toolchain setup identical to direct Makefile use.
 source "$PROJECT_ROOT/config.rc"
 
-LINUX_IMAGE_PATH=${LINUX_IMAGE:-"$PROJECT_ROOT/linux/arch/riscv/boot/Image"}
+LINUX_IMAGE_PATH=${LINUX_IMAGE:-"$PROJECT_ROOT/linux/host/arch/riscv/boot/Image"}
 INITRAMFS_IMAGE_PATH=${INITRAMFS:-"$PROJECT_ROOT/bin/initramfs.cpio.gz"}
 SHADOWFAX_PYTHON=${SHADOWFAX_PYTHON:-"uv run --with cbor2"}
 PLATFORM_NAME=${PLATFORM:-generic}
@@ -16,10 +16,11 @@ SSH_FORWARD_PORT=${SSH_FORWARD_PORT:-2222}
 
 LINUX_LOAD_ADDR=$((0x8a000000))
 SUPERVISOR_REGION_ORDER=25
-SUPERVISOR_REGION_SIZE=$((1 << SUPERVISOR_REGION_ORDER))
+SUPERVISOR_REGION_COUNT=2
+SUPERVISOR_REGION_SIZE=$((SUPERVISOR_REGION_COUNT * (1 << SUPERVISOR_REGION_ORDER)))
 SUPERVISOR_END_ADDR=$((LINUX_LOAD_ADDR + SUPERVISOR_REGION_SIZE))
 INITRAMFS_ALIGNMENT=$((0x200000))
-FDT_LOAD_ADDR=$((0x8af00000))
+FDT_LOAD_ADDR=$((0x8df00000))
 
 usage() {
     cat <<EOF
@@ -133,7 +134,8 @@ FDT_IMAGE_SIZE=$(stat -c %s "$PATCHED_DTB")
 FDT_END_ADDR=$((FDT_LOAD_ADDR + FDT_IMAGE_SIZE))
 
 print_range "Supervisor RAM" \
-    "$LINUX_LOAD_ADDR" "$SUPERVISOR_END_ADDR" "$SUPERVISOR_REGION_SIZE" "Domain2 order $SUPERVISOR_REGION_ORDER"
+    "$LINUX_LOAD_ADDR" "$SUPERVISOR_END_ADDR" "$SUPERVISOR_REGION_SIZE" \
+    "$SUPERVISOR_REGION_COUNT Domain2 order $SUPERVISOR_REGION_ORDER regions"
 print_range "Linux Image" \
     "$LINUX_LOAD_ADDR" "$LINUX_FILE_END_ADDR" "$LINUX_IMAGE_SIZE" "$LINUX_IMAGE_PATH"
 print_range "Linux runtime" \
@@ -155,11 +157,11 @@ check_in_supervisor_region "initramfs" "$INITRAMFS_LOAD_ADDR" "$INITRAMFS_END_AD
 check_in_supervisor_region "device tree" "$FDT_LOAD_ADDR" "$FDT_END_ADDR"
 
 # Only build and start QEMU after the complete layout has passed validation.
-make -C "$PROJECT_ROOT" PYTHON="$SHADOWFAX_PYTHON" PLATFORM="$PLATFORM_NAME" firmware
+make -B -C "$PROJECT_ROOT" PYTHON="$SHADOWFAX_PYTHON" PLATFORM="$PLATFORM_NAME" firmware
 
 LINUX_QEMU_DEVICES="-device loader,file=$LINUX_IMAGE_PATH,addr=0x$(printf '%x' "$LINUX_LOAD_ADDR"),force-raw=on"
 LINUX_QEMU_DEVICES+=" -device loader,file=$INITRAMFS_IMAGE_PATH,addr=0x$(printf '%x' "$INITRAMFS_LOAD_ADDR"),force-raw=on"
-LINUX_QEMU_DEVICES+=" -netdev user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_FORWARD_PORT-:22"
+LINUX_QEMU_DEVICES+=" -netdev user,id=net0,ipv4=on,ipv6=off,hostfwd=tcp:127.0.0.1:$SSH_FORWARD_PORT-:22"
 LINUX_QEMU_DEVICES+=" -device virtio-net-device,netdev=net0"
 
 if [[ -n "${QEMU_DEVICES:-}" ]]; then

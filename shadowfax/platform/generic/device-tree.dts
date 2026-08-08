@@ -35,7 +35,7 @@
 
 	memory@8a000000 {
 		device_type = "memory";
-		reg = <0x00 0x8a000000 0x00 0x2000000>;
+		reg = <0x00 0x8a000000 0x00 0x4000000>;
 	};
 
 	reserved-memory {
@@ -107,14 +107,15 @@
 
 	chosen {
 		stdout-path = "/soc/serial@10000000";
-		rng-seed = <0x4d28c772 0x2ab93c6a 0x79330cab 0x8b454f44 0x26c1e886 0x97d8b4e3 0x738e0214 0x3a5e1abc>;
+		bootargs = "ip=dhcp";
+		/* rng-seed = <0x4d28c772 0x2ab93c6a 0x79330cab 0x8b454f44 0x26c1e886 0x97d8b4e3 0x738e0214 0x3a5e1abc>; */
 
 		opensbi-domains {
 			compatible = "opensbi,domain,config";
 
 			tmem: tmem {
 				compatible = "opensbi,domain,memregion";
-				base = <0x0 0x8C000000>;
+				base = <0x0 0x90000000>;
 				order = <26>;
 			};
 
@@ -123,13 +124,19 @@
 				possible-harts = <&cpu0>;
 				regions = <&tmem 0x3f>;
 				next-arg1 = <0x0 0x0>;
-				next-addr = <0x0 0x8C000000>;
+				next-addr = <0x0 0x90000000>;
 				next-mode = <0x1>;
 			};
 
 			umem: umem {
 				compatible = "opensbi,domain,memregion";
 				base = <0x0 0x8A000000>;
+				order = <25>;
+			};
+
+			umem_high: umem-high {
+				compatible = "opensbi,domain,memregion";
+				base = <0x0 0x8C000000>;
 				order = <25>;
 			};
 
@@ -151,7 +158,7 @@
 				compatible = "opensbi,domain,instance";
 				possible-harts = <&cpu0>;
 				boot-hartid = <&cpu0>;
-				regions = <&umem 0x3f>, <&uplic 0x3f>, <&udevices 0x3f>;
+				regions = <&umem 0x3f>, <&umem_high 0x3f>, <&uplic 0x3f>, <&udevices 0x3f>;
 				next-addr = <0x0 0x8A000000>;
 				next-mode = <0x1>;
 			};

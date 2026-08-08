@@ -24,16 +24,17 @@ TARGET_TRIPLET             ?= riscv64imac-unknown-none-elf
 PROFILE                    ?= debug
 RUSTFLAGS                  := -C target-feature=+h
 QEMU                       ?= qemu-system-riscv64
-QEMU_FLAGS                 := -M virt -m 512M -smp 1 -nographic -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait
+QEMU_FLAGS                 := -M virt -m 512M -smp 1 -nographic
 QEMU_DEVICES               ?=
 ifeq ($(DEBUG), 1)
-QEMU_FLAGS                 +=  -s -S
+QEMU_FLAGS                 +=  -s -S -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait
+
 endif
 
 # Platform Params
 PLATFORM                   ?= generic
 BOOT_DOMAIN_ADDRESS        ?= 0x8A000000
-FDT_ADDR                    := 0x8AF00000
+FDT_ADDR                    := 0x8DF00000
 
 # RISC-V Toolchain
 RV_PREFIX                  ?= riscv64-unknown-linux-$(HOST_LIBC)-

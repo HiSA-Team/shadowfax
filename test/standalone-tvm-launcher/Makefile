@@ -15,7 +15,7 @@ GUEST_ELF       ?= $(ROOT)/guests/attestation.out
 FW_ELF          := $(ROOT)/target/$(TARGET)/$(PROFILE)/shadowfax
 DICE_INPUT      := $(ROOT)/bin/shadowfax.dice.bin
 DTB             := $(ROOT)/bin/device-tree.dtb
-FDT_ADDR        := 0x8AF00000
+FDT_ADDR        := 0x8DF00000
 
 ELF             := $(BUILD_DIR)/standalone-tvm-launcher
 BIN             := $(ELF).bin
