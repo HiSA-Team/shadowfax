@@ -448,7 +448,6 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
 
 /// Prints the firmware, boot-hart, FDT, and supervisor-domain memory layout.
 fn dump_linker_symbols(fdt_addr: usize) {
-    // print header
     print_raw!("\nSHADOWFAX Firmware v0.1\n");
     print_raw!("========================\n");
 
@@ -457,22 +456,25 @@ fn dump_linker_symbols(fdt_addr: usize) {
         let fw_end = &_fw_end as *const u8 as usize;
         let fw_size = (fw_end - fw_start) / 1024;
 
-        print_raw!("Firmware Base     : {:#018x}\n", fw_start);
-        print_raw!("Firmware Size     : {} KB\n", fw_size);
+        print_raw!("{:<40} : {:#018x}\n", "Firmware Base", fw_start);
+        print_raw!("{:<40} : {} KB\n", "Firmware Size", fw_size);
 
         let rw_start = &_fw_rw_start as *const u8 as usize;
         let bss_start = &_start_bss as *const u8 as usize;
         let bss_end = &_end_bss as *const u8 as usize;
         let bss_size = (bss_end - bss_start) / 1024;
-        print_raw!("Firmware RW Start : {:#018x}\n", rw_start);
-        print_raw!("BSS Size          : {} KB\n", bss_size);
+
+        print_raw!("{:<40} : {:#018x}\n", "Firmware RW Start", rw_start);
+        print_raw!("{:<40} : {} KB\n", "BSS Size", bss_size);
 
         print_raw!(
-            "Boot Stack Top    : {:#018x}\n",
+            "{:<40} : {:#018x}\n",
+            "Boot Stack Top",
             &_stack_top as *const u8 as usize
         );
         print_raw!(
-            "TEE Stack Top     : {:#018x}\n",
+            "{:<40} : {:#018x}\n",
+            "TEE Stack Top",
             &_tee_stack_top as *const u8 as usize
         );
     }
@@ -481,15 +483,19 @@ fn dump_linker_symbols(fdt_addr: usize) {
     let fdt_magic = u32::from_be(unsafe { (fdt_addr as *const u32).read_unaligned() });
     let fdt_size =
         u32::from_be(unsafe { ((fdt_addr + size_of::<u32>()) as *const u32).read_unaligned() });
+
     print_raw!(
-        "DICE Input Address : {:#018x}\n",
+        "{:<40} : {:#010x}\n",
+        "DICE Input Address",
         constants::DICE_INPUT_ADDR
     );
-    print_raw!("FDT Address        : {:#018x}\n", fdt_addr);
-    print_raw!("FDT Magic          : {:#010x}\n", fdt_magic);
-    print_raw!("FDT Size           : {} bytes\n", fdt_size);
+    print_raw!("{:<40} : {:#010x}\n", "FDT Address", fdt_addr);
+    print_raw!("{:<40} : {:#010x}\n", "FDT Magic", fdt_magic);
+    print_raw!("{:<40} : {} bytes\n", "FDT Size", fdt_size);
+
     print_raw!(
-        "Supervisor Entry   : {:#018x}\n",
+        "{:<40} : {:#010x}\n",
+        "Untrusted Supervisor Entry",
         constants::memory_layout::UNTRUSTED_DOMAIN_REGIONS[0].base_addr
     );
 
@@ -502,7 +508,7 @@ fn dump_linker_symbols(fdt_addr: usize) {
         let kind = if region.mmio { "MMIO" } else { "RAM" };
 
         print_raw!(
-            "Supervisor Region{} : {:#018x}-{:#018x} {} P:{:#04x}\n",
+            "Untrusted Supervisor Region{:<13} : {:#010x}-{:#010x} {} P:{:#04x}\n",
             index,
             region.base_addr,
             end,
@@ -511,9 +517,32 @@ fn dump_linker_symbols(fdt_addr: usize) {
         );
     }
 
-    // hart and ISA info
+    print_raw!(
+        "{:<40} : {:#010x}\n",
+        "Trusted Supervisor Entry",
+        constants::memory_layout::TRUSTED_DOMAIN_REGIONS[0].base_addr
+    );
+
+    for (index, region) in constants::memory_layout::TRUSTED_DOMAIN_REGIONS
+        .iter()
+        .enumerate()
+    {
+        let size = 1usize << region.order;
+        let end = region.base_addr + size - 1;
+        let kind = if region.mmio { "MMIO" } else { "RAM" };
+
+        print_raw!(
+            "Trusted Supervisor Region{:<15} : {:#010x}-{:#010x} {} P:{:#04x}\n",
+            index,
+            region.base_addr,
+            end,
+            kind,
+            region.permissions
+        );
+    }
+
     let hart_id = mhartid::read();
-    print_raw!("Boot HART ID      : {}\n", hart_id);
+    print_raw!("{:<40} : {}\n", "Boot HART ID", hart_id);
 
     let misa = misa::read();
 
@@ -523,8 +552,7 @@ fn dump_linker_symbols(fdt_addr: usize) {
         misa::XLEN::XLEN128 => 128,
     };
 
-    // TODO build feature string
-    print_raw!("Boot HART ISA     : rv{}\n", xlen);
+    print_raw!("{:<40} : rv{}\n", "Boot HART ISA", xlen);
     print_raw!("========================\n\n");
 }
 
