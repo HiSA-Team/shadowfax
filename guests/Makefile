@@ -1,20 +1,6 @@
-# Toolchain definition
+ROOT       := ..
 RV_PREFIX ?= riscv64-unknown-elf-
-CC         = $(RV_PREFIX)gcc
-AS         = $(RV_PREFIX)as
-OBJCOPY    = $(RV_PREFIX)objcopy
-
-# Flags
-ARCH    = -march=rv64imac -mabi=lp64
-CFLAGS  = -Wall -nostdlib $(ARCH)
-ASFLAGS = $(ARCH)
-LDFLAGS = -Tlinker.ld -ffreestanding -nostartfiles
-
-ifeq ($(DEBUG), 1)
-CFLAGS += -O0 -g
-else
-CFLAGS += -O1
-endif
+include $(ROOT)/config.mk
 
 # Identify all C source files and their corresponding ELF names
 C_SRCS  = $(wildcard *.c)
@@ -29,7 +15,7 @@ all: $(BIN) $(ELF)
 	$(OBJCOPY) -O binary $^ $@
 
 %.out: %.o vmstartup.o
-	$(CC) $(LDFLAGS) $^ -o $@
+	$(CC) $(LDFLAGS) -Tlinker.ld $^ -o $@
 
 vmstartup.o: vmstartup.S
 	$(AS) $(ASFLAGS) -c $< -o $@

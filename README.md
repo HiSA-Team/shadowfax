@@ -51,10 +51,13 @@ local development keys:
 git clone --recurse-submodules https://github.com/HiSA-Team/shadowfax
 cd shadowfax
 make generate-keys PYTHON='uv run --with cbor2'
+make -B PYTHON='uv run --with cbor2'
 ```
 
 Use `make build-info` to check the detected toolchain and platform. Pass `RV_PREFIX` explicitly if
-the RISC-V tools are not available under the default prefix.
+the RISC-V tools are not available under the default prefix. Shared compiler, assembler, linker,
+architecture, and QEMU defaults live in `config.mk`; see [SETUP.md](SETUP.md#shared-make-configuration)
+for supported overrides and debug behavior.
 
 ## The holy grail: bare-metal host and TVM attestation
 
@@ -65,24 +68,21 @@ and retrieves the layered attestation evidence containing the platform certifica
 make -C test/standalone-tvm-launcher/ run
 ```
 
-If `cbor2` is not installed globally, run:
+The root build prepares Shadowfax, the TSM, its signature, the default attestation guest, and the
+DICE-derived platform attestation input. The standalone launcher Makefile itself only embeds the
+selected guest and creates the bare-metal host image. When `run` starts QEMU:
 
-```sh
-make -C test/standalone-tvm-launcher/ run PYTHON='uv run --with cbor2'
-```
-
-Behind the scenes, the launcher Makefile:
-
-1. Builds `guests/attestation.out` and embeds the complete ELF in the host executable's
-   `.guest_elf` section.
-2. Builds Shadowfax, the TSM, its signature, and the DICE-derived platform attestation input.
-3. Loads the firmware, device tree, DICE input, and bare-metal host into QEMU.
-4. Uses SUPD to discover the TSM, then CoVE-H calls to donate confidential pages, create the TVM,
-   map measured ELF segments, create a vCPU, finalize the measurement, and enter the TVM.
-5. The guest invokes CoVE-G `GET_EVIDENCE`; the TSM returns the platform, TSM, and TVM evidence,
+1. The complete `guests/attestation.out` ELF is embedded in the host executable's `.guest_elf`
+   section.
+2. QEMU loads the existing firmware, device tree, DICE input, and bare-metal host.
+3. The host uses SUPD to discover the TSM, then CoVE-H calls to donate confidential pages, create
+   the TVM, map measured ELF segments, create a vCPU, finalize the measurement, and enter the TVM.
+4. The guest invokes CoVE-G `GET_EVIDENCE`; the TSM returns the platform, TSM, and TVM evidence,
    which the guest prints to the QEMU console.
 
-Use `GUEST_ELF=/path/to/guest.out` to embed another RISC-V ELF.
+Use `GUEST_ELF=/path/to/guest.out` to embed another RISC-V ELF or `DTB=/path/to/tree.dtb` when
+running with another prebuilt device tree. Missing inputs are reported instead of being built
+implicitly.
 
 ## Boot Linux as the untrusted host
 

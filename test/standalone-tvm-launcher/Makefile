@@ -1,72 +1,57 @@
-# Build with `make`, run with `make run`, or embed another RISC-V ELF with
-# `make GUEST_ELF=/path/to/guest.out`.
+ROOT         := ../..
+RV_PREFIX    ?= riscv64-unknown-elf-
+include $(ROOT)/config.mk
 
-ROOT            := ../..
-BUILD_DIR       ?= $(ROOT)/target/standalone-tvm-launcher
-TARGET          ?= riscv64imac-unknown-none-elf
-PROFILE         ?= debug
-RV_PREFIX       ?= riscv64-unknown-elf-
+BUILD_DIR    ?= $(ROOT)/target/standalone-tvm-launcher
 
-CC              := $(RV_PREFIX)gcc
-OBJCOPY         := $(RV_PREFIX)objcopy
-QEMU            ?= qemu-system-riscv64
+# Inputs are built outside this Makefile and may be overridden from the CLI.
+FIRMWARE     ?= $(ROOT)/target/$(TARGET_TRIPLET)/$(PROFILE)/shadowfax
+DICE_INPUT   ?= $(ROOT)/bin/shadowfax.dice.bin
+DTB          ?= $(ROOT)/bin/device-tree.dtb
+GUEST_ELF    ?= $(ROOT)/guests/attestation.out
+GUEST_DTB    ?=
 
-GUEST_ELF       ?= $(ROOT)/guests/attestation.out
-FW_ELF          := $(ROOT)/target/$(TARGET)/$(PROFILE)/shadowfax
-DICE_INPUT      := $(ROOT)/bin/shadowfax.dice.bin
-DTB             := $(ROOT)/bin/device-tree.dtb
-FDT_ADDR        := 0x8DF00000
+LOAD_ADDR    ?= $(BOOT_DOMAIN_ADDRESS)
 
-ELF             := $(BUILD_DIR)/standalone-tvm-launcher
-BIN             := $(ELF).bin
-MAP             := $(ELF).map
-OBJECTS         := $(BUILD_DIR)/startup.o $(BUILD_DIR)/main.o \
-	$(BUILD_DIR)/guest_payload.o
+ELF           = $(BUILD_DIR)/standalone-tvm-launcher
+BIN           = $(ELF).bin
+MAP           = $(ELF).map
+OBJECTS       = $(BUILD_DIR)/startup.o $(BUILD_DIR)/main.o
 
-ARCH_FLAGS      := -march=rv64imac -mabi=lp64 -mcmodel=medany
-CFLAGS          := $(ARCH_FLAGS) -O2 -Wall -Wextra -Werror -ffreestanding \
-	-fno-builtin -fno-pie -fno-stack-protector -msmall-data-limit=0
-LDFLAGS         := $(ARCH_FLAGS) -nostdlib -nostartfiles -static -no-pie \
-	-Wl,-T,linker.ld -Wl,--build-id=none -Wl,-Map,$(MAP)
+EMBED_FLAGS   = -DGUEST_ELF=\"$(abspath $(GUEST_ELF))\"
+EMBED_INPUTS  = $(GUEST_ELF)
+ifneq ($(strip $(GUEST_DTB)),)
+EMBED_FLAGS  += -DGUEST_DTB=\"$(abspath $(GUEST_DTB))\"
+EMBED_INPUTS += $(GUEST_DTB)
+endif
 
-.PHONY: all clean firmware run FORCE
+.PHONY: all clean run
 
-all: $(ELF) $(BIN)
+all: $(BIN)
 
 $(BUILD_DIR):
 	mkdir -p $@
 
+$(BUILD_DIR)/startup.o: startup.S $(EMBED_INPUTS) | $(BUILD_DIR)
+	$(CC) $(ASFLAGS) $(EMBED_FLAGS) -c $< -o $@
+
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/startup.o: startup.S | $(BUILD_DIR)
-	$(CC) $(ARCH_FLAGS) -c $< -o $@
-
-$(ROOT)/guests/attestation.out:
-	$(MAKE) -C $(ROOT)/guests attestation.out
-
-$(BUILD_DIR)/guest_payload.o: $(GUEST_ELF) FORCE | $(BUILD_DIR)
-	$(OBJCOPY) -I binary -O elf64-littleriscv -B riscv \
-		--rename-section .data=.guest_elf,alloc,load,readonly,data,contents \
-		$< $@
+	$(CC) $(CFLAGS) -Werror -c $< -o $@
 
 $(ELF): $(OBJECTS) linker.ld
-	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+	$(CC) $(LDFLAGS) -Tlinker.ld -Wl,--build-id=none -Wl,-Map,$(MAP) \
+		$(OBJECTS) -o $@
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@
 
-firmware:
-	$(MAKE) -C $(ROOT) firmware
-
-run: all firmware
-	$(QEMU) -M virt -m 512M -smp 1 -nographic \
-		-bios $(FW_ELF) \
+# Run only with existing firmware inputs; this target never builds them.
+run: $(BIN) $(FIRMWARE) $(DICE_INPUT) $(DTB)
+	$(QEMU) $(QEMU_FLAGS) \
+		-bios $(FIRMWARE) \
 		-device loader,file=$(DTB),addr=$(FDT_ADDR),force-raw=on \
-		-device loader,file=$(DICE_INPUT),addr=0x88000000,force-raw=on \
-		-device loader,file=$(BIN),addr=0x8A000000,force-raw=on
+		-device loader,file=$(DICE_INPUT),addr=$(DICE_INPUT_ADDR),force-raw=on \
+		-device loader,file=$(BIN),addr=$(LOAD_ADDR),force-raw=on
 
 clean:
 	$(RM) -r $(BUILD_DIR)
-
-FORCE:

@@ -78,7 +78,7 @@ environment to provide `pyelftools`.
 For a complete demonstration that does not require GDB, prefer:
 
 ```sh
-make -C test/standalone-tvm-launcher/ run PYTHON='uv run --with cbor2'
+make -C test/standalone-tvm-launcher/ run
 ```
 
 ## Useful GDB commands

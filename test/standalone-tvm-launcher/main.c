@@ -2,9 +2,10 @@
 #include <stdint.h>
 
 #define PAGE_SIZE                  4096UL
-#define PAGE_DIRECTORY_SIZE        (4UL * PAGE_SIZE)
+#define PAGE_DIRECTORY_SIZE        (64UL * PAGE_SIZE)
 #define TVM_STATE_SIZE             PAGE_SIZE
-#define GUEST_RAM_SIZE             (2UL * 1024UL * 1024UL)
+#define GUEST_RAM_SIZE             (64UL * 1024UL * 1024UL)
+#define SEGMENT_STAGING_SIZE       (2UL * 1024UL * 1024UL)
 
 #define SBI_EXT_DBCN               0x4442434EUL
 #define SBI_DBCN_WRITE_BYTE        2UL
@@ -59,12 +60,16 @@ typedef struct {
     uint64_t p_align;
 } Elf64_Phdr;
 
-extern const unsigned char __guest_elf_start[];
-extern const unsigned char __guest_elf_end[];
-extern unsigned char __confidential_start[];
-extern unsigned char __confidential_end[];
+extern const unsigned char __guest_elf[];
+extern const char __guest_elf_size[];
+extern const unsigned char __guest_dtb[];
+extern const unsigned char __guest_dtb_end[];
+extern unsigned char __confidential_metadata_start[];
+extern unsigned char __confidential_metadata_end[];
+extern unsigned char __confidential_guest_start[];
+extern unsigned char __confidential_guest_end[];
 
-static unsigned char segment_staging[GUEST_RAM_SIZE]
+static unsigned char segment_staging[SEGMENT_STAGING_SIZE]
     __attribute__((aligned(PAGE_SIZE)));
 
 static struct sbiret sbi_call(uintptr_t eid, uintptr_t fid,
@@ -168,11 +173,11 @@ static uintptr_t align_up(uintptr_t value)
     return (value + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 }
 
-static void check_confidential_space(uintptr_t next, size_t num_pages)
+static void check_guest_space(uintptr_t next, size_t num_pages)
 {
     uintptr_t end = next + num_pages * PAGE_SIZE;
 
-    if (end < next || end > (uintptr_t)__confidential_end)
+    if (end < next || end > (uintptr_t)__confidential_guest_end)
         fail("confidential memory exhausted", -1);
 }
 
@@ -182,7 +187,7 @@ static void add_zero_pages(uintptr_t tvm_id, uintptr_t *next_physical,
     if (num_pages == 0)
         return;
 
-    check_confidential_space(*next_physical, num_pages);
+    check_guest_space(*next_physical, num_pages);
     require_ok("ADD_ZERO_PAGES",
                covh_call(COVH_ADD_ZERO_PAGES,
                          tvm_id, *next_physical, 0, num_pages,
@@ -192,8 +197,8 @@ static void add_zero_pages(uintptr_t tvm_id, uintptr_t *next_physical,
 
 static uintptr_t load_guest_elf(uintptr_t tvm_id, uintptr_t next_physical)
 {
-    const unsigned char *elf = __guest_elf_start;
-    size_t elf_size = (size_t)(__guest_elf_end - __guest_elf_start);
+    const unsigned char *elf = __guest_elf;
+    size_t elf_size = (size_t)(__guest_elf_size);
     const Elf64_Ehdr *header;
     uintptr_t next_guest_page = 0;
 
@@ -260,7 +265,7 @@ static uintptr_t load_guest_elf(uintptr_t tvm_id, uintptr_t next_physical)
             copy_bytes(segment_staging + page_offset,
                        elf + segment->p_offset,
                        (size_t)segment->p_filesz);
-            check_confidential_space(next_physical, measured_pages);
+            check_guest_space(next_physical, measured_pages);
             require_ok("ADD_MEASURED_PAGES",
                        covh_call(COVH_ADD_MEASURED_PAGES,
                                  tvm_id, (uintptr_t)segment_staging,
@@ -285,25 +290,38 @@ static uintptr_t load_guest_elf(uintptr_t tvm_id, uintptr_t next_physical)
 
 int main(void)
 {
-    uintptr_t confidential_start = (uintptr_t)__confidential_start;
-    uintptr_t confidential_end = (uintptr_t)__confidential_end;
-    uintptr_t page_table = confidential_start;
+    uintptr_t metadata_start = (uintptr_t)__confidential_metadata_start;
+    uintptr_t metadata_end = (uintptr_t)__confidential_metadata_end;
+    uintptr_t guest_memory_start = (uintptr_t)__confidential_guest_start;
+    uintptr_t guest_memory_end = (uintptr_t)__confidential_guest_end;
+    uintptr_t page_table = metadata_start;
     uintptr_t tvm_state = page_table + PAGE_DIRECTORY_SIZE;
-    uintptr_t guest_physical = tvm_state + TVM_STATE_SIZE;
+    uintptr_t guest_physical = guest_memory_start;
     uintptr_t create_params[2] __attribute__((aligned(16)));
     struct sbiret ret;
     uintptr_t tvm_id;
     uintptr_t guest_entry;
+    size_t guest_elf_size = (size_t)__guest_elf_size;
 
     puts("\n[HOST] Standalone CoVE TVM launcher\n");
     puts("[HOST] Embedded ELF: ");
-    puthex((uintptr_t)__guest_elf_start);
+    puthex((uintptr_t)__guest_elf);
     puts("-");
-    puthex((uintptr_t)__guest_elf_end - 1);
-    puts("\n[HOST] Confidential pool: ");
-    puthex(confidential_start);
+    puthex((uintptr_t)__guest_elf  + guest_elf_size - 1);
+    if ((uintptr_t)__guest_dtb != (uintptr_t)__guest_dtb_end) {
+        puts("\n[HOST] Embedded DTB: \n");
+        puthex((uintptr_t)__guest_dtb);
+        puts("-");
+        puthex((uintptr_t)__guest_dtb_end - 1);
+    }
+    puts("\n[HOST] Confidential metadata: ");
+    puthex(metadata_start);
     puts("-");
-    puthex(confidential_end - 1);
+    puthex(metadata_end - 1);
+    puts("\n[HOST] Confidential guest RAM: ");
+    puthex(guest_memory_start);
+    puts("-");
+    puthex(guest_memory_end - 1);
     puts("\n");
 
     ret = sbi_call(SBI_EXT_SUPD, SBI_SUPD_GET_ACTIVE,
@@ -313,12 +331,21 @@ int main(void)
         fail("TSM domain is not active", -1);
 
     /* ADD_ZERO_PAGES maps without clearing; initialize pages before donation. */
-    clear_bytes(__confidential_start,
-                (size_t)(__confidential_end - __confidential_start));
+    clear_bytes(__confidential_metadata_start,
+                (size_t)(__confidential_metadata_end -
+                         __confidential_metadata_start));
+    clear_bytes(__confidential_guest_start,
+                (size_t)(__confidential_guest_end -
+                         __confidential_guest_start));
     require_ok("CONVERT_PAGES",
                covh_call(COVH_CONVERT_PAGES,
-                         confidential_start,
-                         (confidential_end - confidential_start) / PAGE_SIZE,
+                         metadata_start,
+                         (metadata_end - metadata_start) / PAGE_SIZE,
+                         0, 0, 0, 0));
+    require_ok("CONVERT_GUEST_PAGES",
+               covh_call(COVH_CONVERT_PAGES,
+                         guest_memory_start,
+                         (guest_memory_end - guest_memory_start) / PAGE_SIZE,
                          0, 0, 0, 0));
 
     create_params[0] = page_table;

@@ -14,34 +14,20 @@
 #
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 
-# Toolchain/Platform
-PYTHON                     := python
-HOST_TRIPLET               := $(shell rustc -vV | grep '^host:' | awk '{print $$2}')
-HOST_ARCHITECTURE          := $(shell uname -m)
-HOST_LIBC                  := $(shell if ldd --version 2>&1 | grep -q musl; then echo musl; else echo gnu; fi)
+PYTHON            ?= python
+PLATFORM          ?= generic
+RUSTFLAGS         ?= -C target-feature=+h
+HOST_ARCHITECTURE := $(shell uname -m)
+HOST_TRIPLET      := $(shell rustc -vV | awk '/^host:/ { print $$2 }')
+HOST_LIBC         := $(shell if ldd --version 2>&1 | grep -q musl; then echo musl; else echo gnu; fi)
+RV_PREFIX         ?= riscv64-unknown-linux-$(HOST_LIBC)-
+
+include config.mk
+
 OPENSBI_VERSION            := $(shell git -C shadowfax/opensbi describe)
-TARGET_TRIPLET             ?= riscv64imac-unknown-none-elf
-PROFILE                    ?= debug
-RUSTFLAGS                  := -C target-feature=+h
-QEMU                       ?= qemu-system-riscv64
-QEMU_FLAGS                 := -M virt -m 512M -smp 1 -nographic
 QEMU_DEVICES               ?=
-ifeq ($(DEBUG), 1)
-QEMU_FLAGS                 +=  -s -S -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait
-
-endif
-
-# Platform Params
-PLATFORM                   ?= generic
-BOOT_DOMAIN_ADDRESS        ?= 0x8A000000
-FDT_ADDR                    := 0x8DF00000
-
-# RISC-V Toolchain
-RV_PREFIX                  ?= riscv64-unknown-linux-$(HOST_LIBC)-
-OBJCOPY                    := $(RV_PREFIX)objcopy
 
 # Files and Directories
-MAKEFILE_SOURCE_DIR        := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 BIN_DIR                     = bin
 TARGET_DIR                  = target/$(TARGET_TRIPLET)/$(PROFILE)
 KEYS_DIR                    = shadowfax/keys
@@ -61,7 +47,6 @@ DICE_PLATFORM_PUBLIC_KEY    = $(KEYS_DIR)/root_of_trust_pub.bin
 DICE_PLATFORM_PRIVATE_KEY   = $(KEYS_DIR)/root_of_trust_priv.bin
 
 # Debug variables for QEMU
-GDB                         = $(RV_PREFIX)gdb
 GDB_SETTINGS_SCRIPT         := test/debug/gdbinit
 GDB_COVE_SCRIPT             ?= test/debug/gdb_covh_get_tsm_info.py
 
@@ -73,6 +58,7 @@ export RUSTFLAGS
 
 # Needed by Python GDB process
 export BOOT_DOMAIN_ADDRESS
+export PLATFORM
 
 ifeq ($(HOST_LIBC), musl)
 
@@ -82,7 +68,7 @@ ifeq ($(LIBCLANG_STATIC_PATH),)
 $(error Missing LIBCLANG_STATIC_PATH environment variable which is required in a musl environment)
 endif
 
-export LLVM_CONFIG_PATH     := $(MAKEFILE_SOURCE_DIR)scripts/llvm-config.sh
+export LLVM_CONFIG_PATH     := $(CURDIR)/scripts/llvm-config.sh
 endif
 
 .PHONY: all clean firmware tsm test generate-keys guests help
@@ -137,7 +123,7 @@ generate-keys:
 qemu-run: firmware
 	$(QEMU) $(QEMU_FLAGS) -bios $(FW_ELF) \
 		-device loader,file=$(FDT_IMAGE),addr=$(FDT_ADDR),force-raw=on \
-		-device loader,file=$(DICE_INPUT),addr=0x88000000,force-raw=on $(QEMU_DEVICES)
+		-device loader,file=$(DICE_INPUT),addr=$(DICE_INPUT_ADDR),force-raw=on $(QEMU_DEVICES)
 
 ## debug: attach to a gdb server and load $(GDB_COVE_SCRIPT)
 debug:
@@ -155,9 +141,15 @@ build-info:
 	@echo "  HOST_TARGET_TRIPLET:       $(HOST_TRIPLET)"
 	@echo "  TARGET_TRIPLET:            $(TARGET_TRIPLET)"
 	@echo "  RV_PREFIX:                 $(RV_PREFIX)"
+	@echo "  ARCH/ABI:                  $(ARCH)/$(ABI)"
 	@echo "  PROFILE:                   $(PROFILE)"
+	@echo "  DEBUG:                     $(DEBUG)"
 	@echo "  PLATFORM:                  $(PLATFORM)"
+	@echo "  CFLAGS:                    $(CFLAGS)"
+	@echo "  ASFLAGS:                   $(ASFLAGS)"
+	@echo "  LDFLAGS:                   $(LDFLAGS)"
 	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
+	@echo "  QEMU_FLAGS:                $(QEMU_FLAGS)"
 	@echo "  OPENSBI_VERSION:           $(OPENSBI_VERSION)"
 	@echo "  BOOT_DOMAIN_ADDRESS:       $(BOOT_DOMAIN_ADDRESS)"
 ifeq ($(HOST_LIBC), musl)

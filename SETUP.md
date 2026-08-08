@@ -46,6 +46,21 @@ make RV_PREFIX=/opt/riscv/bin/riscv64-unknown-elf- build-info
 The standalone launcher defaults to `riscv64-unknown-elf-`; Linux builds commonly use
 `riscv64-unknown-linux-gnu-`. Keep the selected compiler's ISA and ABI compatible with RV64.
 
+## Shared Make configuration
+
+Project-owned firmware and bare-metal Makefiles import `config.mk`. It defines the toolchain,
+`ARCH`, `ABI`, `CFLAGS`, `ASFLAGS`, `LDFLAGS`, and common QEMU settings in one place. Override a
+setting on the command line without editing a Makefile:
+
+```sh
+make ARCH=rv64imafdc ABI=lp64d
+make CFLAGS='-march=rv64imac -mabi=lp64 -O2 -g'
+```
+
+`DEBUG=1` selects `-O0 -g` for C sources, adds debug information to assembler sources, and starts
+QEMU paused with its GDB server enabled. Local flags such as linker scripts and `-Werror` stay next
+to the commands that use them.
+
 ## Python and attestation tooling
 
 Measured firmware builds use `scripts/dice_tool.py`, which requires `cbor2`. Either install it in a

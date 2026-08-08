@@ -18,4 +18,21 @@ _start:
     j 3b
     .size _start, . - _start
 
-    .section .note.GNU-stack, "", @progbits
+    .section .guest_elf, "a", @progbits
+    .balign 4096
+    .global __guest_elf
+__guest_elf:
+  .incbin GUEST_ELF
+  .global __guest_elf_size
+  .set __guest_elf_size, . - __guest_elf
+
+#ifdef GUEST_DTB
+    .balign 4096
+#endif
+    .global __guest_dtb
+__guest_dtb:
+#ifdef GUEST_DTB
+    .incbin GUEST_DTB
+#endif
+    .global __guest_dtb_end
+__guest_dtb_end:
