@@ -44,8 +44,8 @@ pub static GUEST_DTB: [u8; include_bytes!("../../bin/guest.dtb").len()] =
     *include_bytes!("../../bin/guest.dtb");
 
 // #[link_section = ".rodata"]
-// pub static GUEST_INITRD: [u8; include_bytes!("../../bin/initramfs.cpio.gz").len()] =
-//     *include_bytes!("../../bin/initramfs.cpio.gz");
+pub static GUEST_INITRD: [u8; include_bytes!("../../bin/guest-initramfs.cpio.gz").len()] =
+    *include_bytes!("../../bin/guest-initramfs.cpio.gz");
 
 extern crate alloc;
 #[global_allocator]

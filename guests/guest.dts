@@ -40,9 +40,9 @@
 	};
 
 	chosen {
-		linux,initrd-start = <0x0 0x01000000>;
-		linux,initrd-end = <0x0 0x01402277>;
   	bootargs = "earlycon=uart8250,mmio,0x05000000 console=ttyS0,115200";
+		linux,initrd-start = <0x0 0x01000000>;
+    linux,initrd-end = <0x0 0x0140201F>;
 	};
 
 	soc {

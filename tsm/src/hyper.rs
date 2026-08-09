@@ -26,7 +26,7 @@ use crate::{
     perf::{self, read_cycle},
     println,
     sbi::{self, handle_covg},
-    TsmState, GUEST_DTB, GUEST_ELF, MEASUREMENT,
+    TsmState, GUEST_DTB, GUEST_ELF, GUEST_INITRD, MEASUREMENT,
 };
 
 const MIN_PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
@@ -713,11 +713,17 @@ impl HypervisorState {
 
         // Setup guest physical address translation (G-stage)
         hgatp::set(hgatp::Mode::Sv39x4, 0, tvm.page_table_addr >> 12);
-        let guest_page_faults = (1usize << 12)  // Instruction page fault
-      | (1usize << 13) // Load page fault
-      | (1usize << 15); // Store/AMO page fault
+        let guest_exceptions = (1usize << 0)  // Instruction-address misaligned
+            | (1usize << 2)  // Illegal instruction
+            | (1usize << 3)  // Breakpoint
+            | (1usize << 4)  // Load-address misaligned
+            | (1usize << 6)  // Store-address misaligned
+            | (1usize << 8)  // U-mode ecall
+            | (1usize << 12) // Instruction page fault
+            | (1usize << 13) // Load page fault
+            | (1usize << 15); // Store page fault
 
-        hedeleg::write(guest_page_faults);
+        hedeleg::write(guest_exceptions);
         // Delegate the virtual supervisor timer interrupt to VS.
         // VSTIP occupies bit 6 in hideleg/hip.
         hideleg::write(1 << 6);
@@ -1079,9 +1085,11 @@ struct LazyState {
     dtb_gpa: usize,
     dtb_data: &'static [u8],
 
-    // // initrd
-    // initrd_gpa: usize,
-    // initrd_data: &'static [u8],
+    // initrd
+    initrd_gpa: usize,
+    initrd_data: &'static [u8],
+
+    // allocator
     next_free_phys: usize, // Simple bump allocator for physical pages
     phys_limit: usize,
     page_table_size: usize,
@@ -1141,24 +1149,24 @@ fn handle_page_fault(htval: usize, stval: usize) {
             }
         }
 
-        // let initrd_start = lazy.initrd_gpa;
-        // let initrd_end = lazy.initrd_gpa + lazy.initrd_data.len();
-        // if gpa_page < initrd_end && initrd_start < gpa_page_end {
-        //     let copy_gpa_start = core::cmp::max(gpa_page, initrd_start);
-        //     let copy_gpa_end = core::cmp::min(gpa_page_end, initrd_end);
-        //
-        //     let source_offset = copy_gpa_start - initrd_start;
-        //     let destination_offset = copy_gpa_start - gpa_page;
-        //     let copy_length = copy_gpa_end - copy_gpa_start;
-        //
-        //     unsafe {
-        //         core::ptr::copy_nonoverlapping(
-        //             lazy.initrd_data.as_ptr().add(source_offset),
-        //             (pa as *mut u8).add(destination_offset),
-        //             copy_length,
-        //         );
-        //     }
-        // }
+        let initrd_start = lazy.initrd_gpa;
+        let initrd_end = lazy.initrd_gpa + lazy.initrd_data.len();
+        if gpa_page < initrd_end && initrd_start < gpa_page_end {
+            let copy_gpa_start = core::cmp::max(gpa_page, initrd_start);
+            let copy_gpa_end = core::cmp::min(gpa_page_end, initrd_end);
+
+            let source_offset = copy_gpa_start - initrd_start;
+            let destination_offset = copy_gpa_start - gpa_page;
+            let copy_length = copy_gpa_end - copy_gpa_start;
+
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    lazy.initrd_data.as_ptr().add(source_offset),
+                    (pa as *mut u8).add(destination_offset),
+                    copy_length,
+                );
+            }
+        }
 
         // unsafe {
         //     PAGE_FAULT_COUNTER += 1;
@@ -1300,8 +1308,8 @@ pub fn bootstrap_load_elf_lazy(
             dtb_gpa: dtb_addr,
             dtb_data: GUEST_DTB.as_slice(),
 
-            // initrd_gpa: 0x01000000,
-            // initrd_data: GUEST_INITRD.as_slice(),
+            initrd_gpa: 0x01000000,
+            initrd_data: GUEST_INITRD.as_slice(),
             next_free_phys: conf_pool_base,
             phys_limit: conf_pool_base + GUEST_DRAM_SIZE,
             page_table_size: state_addr - pt_addr,
