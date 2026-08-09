@@ -1,0 +1,62 @@
+/dts-v1/;
+
+/ {
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	compatible = "riscv-virtio";
+	model = "riscv-virtio,qemu";
+
+	memory@200000 {
+		device_type = "memory";
+		reg = <0x00 0x200000 0x00 0x4000000>;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		timebase-frequency = <10000000>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			reg = <0>;
+			status = "okay";
+			compatible = "riscv";
+
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions = "i", "m", "c", "zaamo", "zalrsc", "zicsr", "zifencei", "zicntr", "sstc";
+			riscv,isa = "rv64imc_zaamo_zalrsc_zicntr_zicsr_zifencei_sstc";
+			mmu-type = "riscv,sv39";
+
+			cpu_intc0: interrupt-controller {
+				#interrupt-cells = <1>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+			};
+		};
+	};
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		linux,initrd-start = <0x0 0x01000000>;
+		linux,initrd-end = <0x0 0x01402277>;
+  	bootargs = "earlycon=uart8250,mmio,0x05000000 console=ttyS0,115200";
+	};
+
+	soc {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		compatible = "simple-bus";
+		ranges;
+
+		uart0: serial@5000000 {
+			compatible = "ns16550a";
+			reg = <0x0 0x05000000 0x0 0x100>;
+			clock-frequency = <3686400>;
+			current-speed = <115200>;
+			status = "okay";
+		};
+	};
+};

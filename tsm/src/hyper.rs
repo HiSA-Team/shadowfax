@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 use common::{
     attestation::{DiceLayer, TvmAttestationContext},
-    sbi::{sbi_call, COVG_EXTENSION, PAGE_SIZE},
+    sbi::{sbi_call, SbiRet, COVG_EXTENSION, PAGE_SIZE},
 };
-use core::alloc::Layout;
+use core::{alloc::Layout, num};
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 use riscv::{
     interrupt::Trap,
@@ -19,14 +19,14 @@ use zeroize::Zeroize;
 
 use crate::{
     h_extension::{
-        csrs::{hgatp, hstatus, htval, vsatp},
+        csrs::{hedeleg, henvcfg, hgatp, hideleg, hstatus, htval, vsatp},
         instruction::hfence_gvma_all,
         HvException,
     },
     perf::{self, read_cycle},
     println,
     sbi::{self, handle_covg},
-    TsmState, MEASUREMENT,
+    TsmState, GUEST_DTB, GUEST_ELF, MEASUREMENT,
 };
 
 const MIN_PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
@@ -74,8 +74,8 @@ fn ppn_to_pa(ppn: u64) -> usize {
 ///
 /// Note: This assumes all mappings use VPN[2]=0 (addresses < 1GB)
 fn map_4k_leaf(root_pt: usize, page_table_size: usize, gpa: usize, pa: usize, perms: u64) {
-    // assert_eq!(gpa % PAGE_SIZE, 0, "GPA must be page-aligned");
-    // assert_eq!(pa % PAGE_SIZE, 0, "PA must be page-aligned");
+    assert_eq!(gpa % PAGE_SIZE, 0, "GPA must be page-aligned");
+    assert_eq!(pa % PAGE_SIZE, 0, "PA must be page-aligned");
 
     let [vpn2, vpn1, vpn0] = make_vpn_sv39(gpa);
 
@@ -410,6 +410,59 @@ impl HypervisorState {
         Ok(())
     }
 
+    pub fn add_tvm_mmio_region(
+        &mut self,
+        tvm_id: usize,
+        guest_gpa: usize,
+        host_pa: usize,
+        size: usize,
+    ) -> anyhow::Result<()> {
+        if guest_gpa % PAGE_SIZE != 0
+            || host_pa % PAGE_SIZE != 0
+            || size == 0
+            || size % PAGE_SIZE != 0
+        {
+            anyhow::bail!("MMIO addresses and size must be page-aligned");
+        }
+
+        let tvm = self
+            .tvm
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no TVM present"))?;
+
+        if tvm.id != tvm_id {
+            anyhow::bail!("TVM ID mismatch");
+        }
+
+        match tvm.state_enum {
+            TvmState::TvmInitializing => {}
+            _ => anyhow::bail!("cannot add MMIO after finalization"),
+        }
+
+        // Check that the MMIO GPA does not overlap guest RAM.
+        let mmio_end = guest_gpa + size;
+
+        for region in &tvm.memory_regions {
+            let region_start = region.guest_gpa_base;
+            let region_end = region_start + region.num_pages * PAGE_SIZE;
+
+            if guest_gpa < region_end && region_start < mmio_end {
+                anyhow::bail!("MMIO overlaps an existing guest region");
+            }
+        }
+
+        map_region(
+            tvm.page_table_addr,
+            tvm.page_table_size,
+            guest_gpa,
+            host_pa,
+            size / PAGE_SIZE,
+            PTE_R | PTE_W | PTE_U | PTE_A | PTE_D,
+        );
+
+        Ok(())
+    }
+
     pub fn add_tvm_measured_pages(
         &mut self,
         tvm_id: usize,
@@ -660,6 +713,14 @@ impl HypervisorState {
 
         // Setup guest physical address translation (G-stage)
         hgatp::set(hgatp::Mode::Sv39x4, 0, tvm.page_table_addr >> 12);
+        let guest_page_faults = (1usize << 12)  // Instruction page fault
+      | (1usize << 13) // Load page fault
+      | (1usize << 15); // Store/AMO page fault
+
+        hedeleg::write(guest_page_faults);
+        // Delegate the virtual supervisor timer interrupt to VS.
+        // VSTIP occupies bit 6 in hideleg/hip.
+        hideleg::write(1 << 6);
 
         hfence_gvma_all();
 
@@ -802,7 +863,7 @@ impl TvmVcpuState {
         vcpu
     }
 
-    unsafe fn enter(&self, entry_sepc: usize, _entry_arg: usize) -> ! {
+    unsafe fn enter(&self, entry_sepc: usize, entry_arg: usize) -> ! {
         let ctx = &self.trap_ctx as *const VmTrapContext as usize;
 
         // Calculate HS stack top (grows downward, so point to end of array)
@@ -819,6 +880,9 @@ impl TvmVcpuState {
         sstatus::set_spp(SPP::Supervisor); // Return to S-mode (VS-mode with SPV=1)
         sstatus::set_sie(); // Enable interrupts
         sstatus::set_fs(FS::Initial); // Enable FP state
+        henvcfg::set_cbze(); // Allow cbo.zero
+        henvcfg::set_cbcfe(); // Allow cbo.clean/cbo.flush
+        henvcfg::set_stce(); // Allow VS-level time-comparator access
 
         // Hypervisor trap handler
         stvec::write(Stvec::from_bits(hyper_trap as *const fn() as usize));
@@ -839,6 +903,8 @@ impl TvmVcpuState {
                 fence.i
                 sret
             "#,
+            in("a0") 0usize,
+            in("a1") entry_arg,
             options(readonly, noreturn, nostack)
         )
     }
@@ -925,10 +991,8 @@ pub unsafe extern "C" fn hyper_trap() -> ! {
         "ld x28, 224(t6)",
         "ld x29, 232(t6)",
         "ld x30, 240(t6)",
-        // Restore Guest t6 and set up sscratch for next trap
-        "ld t0, 248(t6)",    // Load saved Guest t6 into t0
         "csrw sscratch, t6", // Put VmTrapContext pointer back into sscratch
-        "mv t6, t0",         // Finally restore Guest t6
+        "ld t6, 248(t6)",    // Finally restore Guest t6
         "sret",
     )
 }
@@ -936,7 +1000,8 @@ pub unsafe extern "C" fn hyper_trap() -> ! {
 #[no_mangle]
 extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapContext {
     let scause = riscv::register::scause::read();
-    let stval = riscv::register::stval::read(); // GPA on Guest Page Fault
+    let htval = htval::read();
+    let stval = riscv::register::stval::read();
     let mut sepc = riscv::register::sepc::read();
 
     match scause.cause() {
@@ -963,7 +1028,6 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                             &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
                         )
                     };
-
                     // 3. Write return values back to Guest a0, a1
                     regs[10] = sbi_ret.a0 as usize;
                     regs[11] = sbi_ret.a1 as usize;
@@ -980,7 +1044,7 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                 | HvException::LoadGuestPageFault
                 | HvException::StoreAmoGuestPageFault => {
                     // 'stval' holds the Guest Physical Address that caused the fault
-                    handle_page_fault(stval);
+                    handle_page_fault(htval.bits(), stval);
                     // We do NOT increment sepc; we want to retry the instruction
                 }
                 _ => {
@@ -999,7 +1063,7 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
 
 // Track ELF segments to know what to copy where
 struct LazySegment {
-    vaddr: usize,
+    gpa: usize,
     memsz: usize,
     filesz: usize,
     offset: usize,
@@ -1007,9 +1071,18 @@ struct LazySegment {
 
 // Global state accessible by the trap handler
 struct LazyState {
+    // elf
     segments: Vec<LazySegment>,
-    elf_data: &'static [u8], // Reference to the raw ELF bytes
-    next_free_phys: usize,   // Simple bump allocator for physical pages
+    elf_data: &'static [u8],
+
+    // dtb
+    dtb_gpa: usize,
+    dtb_data: &'static [u8],
+
+    // // initrd
+    // initrd_gpa: usize,
+    // initrd_data: &'static [u8],
+    next_free_phys: usize, // Simple bump allocator for physical pages
     phys_limit: usize,
     page_table_size: usize,
 }
@@ -1018,15 +1091,290 @@ struct LazyState {
 static LAZY_STATE: Mutex<Option<LazyState>> = Mutex::new(None);
 static mut PAGE_FAULT_COUNTER: usize = 0;
 
-pub fn bootstrap_load_elf(
+fn handle_page_fault(htval: usize, stval: usize) {
+    // let cycle_start = read_cycle();
+    let mut lock = LAZY_STATE.lock();
+    let gpa = (htval << 2) | (stval & 0x3);
+    let gpa_page = gpa & !(PAGE_SIZE - 1);
+    let gpa_page_end = gpa_page + PAGE_SIZE;
+
+    if gpa_page < GUEST_DRAM_GPA_START || gpa_page_end > GUEST_DRAM_GPA_END {
+        panic!("GPA 0x{:x} is outside guest RAM", gpa);
+    }
+
+    if let Some(lazy) = lock.as_mut() {
+        // Allocate a physical page (simple bump allocation)
+        if lazy.next_free_phys >= lazy.phys_limit {
+            panic!(
+                "OOM: run out of confidential memory for lazy loading (gpa=0x{:x})",
+                gpa,
+            );
+        }
+
+        let pa = lazy.next_free_phys;
+        lazy.next_free_phys += PAGE_SIZE;
+
+        // println!(
+        //     "[OLORIN] page_fault_handler: htval 0x{:x}; stval 0x{:x}; gpa 0x{:x}; gpa_page 0x{:x}; next_free_phys 0x{:x}; phys_limit 0x{:x}",
+        //     htval, stval, gpa, gpa_page, lazy.next_free_phys, lazy.phys_limit
+        // );
+
+        // Initialize page with zeros (important for BSS or partial pages)
+        unsafe { core::ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE) };
+
+        let dtb_start = lazy.dtb_gpa;
+        let dtb_end = lazy.dtb_gpa + lazy.dtb_data.len();
+        if gpa_page < dtb_end && dtb_start < gpa_page_end {
+            let copy_gpa_start = core::cmp::max(gpa_page, dtb_start);
+            let copy_gpa_end = core::cmp::min(gpa_page_end, dtb_end);
+
+            let source_offset = copy_gpa_start - dtb_start;
+            let destination_offset = copy_gpa_start - gpa_page;
+            let copy_length = copy_gpa_end - copy_gpa_start;
+
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    lazy.dtb_data.as_ptr().add(source_offset),
+                    (pa as *mut u8).add(destination_offset),
+                    copy_length,
+                );
+            }
+        }
+
+        // let initrd_start = lazy.initrd_gpa;
+        // let initrd_end = lazy.initrd_gpa + lazy.initrd_data.len();
+        // if gpa_page < initrd_end && initrd_start < gpa_page_end {
+        //     let copy_gpa_start = core::cmp::max(gpa_page, initrd_start);
+        //     let copy_gpa_end = core::cmp::min(gpa_page_end, initrd_end);
+        //
+        //     let source_offset = copy_gpa_start - initrd_start;
+        //     let destination_offset = copy_gpa_start - gpa_page;
+        //     let copy_length = copy_gpa_end - copy_gpa_start;
+        //
+        //     unsafe {
+        //         core::ptr::copy_nonoverlapping(
+        //             lazy.initrd_data.as_ptr().add(source_offset),
+        //             (pa as *mut u8).add(destination_offset),
+        //             copy_length,
+        //         );
+        //     }
+        // }
+
+        // unsafe {
+        //     PAGE_FAULT_COUNTER += 1;
+        //     let a = PAGE_FAULT_COUNTER;
+        //     println!("PAGE_FAULT_COUNTER = {}", a);
+        // }
+        // Fill with ELF data if the page overlaps a segment
+        for segment in &lazy.segments {
+            let seg_start = segment.gpa;
+            let seg_end = segment.gpa + segment.memsz;
+
+            if gpa_page_end <= seg_start || gpa_page >= seg_end {
+                continue;
+            }
+
+            let segment_file_start = segment.gpa;
+            let segment_file_end = segment.gpa + segment.filesz;
+
+            // Intersection of this page and the file-backed portion.
+            let copy_gpa_start = core::cmp::max(gpa_page, segment_file_start);
+            let copy_gpa_end = core::cmp::min(gpa_page_end, segment_file_end);
+
+            if copy_gpa_start >= copy_gpa_end {
+                // This is BSS: page was already zeroed.
+                continue;
+            }
+
+            let source_offset = segment.offset + (copy_gpa_start - segment.gpa);
+            let destination_offset = copy_gpa_start - gpa_page;
+            let copy_length = copy_gpa_end - copy_gpa_start;
+
+            // println!(
+            //     "[OLORIN] page_fault_handler: copy ELF offset 0x{:x}, len {} -> GPA 0x{:x}, HPA 0x{:x}",
+            //     source_offset,
+            //     copy_length,
+            //     copy_gpa_start,
+            //     pa + destination_offset,
+            // );
+
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    lazy.elf_data.as_ptr().add(source_offset),
+                    (pa as *mut u8).add(destination_offset),
+                    copy_length,
+                );
+            }
+        }
+
+        // Map the page into the Guest Page Table
+        // Retrieve the root PPN from HGATP to find the page table location
+        let hgatp_val = hgatp::read().bits();
+        let root_ppn = hgatp_val & 0xFF_FFFF_FFFF_F;
+        let root_pt = (root_ppn << 12) as usize;
+
+        // Map with full permissions for now (R/W/X/U)
+        map_4k_leaf(
+            root_pt,
+            lazy.page_table_size,
+            gpa_page,
+            pa,
+            PTE_R | PTE_W | PTE_X | PTE_U | PTE_A | PTE_D,
+        );
+
+        // 6. Flush TLB so the CPU sees the new mapping immediately
+        hfence_gvma_all();
+    } else {
+        panic!(
+            "Guest Page Fault occurred but Lazy Loading state is not initialized! (GPA={:x}; gpa_page={:x})",
+            gpa,gpa_page
+        );
+    }
+    // let cycle_end = read_cycle();
+    // println!("pfaultcycle = {}", cycle_end - cycle_start);
+}
+
+const GUEST_DRAM_SIZE: usize = 64 * 1024 * 1024;
+const GUEST_DRAM_GPA_START: usize = 0x20_0000;
+const GUEST_DRAM_GPA_END: usize = 0x20_0000 + GUEST_DRAM_SIZE;
+
+pub fn bootstrap_load_elf_lazy(
     state: &mut TsmState,
-    data: &[u8],
     pt_addr: usize,
     state_addr: usize,
     conf_pool_base: usize,
 ) -> anyhow::Result<usize> {
-    let elf = ElfBytes::<AnyEndian>::minimal_parse(data)
-        .map_err(|e| anyhow::anyhow!("ELF parse error: {:?}", e))?;
+    let elf = unsafe {
+        ElfBytes::<AnyEndian>::minimal_parse(core::slice::from_raw_parts(
+            GUEST_ELF.as_ptr(),
+            GUEST_ELF.len(),
+        ))
+    }
+    .map_err(|e| anyhow::anyhow!("ELF parse error: {:?}", e))?;
+
+    let elf_paddr_base: usize =
+        elf.segments()
+            .and_then(|segments| {
+                segments
+                    .iter()
+                    .filter(|ph| ph.p_type == PT_LOAD)
+                    .map(|ph| ph.p_paddr)
+                    .min()
+            })
+            .ok_or_else(|| anyhow::anyhow!("ELF has no PT_LOAD segments"))? as usize;
+
+    let mut segments = Vec::new();
+    if let Some(hdrs) = elf.segments() {
+        for ph in hdrs.iter().filter(|ph| ph.p_type == PT_LOAD) {
+            let elf_paddr = ph.p_paddr as usize;
+
+            let relative = elf_paddr
+                .checked_sub(elf_paddr_base)
+                .ok_or_else(|| anyhow::anyhow!("ELF has no PT_LOAD segments"))?;
+
+            let gpa = GUEST_DRAM_GPA_START
+                .checked_add(relative)
+                .ok_or_else(|| anyhow::anyhow!("GPA overflow"))?;
+
+            segments.push(LazySegment {
+                gpa,
+                memsz: ph.p_memsz as usize,
+                filesz: ph.p_filesz as usize,
+                offset: ph.p_offset as usize,
+            });
+
+            println!("ELF paddr 0x{:x} -> guest GPA 0x{:x}", elf_paddr, gpa);
+        }
+    }
+
+    /* Copy DTB into guest space */
+    let dtb_offset = (GUEST_DRAM_SIZE - GUEST_DTB.len() - 1) & !(PAGE_SIZE - 1);
+    let dtb_addr = GUEST_DRAM_GPA_START + dtb_offset;
+
+    {
+        let mut lock = LAZY_STATE.lock();
+        *lock = Some(LazyState {
+            segments,
+            elf_data: GUEST_ELF.as_slice(),
+
+            dtb_gpa: dtb_addr,
+            dtb_data: GUEST_DTB.as_slice(),
+
+            // initrd_gpa: 0x01000000,
+            // initrd_data: GUEST_INITRD.as_slice(),
+            next_free_phys: conf_pool_base,
+            phys_limit: conf_pool_base + GUEST_DRAM_SIZE,
+            page_table_size: state_addr - pt_addr,
+        });
+        println!(
+            "[OLORIN] initialized page fault state: 0x{:x} - 0x{:x}",
+            conf_pool_base,
+            conf_pool_base + GUEST_DRAM_SIZE,
+        );
+    }
+
+    // Standard TVM Creation (Metadata only, NO MAPPING)
+    let attestation = state.attestation_context.compute_next(&[0; 32]);
+    let tvm_id = state
+        .hypervisor
+        .create_tvm(attestation, pt_addr, state_addr)?;
+
+    state
+        .hypervisor
+        .add_tvm_memory_region(tvm_id, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
+
+    const UART_GPA: usize = 0x0500_0000;
+    const UART_HPA: usize = 0x1000_0000;
+
+    state
+        .hypervisor
+        .add_tvm_mmio_region(tvm_id, UART_GPA, UART_HPA, PAGE_SIZE)?;
+
+    // Finalize
+    let entry_virtual = elf.ehdr.e_entry as usize;
+    let entry_segment = elf
+        .segments()
+        .and_then(|segments| {
+            segments.iter().filter(|p| p.p_type == PT_LOAD).find(|p| {
+                let start = p.p_vaddr as usize;
+                let end = start + p.p_memsz as usize;
+                entry_virtual >= start && entry_virtual < end
+            })
+        })
+        .expect("cannot find entrypoint");
+
+    // Offset of entry within its PT_LOAD segment.
+    let entry_offset = entry_virtual - entry_segment.p_vaddr as usize;
+
+    // Offset of the entry segment relative to the ELF physical base.
+    let entry_segment_offset = entry_segment.p_paddr as usize - elf_paddr_base;
+
+    let entry_gpa = GUEST_DRAM_GPA_START
+        .checked_add(entry_segment_offset)
+        .and_then(|address| address.checked_add(entry_offset))
+        .ok_or_else(|| anyhow::anyhow!("Entry GPA overflow"))?;
+    println!("[OLORIN] Guest entrypoint: 0x{:x}", entry_gpa);
+    println!("[OLORIN] Guest dtb at : 0x{:x}", dtb_addr);
+    state
+        .hypervisor
+        .finalize_tvm(tvm_id, entry_gpa, dtb_addr, 0)?;
+
+    Ok(tvm_id)
+}
+
+pub fn bootstrap_load_elf(
+    state: &mut TsmState,
+    pt_addr: usize,
+    state_addr: usize,
+    conf_pool_base: usize,
+) -> anyhow::Result<usize> {
+    let elf = unsafe {
+        ElfBytes::<AnyEndian>::minimal_parse(core::slice::from_raw_parts(
+            GUEST_ELF.as_ptr(),
+            GUEST_ELF.len(),
+        ))
+    }
+    .map_err(|e| anyhow::anyhow!("ELF parse error: {:?}", e))?;
 
     // 1. Create TVM
     let attestation = state.attestation_context.compute_next(&[0; 32]);
@@ -1036,7 +1384,7 @@ pub fn bootstrap_load_elf(
 
     // 2. Define Guest RAM - MATCH LINKER SCRIPT (ORIGIN = 0x1000)
     let gpa_base = 0x0;
-    let ram_size = 2 * 1024 * 1024; // 2MB
+    let ram_size = 64 * 1024 * 1024;
     state
         .hypervisor
         .add_tvm_memory_region(tvm_id, gpa_base, ram_size)?;
@@ -1049,16 +1397,17 @@ pub fn bootstrap_load_elf(
 
     // 3. Load PT_LOAD segments
     for ph in segments.iter().filter(|ph| ph.p_type == PT_LOAD) {
-        let p_vaddr = ph.p_vaddr as usize;
+        let p_paddr = ph.p_paddr as usize;
         let p_filesz = ph.p_filesz as usize;
         let p_memsz = ph.p_memsz as usize;
         let p_offset = ph.p_offset as usize;
 
         // Alignment Math
-        let gpa_page_start = p_vaddr & !(PAGE_SIZE - 1);
-        let offset_in_page = p_vaddr - gpa_page_start;
+        let gpa_page_start = p_paddr & !(PAGE_SIZE - 1);
+        let offset_in_page = p_paddr - gpa_page_start;
         let num_measured_pages = (offset_in_page + p_filesz + PAGE_SIZE - 1) / PAGE_SIZE;
 
+        let data = GUEST_ELF.as_slice();
         if p_filesz > 0 {
             // FIX: Use an aligned scratchpad to avoid "src addr must be page-aligned" panic
             let layout =
@@ -1089,6 +1438,16 @@ pub fn bootstrap_load_elf(
 
                 alloc::alloc::dealloc(scratchpad, layout);
             }
+
+            // println!(
+            //     "[OLORIN] mapping 0x{:x} - 0x{:x} -> 0x{:x} - 0x{:x}; 0x{:x} - 0x{:x}",
+            //     p_paddr,
+            //     p_paddr + p_filesz,
+            //     gpa_page_start,
+            //     gpa_page_start + num_measured_pages * PAGE_SIZE,
+            //     current_conf_ptr,
+            //     current_conf_ptr + num_measured_pages * PAGE_SIZE
+            // );
             current_conf_ptr += num_measured_pages * PAGE_SIZE;
         }
 
@@ -1132,158 +1491,6 @@ pub fn bootstrap_load_elf(
     }
 
     // 5. Finalize TVM
-    let entry_point = elf.ehdr.e_entry as usize;
-    state.hypervisor.finalize_tvm(tvm_id, entry_point, 0, 0)?;
-
-    Ok(tvm_id)
-}
-
-fn handle_page_fault(gpa: usize) {
-    // let cycle_start = read_cycle();
-    let mut lock = LAZY_STATE.lock();
-
-    if let Some(lazy) = lock.as_mut() {
-        // 1. Align the faulting GPA to a 4KB page boundary
-        let gpa_page = gpa & !(PAGE_SIZE - 1);
-
-        // 2. Allocate a physical page (simple bump allocation)
-        if lazy.next_free_phys >= lazy.phys_limit {
-            panic!("OOM: Run out of confidential memory for lazy loading");
-        }
-        let pa = lazy.next_free_phys;
-        lazy.next_free_phys += PAGE_SIZE;
-
-        // 3. Initialize page with zeros (important for BSS or partial pages)
-        unsafe { core::ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE) };
-
-        // unsafe {
-        //     PAGE_FAULT_COUNTER += 1;
-        //     let a = PAGE_FAULT_COUNTER;
-        //     println!("PAGE_FAULT_COUNTER = {}", a);
-        // }
-        // 4. Fill with ELF data if the page overlaps a segment
-        for seg in &lazy.segments {
-            let seg_start = seg.vaddr;
-            let seg_end = seg.vaddr + seg.memsz;
-
-            // Check overlap
-            if gpa_page >= seg_start && gpa_page < seg_end {
-                // Calculate offsets to copy the correct slice
-                let start_in_page = if seg_start > gpa_page {
-                    seg_start - gpa_page
-                } else {
-                    0
-                };
-                let end_in_page = if seg_end < gpa_page + PAGE_SIZE {
-                    seg_end - gpa_page
-                } else {
-                    PAGE_SIZE
-                };
-
-                let copy_start = gpa_page + start_in_page;
-                let copy_end = gpa_page + end_in_page;
-
-                // Ensure we don't copy past the file size (bss section is zero-filled)
-                let seg_file_end = seg.vaddr + seg.filesz;
-                let effective_end = core::cmp::min(copy_end, seg_file_end);
-
-                if effective_end > copy_start {
-                    let len = effective_end - copy_start;
-                    let file_off = seg.offset + (copy_start - seg.vaddr);
-
-                    unsafe {
-                        core::ptr::copy_nonoverlapping(
-                            lazy.elf_data.as_ptr().add(file_off),
-                            (pa as *mut u8).add(start_in_page),
-                            len,
-                        );
-                    }
-                }
-            }
-        }
-
-        // 5. Map the page into the Guest Page Table
-        // Retrieve the root PPN from HGATP to find the page table location
-        let hgatp_val = hgatp::read().bits();
-        let root_ppn = hgatp_val & 0xFF_FFFF_FFFF_F;
-        let root_pt = (root_ppn << 12) as usize;
-
-        // Map with full permissions (R/W/X/U)
-        // Note: You must ensure map_4k_leaf is accessible here
-        map_4k_leaf(
-            root_pt,
-            lazy.page_table_size,
-            gpa_page,
-            pa,
-            PTE_R | PTE_W | PTE_X | PTE_U | PTE_A | PTE_D,
-        );
-
-        // 6. Flush TLB so the CPU sees the new mapping immediately
-        hfence_gvma_all();
-    } else {
-        panic!("Guest Page Fault occurred but Lazy Loading state is not initialized!");
-    }
-    // let cycle_end = read_cycle();
-    // println!("pfaultcycle = {}", cycle_end - cycle_start);
-}
-
-pub fn bootstrap_load_elf_lazy(
-    state: &mut TsmState,
-    data: &'static [u8], // Must be 'static to persist for the trap handler
-    pt_addr: usize,
-    state_addr: usize,
-    conf_pool_base: usize,
-) -> anyhow::Result<usize> {
-    // A. Parse ELF to find PT_LOAD segments
-    let elf = ElfBytes::<AnyEndian>::minimal_parse(data)
-        .map_err(|e| anyhow::anyhow!("ELF parse error: {:?}", e))?;
-
-    let mut segments = Vec::new();
-    if let Some(hdrs) = elf.segments() {
-        for ph in hdrs.iter().filter(|ph| ph.p_type == PT_LOAD) {
-            segments.push(LazySegment {
-                vaddr: ph.p_vaddr as usize,
-                memsz: ph.p_memsz as usize,
-                filesz: ph.p_filesz as usize,
-                offset: ph.p_offset as usize,
-            });
-        }
-    }
-
-    // B. Initialize the Global Lazy State
-    // We reserve the physical memory pool here but don't touch it yet.
-    // The trap handler will allocate from 'next_free_phys' on demand.
-    let ram_size = 2 * 1024 * 1024; // Fixed 2MB for this test setup
-
-    {
-        let mut lock = LAZY_STATE.lock();
-        *lock = Some(LazyState {
-            segments,
-            elf_data: data,
-            next_free_phys: conf_pool_base,
-            phys_limit: conf_pool_base + ram_size,
-            page_table_size: state_addr - pt_addr,
-        });
-    }
-
-    // C. Standard TVM Creation (Metadata only, NO MAPPING)
-    let attestation = state.attestation_context.compute_next(&[0; 32]);
-    let tvm_id = state
-        .hypervisor
-        .create_tvm(attestation, pt_addr, state_addr)?;
-
-    // Define the guest physical address range (e.g. 0x1000 size 2MB)
-    // This records that the range is valid for the TVM, allowing the
-    // fault handler to proceed later, but we map 0 pages right now.
-    let gpa_base = 0x1000;
-    state
-        .hypervisor
-        .add_tvm_memory_region(tvm_id, gpa_base, ram_size)?;
-
-    // D. Finalize
-    // Set the entry point (e.g. 0x1000).
-    // The Guest will execute the first instruction, immediately Page Fault
-    // (because the page table is empty), and trigger our Lazy Trap Handler.
     let entry_point = elf.ehdr.e_entry as usize;
     state.hypervisor.finalize_tvm(tvm_id, entry_point, 0, 0)?;
 

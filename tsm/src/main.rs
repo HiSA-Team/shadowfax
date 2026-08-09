@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use common::{
     attestation::{DiceLayer, TsmAttestationContext},
     sbi::{
-        SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
+        SbiRet, PAGE_SIZE, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
         SBI_COVH_ADD_ZERO_PAGES, SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM,
         SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM,
         SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES, SBI_COVH_RUN_TVM_VCPU,
@@ -31,8 +31,21 @@ mod perf;
 mod sbi;
 mod state;
 
+// #[link_section = ".rodata"]
+// pub static GUEST_ELF: [u8; include_bytes!("../../guests/attestation.out").len()] =
+//     *include_bytes!("../../guests/attestation.out");
+
 #[link_section = ".rodata"]
-pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/attestation.out");
+pub static GUEST_ELF: [u8; include_bytes!("../../linux/guest/vmlinux").len()] =
+    *include_bytes!("../../linux/guest/vmlinux");
+
+#[link_section = ".rodata"]
+pub static GUEST_DTB: [u8; include_bytes!("../../bin/guest.dtb").len()] =
+    *include_bytes!("../../bin/guest.dtb");
+
+// #[link_section = ".rodata"]
+// pub static GUEST_INITRD: [u8; include_bytes!("../../bin/initramfs.cpio.gz").len()] =
+//     *include_bytes!("../../bin/initramfs.cpio.gz");
 
 extern crate alloc;
 #[global_allocator]
@@ -84,7 +97,7 @@ extern "C" fn _start() -> ! {
 
         stack_size_per_hart = const STACK_SIZE_PER_HART,
         stack_top = sym _stack_top,
-        main = sym main,
+        main = sym test_tvm_bootstrap,
     )
 }
 
@@ -295,21 +308,21 @@ fn handle_covh(
 /// Test function to bypass SBI and jump straight into a TVM
 fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Starting Mapping TVM from ELF");
-    // 1. Initialize the TSM state manually (if _secure_init wasn't called by a driver)
     // We'll simulate a dummy attestation context for testing.
     _secure_init(0);
 
     let mut lock = STATE.lock();
     let state = lock.as_mut().expect("State not initialized");
 
-    // 2. Define Memory Layout for Testing (Adjust based on your QEMU RAM)
-    // Assuming TSM is at 0x80200000, let's put TVM structures higher up.
-    let tvm_page_table_addr = 0x80800000;
+    // Assuming TSM is at 0x90000000-0x93FFFFFFFF, let's put TVM structures higher up.
+    //
+    let confidential_memory = 0x94000000;
+    let guest_ram_size = 64 * 1024 * 1024;
+    let tvm_page_table_addr = confidential_memory;
     let tvm_state_addr = tvm_page_table_addr + 256 * 1024;
-    let tvm_confidential_pool = 0x80900000; // Where guest RAM actually sits
-    let pool_size_pages = 512; // 2MB test pool
+    let tvm_confidential_pool = confidential_memory + 256 * 1024 + 4096; // Where guest RAM actually sits
+    let pool_size_pages = guest_ram_size / PAGE_SIZE;
 
-    // 3. Convert pages to confidential
     state
         .hypervisor
         .add_confidential_pages(tvm_page_table_addr, 64)
@@ -327,7 +340,6 @@ fn test_tvm_bootstrap() -> ! {
     // This helper parses GUEST_ELF and maps it into the TVM
     let tvm_id = hyper::bootstrap_load_elf_lazy(
         state,
-        GUEST_ELF,
         tvm_page_table_addr,
         tvm_state_addr,
         tvm_confidential_pool,
@@ -387,9 +399,8 @@ fn test_tvm_bootstrap_perf() -> ! {
 
     // 4. Use the ELF loading procedure
     // This helper parses GUEST_ELF and maps it into the TVM
-    let tvm_id = hyper::bootstrap_load_elf_lazy(
+    let tvm_id = hyper::bootstrap_load_elf(
         state,
-        GUEST_ELF,
         tvm_page_table_addr,
         tvm_state_addr,
         tvm_confidential_pool,
