@@ -1,5 +1,4 @@
 ROOT         := ../..
-RV_PREFIX    ?= riscv64-unknown-elf-
 include $(ROOT)/config.mk
 
 BUILD_DIR    ?= $(ROOT)/target/standalone-tvm-launcher
@@ -15,7 +14,6 @@ LOAD_ADDR    ?= $(BOOT_DOMAIN_ADDRESS)
 
 ELF           = $(BUILD_DIR)/standalone-tvm-launcher
 BIN           = $(ELF).bin
-MAP           = $(ELF).map
 OBJECTS       = $(BUILD_DIR)/startup.o $(BUILD_DIR)/main.o
 
 EMBED_FLAGS   = -DGUEST_ELF=\"$(abspath $(GUEST_ELF))\"
@@ -36,11 +34,10 @@ $(BUILD_DIR)/startup.o: startup.S $(EMBED_INPUTS) | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) $(EMBED_FLAGS) -c $< -o $@
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -Werror -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(ELF): $(OBJECTS) linker.ld
-	$(CC) $(LDFLAGS) -Tlinker.ld -Wl,--build-id=none -Wl,-Map,$(MAP) \
-		$(OBJECTS) -o $@
+	$(CC) $(LDFLAGS) -Tlinker.ld $(OBJECTS) -o $@
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@
