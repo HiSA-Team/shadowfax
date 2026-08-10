@@ -35,12 +35,12 @@ mkdir -p "$WORK/bin" "$WORK/rootfs" "$OUT"
 
 # Build the Linux applications once. Both environments use these exact files.
 for benchmark in aes dhrystone miniz norx primes qsort sha512; do
-    echo CC $benchmark
+    echo CC $benchmark.c
     "${RV_PREFIX}gcc" -static -O2 -g -fPIE -std=gnu17 -march=rv64imafdc -mabi=lp64 \
         "$RV8/src/$benchmark.c" -o "$WORK/bin/$benchmark"
 done
 
-echo CXX $benchmark
+echo CXX $benchmark.cc
 "${RV_PREFIX}g++" -static -O2 -g -fPIE -march=rv64imafdc -mabi=lp64 \
     "$RV8/src/bigint.cc" -o "$WORK/bin/bigint"
 
