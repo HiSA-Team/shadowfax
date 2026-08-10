@@ -89,8 +89,28 @@ implicitly.
 
 ## Boot Linux as a TVM guest
 
-The standalone TSM can boot a Linux kernel as a confidential VS-mode TVM. This path consumes an ELF
-kernel rather than a raw `Image`, and embeds a TVM-specific DTB and initramfs:
+The standalone TSM can boot a Linux kernel as a confidential VS-mode TVM. Users will need to change
+the hypervisor entrypoint using the following patch:
+
+```diff
+diff --git a/tsm/src/main.rs b/tsm/src/main.rs
+index 5d2204e..6205151 100644
+--- a/tsm/src/main.rs
++++ b/tsm/src/main.rs
+@@ -97,7 +97,7 @@ extern "C" fn _start() -> ! {
+
+         stack_size_per_hart = const STACK_SIZE_PER_HART,
+         stack_top = sym _stack_top,
+-        main = sym test_tvm_bootstrap,
++        main = sym main,
+     )
+ }
+
+```
+This change is needed because the normally, the TSM behaves like a `trap-handler` cooperating with the
+untrusted domain through the firmware. The `test_tvm_bootstrap` skips this interaction creating the VM
+directly from the provided ELF.
+This path consumes an ELF kernel rather than a raw `Image`, and embeds a TVM-specific DTB and initramfs:
 
 ```text
 linux/guest/vmlinux
@@ -102,7 +122,7 @@ Build those artifacts using the committed configurations and instructions in
 [`guests/linux/README.md`](guests/linux/README.md), then run:
 
 ```sh
-cargo build --target riscv64imac-unknown-none-elf -p tsm
+make -B tsm
 qemu-system-riscv64 -M virt -nographic -smp 1 -m 512M \
     -kernel target/riscv64imac-unknown-none-elf/debug/tsm
 ```
