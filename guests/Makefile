@@ -1,27 +1,9 @@
-ROOT       := ..
-RV_PREFIX ?= riscv64-unknown-elf-
-include $(ROOT)/config.mk
+.PHONY: all bare-metal clean
 
-# Identify all C source files and their corresponding ELF names
-C_SRCS  = $(wildcard *.c)
-BIN     = $(C_SRCS:.c=.bin)
-ELF    = $(C_SRCS:.c=.out)
+all: bare-metal
 
-.PHONY: all clean
-
-all: $(BIN) $(ELF)
-
-%.bin: %.out
-	$(OBJCOPY) -O binary $^ $@
-
-%.out: %.o vmstartup.o
-	$(CC) $(LDFLAGS) -Tlinker.ld $^ -o $@
-
-vmstartup.o: vmstartup.S
-	$(AS) $(ASFLAGS) -c $< -o $@
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+bare-metal:
+	$(MAKE) -C bare-metal
 
 clean:
-	rm -f *.o *.out *.bin
+	$(MAKE) -C bare-metal clean

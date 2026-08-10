@@ -96,13 +96,17 @@ make -B PYTHON='uv run --with cbor2'
 Generated keys are development material under `shadowfax/keys/`; do not treat them as production
 secrets or commit private replacements.
 
-## Linux host
+## Linux untrusted host
 
-The Linux tree and build output are intentionally local. `scripts/run-linux.sh` expects, by default:
+This section describes Linux running in Shadowfax's untrusted supervisor domain. It does not
+describe the confidential Linux TVM guest.
+
+The Linux source tree and build output are intentionally local. `scripts/run-linux.sh` expects, by
+default:
 
 ```text
 linux/host/arch/riscv/boot/Image
-bin/initramfs.cpio.gz
+bin/linux-host-initramfs.cpio.gz
 ```
 
 ### Kernel configuration
@@ -142,7 +146,7 @@ make -C "$LINUX_SRC" O="$PWD/linux/host" ARCH=riscv \
     CROSS_COMPILE=riscv64-unknown-linux-gnu- -j"$(nproc)" Image
 ```
 
-### Minimal initramfs
+### Minimal Linux host initramfs
 
 The archive may be an uncompressed `.cpio` or gzip-compressed `.cpio.gz`. It needs BusyBox or an
 equivalent `/init`. For an interactive shell and Dropbear, initialize the virtual filesystems before
@@ -183,6 +187,44 @@ INITRAMFS=/path/to/initramfs.cpio.gz \
 SSH_FORWARD_PORT=2223 \
 ./scripts/run-linux.sh
 ```
+
+## Linux TVM guest
+
+The Linux TVM guest is a separate kernel running in VS-mode inside confidential memory managed by
+the TSM. Its source configurations live under `guests/linux/`, while its generated build outputs
+remain local:
+
+```text
+guests/linux/kernel.config
+guests/linux/busybox.config
+guests/linux/linux-tvm.dts
+
+linux/guest/vmlinux
+bin/linux-tvm-initramfs.cpio.gz
+bin/linux-tvm.dtb
+```
+
+Start the guest-kernel build from the committed configuration:
+
+```sh
+LINUX_SRC=/path/to/linux
+mkdir -p linux/guest
+cp guests/linux/kernel.config linux/guest/.config
+make -C "$LINUX_SRC" O="$PWD/linux/guest" ARCH=riscv \
+    CROSS_COMPILE=riscv64-unknown-linux-gnu- olddefconfig
+make -C "$LINUX_SRC" O="$PWD/linux/guest" ARCH=riscv \
+    CROSS_COMPILE=riscv64-unknown-linux-gnu- -j"$(nproc)" vmlinux
+```
+
+Unlike the firmware's RV64IMAC build, the current Linux TVM CPU description exposes F and D because
+the tested static userspace links RV64GC runtime libraries. The guest kernel therefore enables
+`CONFIG_FPU`. It also enables `CONFIG_POSIX_TIMERS`, which is required by BusyBox programs that use
+`alarm()` or `setitimer()`, including repeated `ping` requests.
+
+Build BusyBox, assemble the initramfs, compile and patch the TVM device tree, and boot the standalone
+TSM by following [`guests/linux/README.md`](guests/linux/README.md). The current minimal device tree
+provides one CPU, 64 MiB of guest RAM, and a UART. It does not provide the virtio networking and SSH
+environment described in the Linux host section above.
 
 ## Docker
 

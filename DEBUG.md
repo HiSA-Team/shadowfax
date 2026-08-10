@@ -71,15 +71,31 @@ make debug GDB_COVE_SCRIPT=test/debug/gdb_covh_create_tvm_from_elf.py
 ```
 
 This is the debugger-driven counterpart of the standalone launcher. It reads
-`guests/attestation.out`, allocates confidential memory, maps each loadable ELF segment into guest
-physical memory, creates the vCPU, and runs the attestation guest. The script requires GDB's Python
-environment to provide `pyelftools`.
+`guests/bare-metal/attestation.out`, allocates confidential memory, maps each loadable ELF segment
+into guest physical memory, creates the vCPU, and runs the attestation guest. The script requires
+GDB's Python environment to provide `pyelftools`.
 
 For a complete demonstration that does not require GDB, prefer:
 
 ```sh
 make -C test/standalone-tvm-launcher/ run
 ```
+
+### Boot the Linux TVM guest directly
+
+This is different from debugging the Linux untrusted host with `scripts/run-linux.sh`. The
+standalone TSM embeds `linux/guest/vmlinux`, `bin/linux-tvm.dtb`, and
+`bin/linux-tvm-initramfs.cpio.gz`, then enters Linux as a confidential VS-mode guest:
+
+```sh
+cargo build --target riscv64imac-unknown-none-elf -p tsm
+qemu-system-riscv64 -M virt -nographic -smp 1 -m 512M \
+    -kernel target/riscv64imac-unknown-none-elf/debug/tsm
+```
+
+Early Linux output uses the TVM UART described at guest GPA `0x05000000`. Page-loading diagnostics
+come from the TSM before the Linux console takes over. Use the configuration and artifact-generation
+instructions in [`guests/linux/README.md`](guests/linux/README.md).
 
 ## Useful GDB commands
 

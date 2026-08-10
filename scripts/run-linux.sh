@@ -9,7 +9,7 @@ PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 source "$PROJECT_ROOT/config.rc"
 
 LINUX_IMAGE_PATH=${LINUX_IMAGE:-"$PROJECT_ROOT/linux/host/arch/riscv/boot/Image"}
-INITRAMFS_IMAGE_PATH=${INITRAMFS:-"$PROJECT_ROOT/bin/initramfs.cpio.gz"}
+INITRAMFS_IMAGE_PATH=${INITRAMFS:-"$PROJECT_ROOT/bin/linux-host-initramfs.cpio.gz"}
 SHADOWFAX_PYTHON=${SHADOWFAX_PYTHON:-"uv run --with cbor2"}
 PLATFORM_NAME=${PLATFORM:-generic}
 SSH_FORWARD_PORT=${SSH_FORWARD_PORT:-2222}
