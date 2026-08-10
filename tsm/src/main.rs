@@ -31,21 +31,17 @@ mod perf;
 mod sbi;
 mod state;
 
-// #[link_section = ".rodata"]
-// pub static GUEST_ELF: [u8; include_bytes!("../../guests/bare-metal/attestation.out").len()] =
-//     *include_bytes!("../../guests/bare-metal/attestation.out");
+#[link_section = ".rodata"]
+pub static GUEST_ELF: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.elf")).len()] =
+    *include_bytes!(concat!(env!("OUT_DIR"), "/guest.elf"));
 
 #[link_section = ".rodata"]
-pub static GUEST_ELF: [u8; include_bytes!("../../linux/guest/vmlinux").len()] =
-    *include_bytes!("../../linux/guest/vmlinux");
+pub static GUEST_DTB: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.dtb")).len()] =
+    *include_bytes!(concat!(env!("OUT_DIR"), "/guest.dtb"));
 
 #[link_section = ".rodata"]
-pub static GUEST_DTB: [u8; include_bytes!("../../bin/linux-tvm.dtb").len()] =
-    *include_bytes!("../../bin/linux-tvm.dtb");
-
-// #[link_section = ".rodata"]
-pub static GUEST_INITRD: [u8; include_bytes!("../../bin/linux-tvm-initramfs.cpio.gz").len()] =
-    *include_bytes!("../../bin/linux-tvm-initramfs.cpio.gz");
+pub static GUEST_INITRD: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.initrd")).len()] =
+    *include_bytes!(concat!(env!("OUT_DIR"), "/guest.initrd"));
 
 extern crate alloc;
 #[global_allocator]
@@ -97,8 +93,28 @@ extern "C" fn _start() -> ! {
 
         stack_size_per_hart = const STACK_SIZE_PER_HART,
         stack_top = sym _stack_top,
-        main = sym main,
+        main = sym tsm_entry,
     )
+}
+
+extern "C" fn tsm_entry(
+    a0: usize,
+    a1: usize,
+    a2: usize,
+    a3: usize,
+    a4: usize,
+    a5: usize,
+    a6: usize,
+    a7: usize,
+) -> ! {
+    #[cfg(feature = "standalone")]
+    {
+        let _ = (a0, a1, a2, a3, a4, a5, a6, a7);
+        test_tvm_bootstrap()
+    }
+
+    #[cfg(not(feature = "standalone"))]
+    main(a0, a1, a2, a3, a4, a5, a6, a7)
 }
 
 pub struct TsmState {
@@ -306,7 +322,7 @@ fn handle_covh(
 }
 
 /// Test function to bypass SBI and jump straight into a TVM
-#[allow(deadcode)]
+#[allow(dead_code)]
 fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Starting Mapping TVM from ELF");
     // We'll simulate a dummy attestation context for testing.
@@ -315,19 +331,19 @@ fn test_tvm_bootstrap() -> ! {
     let mut lock = STATE.lock();
     let state = lock.as_mut().expect("State not initialized");
 
-    // Assuming TSM is at 0x90000000-0x93FFFFFFFF, let's put TVM structures higher up.
+    // Assuming TSM is at 0x90000000-0x93FFFFFFFF, put TVM structures higher up.
     //
     let confidential_memory = 0x94000000;
-    let guest_ram_size = 64 * 1024 * 1024;
+    let guest_ram_size = 256 * 1024 * 1024;
     let tvm_page_table_addr = confidential_memory;
-    let tvm_state_addr = tvm_page_table_addr + 256 * 1024;
-    let tvm_confidential_pool = confidential_memory + 256 * 1024 + 4096; // Where guest RAM actually sits
+    let tvm_state_addr = tvm_page_table_addr + 1024 * 1024;
+    let tvm_confidential_pool = tvm_state_addr + 4096;
     let pool_size_pages = guest_ram_size / PAGE_SIZE;
 
     state
         .hypervisor
-        .add_confidential_pages(tvm_page_table_addr, 64)
-        .unwrap(); // 256KB
+        .add_confidential_pages(tvm_page_table_addr, 256)
+        .unwrap(); // 1 MiB
     state
         .hypervisor
         .add_confidential_pages(tvm_state_addr, 1)

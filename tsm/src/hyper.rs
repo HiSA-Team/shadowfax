@@ -1242,7 +1242,7 @@ fn handle_page_fault(htval: usize, stval: usize) {
     // println!("pfaultcycle = {}", cycle_end - cycle_start);
 }
 
-const GUEST_DRAM_SIZE: usize = 64 * 1024 * 1024;
+const GUEST_DRAM_SIZE: usize = 256 * 1024 * 1024;
 const GUEST_DRAM_GPA_START: usize = 0x20_0000;
 const GUEST_DRAM_GPA_END: usize = 0x20_0000 + GUEST_DRAM_SIZE;
 
@@ -1331,7 +1331,7 @@ pub fn bootstrap_load_elf_lazy(
         .hypervisor
         .add_tvm_memory_region(tvm_id, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
 
-    const UART_GPA: usize = 0x0500_0000;
+    const UART_GPA: usize = 0x1800_0000;
     const UART_HPA: usize = 0x1000_0000;
 
     state
@@ -1483,9 +1483,8 @@ pub fn bootstrap_load_elf(
         highest_gpa_mapped = highest_gpa_mapped.max(segment_end);
     }
 
-    // 4. Map the rest of the 2MB RAM (The Stack and Heap)
-    // This is critical. If CoreMark allocates the list outside PT_LOAD,
-    // it will be NULL or Fault unless we map the remaining RAM here.
+    // 4. Map the rest of the 2MB RAM (the stack and heap).
+    // Freestanding guests may use memory beyond their PT_LOAD segments.
     let ram_end_gpa = gpa_base + ram_size;
     if highest_gpa_mapped < ram_end_gpa {
         let remaining_pages = (ram_end_gpa - highest_gpa_mapped) / PAGE_SIZE;

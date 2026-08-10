@@ -32,6 +32,7 @@ BIN_DIR                     = bin
 TARGET_DIR                  = target/$(TARGET_TRIPLET)/$(PROFILE)
 KEYS_DIR                    = shadowfax/keys
 TEST_DIR                    = test/functional/
+CARGO_FLAGS                 =
 
 FW_ELF                      = $(TARGET_DIR)/shadowfax
 FW_BIN                      = $(BIN_DIR)/shadowfax.bin
@@ -100,13 +101,13 @@ $(FW_BIN): $(FW_ELF)
 	$(OBJCOPY) -O binary $< $@
 
 $(FW_ELF): $(TSM_ELF) $(TSM_SIG)
-	cargo build --target $(TARGET_TRIPLET) -p shadowfax
+	cargo build --target $(TARGET_TRIPLET) -p shadowfax $(CARGO_FLAGS)
 
 $(TSM_SIG): $(TSM_ELF)
 	openssl pkeyutl -sign -inkey $(PRIVATE_KEY) -in $< -out $@
 
 $(TSM_ELF):
-	 cargo build --target $(TARGET_TRIPLET) -p tsm
+	 cargo build --target $(TARGET_TRIPLET) -p tsm $(CARGO_FLAGS)
 
 ## test: build and run the tests
 test: firmware
