@@ -44,8 +44,8 @@ COVH_CREATE_TVM_VCPU: int = 14
 COVH_RUN_TVM_VCPU: int = 15
 
 # ================ Create TVM Input ======================= #
-TVM_ELF_PATH: str = "guests/attestation.out"
-TVM_BIN_PATH: str = "guests/attestation.bin"
+TVM_ELF_PATH: str = "guests/bare-metal/attestation.out"
+TVM_BIN_PATH: str = "guests/bare-metal/attestation.bin"
 DEFAULT_PAGE_SIZE: int = 4096  # 4k
 PAGE_DIRECTORY_SIZE: int = 0x4000  # 16kib
 NUM_PAGES_TO_DONATE: int = 1024

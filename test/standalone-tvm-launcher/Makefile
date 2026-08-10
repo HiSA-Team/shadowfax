@@ -7,7 +7,7 @@ BUILD_DIR    ?= $(ROOT)/target/standalone-tvm-launcher
 FIRMWARE     ?= $(ROOT)/target/$(TARGET_TRIPLET)/$(PROFILE)/shadowfax
 DICE_INPUT   ?= $(ROOT)/bin/shadowfax.dice.bin
 DTB          ?= $(ROOT)/bin/device-tree.dtb
-GUEST_ELF    ?= $(ROOT)/guests/attestation.out
+GUEST_ELF    ?= $(ROOT)/guests/bare-metal/attestation.out
 GUEST_DTB    ?=
 
 LOAD_ADDR    ?= $(BOOT_DOMAIN_ADDRESS)

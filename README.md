@@ -7,15 +7,17 @@ Shadowfax is an open-source RISC-V confidential-computing firmware stack based o
 Application-TEE (CoVE) specification. It combines an M-mode TSM driver, OpenSBI, and a trusted
 security monitor (TSM) capable of creating and running trusted virtual machines (TVMs).
 
-The project is tested with the `riscv64imac` target, RISC-V Privileged ISA v1.12, OpenSBI v1.7,
-and QEMU's `virt` machine.
+The firmware and TSM are tested with the `riscv64imac` target, RISC-V Privileged ISA v1.12,
+OpenSBI v1.7, and QEMU's `virt` machine. The experimental Linux TVM guest additionally exposes
+the F and D extensions to its userspace.
 
 ## Documentation index
 
 - [Quick setup](#quick-setup): clone the project, generate keys, and verify the toolchain.
 - [Bare-metal TVM attestation](#the-holy-grail-bare-metal-host-and-tvm-attestation): run the
   complete host-to-TVM demonstration.
-- [Linux host](#boot-linux-as-the-untrusted-host): boot Linux with an initramfs and SSH forwarding.
+- [Linux TVM guest](#boot-linux-as-a-tvm-guest): boot Linux inside a confidential VM.
+- [Linux host](#boot-linux-as-the-untrusted-host): boot Linux in the untrusted supervisor domain.
 - [SETUP.md](SETUP.md): detailed dependencies, toolchains, keys, Linux, initramfs, Docker, and musl
   instructions.
 - [DEBUG.md](DEBUG.md): QEMU/GDB startup, synthetic CoVE-H scenarios, and debugger commands.
@@ -25,7 +27,8 @@ and QEMU's `virt` machine.
 - `shadowfax/`: M-mode firmware, static domain setup, and the OpenSBI submodule.
 - `tsm/`: trusted security monitor and TVM lifecycle implementation.
 - `common/`: SBI definitions and attestation structures shared by firmware and TSM.
-- `guests/`: bare-metal TVM workloads, including the attestation guest.
+- `guests/bare-metal/`: freestanding TVM workloads, including the attestation guest.
+- `guests/linux/`: Linux TVM kernel, BusyBox, and device-tree source configurations.
 - `test/`: standalone launchers, functional tests, GDB scripts, and security scenarios.
 - `scripts/`: host setup, DICE tooling, and the Linux/QEMU launcher.
 - `docs/source/`: Sphinx reference documentation.
@@ -59,7 +62,7 @@ the RISC-V tools are not available under the default prefix. Shared compiler, as
 architecture, and QEMU defaults live in `config.mk`; see [SETUP.md](SETUP.md#shared-make-configuration)
 for supported overrides and debug behavior.
 
-## The holy grail: bare-metal host and TVM attestation
+Bare-metal host and TVM attestation
 
 The most complete standalone demonstration runs a bare-metal CoVE host, creates a bare-metal TVM,
 and retrieves the layered attestation evidence containing the platform certificate:
@@ -72,8 +75,8 @@ The root build prepares Shadowfax, the TSM, its signature, the default attestati
 DICE-derived platform attestation input. The standalone launcher Makefile itself only embeds the
 selected guest and creates the bare-metal host image. When `run` starts QEMU:
 
-1. The complete `guests/attestation.out` ELF is embedded in the host executable's `.guest_elf`
-   section.
+1. The complete `guests/bare-metal/attestation.out` ELF is embedded in the host executable's
+   `.guest_elf` section.
 2. QEMU loads the existing firmware, device tree, DICE input, and bare-metal host.
 3. The host uses SUPD to discover the TSM, then CoVE-H calls to donate confidential pages, create
    the TVM, map measured ELF segments, create a vCPU, finalize the measurement, and enter the TVM.
@@ -84,12 +87,56 @@ Use `GUEST_ELF=/path/to/guest.out` to embed another RISC-V ELF or `DTB=/path/to/
 running with another prebuilt device tree. Missing inputs are reported instead of being built
 implicitly.
 
+## Boot Linux as a TVM guest
+
+The standalone TSM can boot a Linux kernel as a confidential VS-mode TVM. Users will need to change
+the hypervisor entrypoint using the following patch:
+
+```diff
+diff --git a/tsm/src/main.rs b/tsm/src/main.rs
+index 5d2204e..6205151 100644
+--- a/tsm/src/main.rs
++++ b/tsm/src/main.rs
+@@ -97,7 +97,7 @@ extern "C" fn _start() -> ! {
+
+         stack_size_per_hart = const STACK_SIZE_PER_HART,
+         stack_top = sym _stack_top,
+-        main = sym test_tvm_bootstrap,
++        main = sym main,
+     )
+ }
+
+```
+This change is needed because the normally, the TSM behaves like a `trap-handler` cooperating with the
+untrusted domain through the firmware. The `test_tvm_bootstrap` skips this interaction creating the VM
+directly from the provided ELF.
+This path consumes an ELF kernel rather than a raw `Image`, and embeds a TVM-specific DTB and initramfs:
+
+```text
+linux/guest/vmlinux
+bin/linux-tvm.dtb
+bin/linux-tvm-initramfs.cpio.gz
+```
+
+Build those artifacts using the committed configurations and instructions in
+[`guests/linux/README.md`](guests/linux/README.md), then run:
+
+```sh
+make -B tsm
+qemu-system-riscv64 -M virt -nographic -smp 1 -m 512M \
+    -kernel target/riscv64imac-unknown-none-elf/debug/tsm
+```
+
+This is intentionally separate from the Linux host workflow below. The Linux TVM guest runs inside
+the TSM's confidential 64 MiB guest-physical address space; the Linux host runs as Shadowfax's
+untrusted supervisor domain.
+
 ## Boot Linux as the untrusted host
 
-Prepare these local artifacts as described in [SETUP.md](SETUP.md#linux-host):
+Prepare these local artifacts as described in [SETUP.md](SETUP.md#linux-untrusted-host):
 
 - `linux/host/arch/riscv/boot/Image`
-- `bin/initramfs.cpio.gz`
+- `bin/linux-host-initramfs.cpio.gz`
 
 Then run:
 

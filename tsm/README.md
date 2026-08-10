@@ -51,31 +51,49 @@ You can choose between a static or dynamic approach by swapping the helper funct
 -  Dynamic (Lazy) Approach: `Use bootstrap_load_elf_lazy`. This maps guest memory regions but may defer actual page loading.
 - Static Approach: Use `bootstrap_load_elf`. This performs a full pre-loading of the ELF segments into the TVM's confidential memory.
 
-## Run a simple guest
-Users can run a simple guest to test the hypervisor in stand-alone mode:
-- compile a guest: in `guests/` there are some bare-metal VS-mode kernel
-- adjust the GUEST_ELF variable to point to the ELF
-- build the TSM
-- run on QEMU
+## Run a bare-metal guest
+
+The freestanding VS-mode workloads live in `guests/bare-metal/`. Build them from the repository
+root, select the resulting ELF in `tsm/src/main.rs`, build the TSM, and run it directly with QEMU.
 
 ```sh
-# compile guest
-cd guests/
-sh compile_guest.sh hellotvm.c
+make -C guests bare-metal
 ```
 
 ```rust
-// Point the GUEST_ELF to the built guest
+// Point GUEST_ELF to the selected bare-metal guest.
 #[link_section = ".rodata"]
-pub static GUEST_ELF: &[u8] = include_bytes!("../../guests/a.out");
+pub static GUEST_ELF: [u8;
+    include_bytes!("../../guests/bare-metal/hellotvm.out").len()
+] = *include_bytes!("../../guests/bare-metal/hellotvm.out");
 ```
 
 ```sh
-# build TSM
-
 make -B tsm
+qemu-system-riscv64 -M virt -nographic -smp 1 -m 1G \
+    -kernel target/riscv64imac-unknown-none-elf/debug/tsm
 ```
 
-```sh
-# run on QEMU
-qemu-system-riscv64 -nographic -smp 1 -m 1G  -M virt -kernel target/riscv64imac-unknown-none-elf/debug/tsm
+## Run the Linux TVM guest
+
+Linux running as a confidential TVM guest is separate from Linux running as Shadowfax's untrusted
+host. The standalone TSM currently embeds these generated inputs:
+
+```text
+linux/guest/vmlinux
+bin/linux-tvm.dtb
+bin/linux-tvm-initramfs.cpio.gz
+```
+
+The reproducible source inputs are committed under `guests/linux/`:
+
+```text
+guests/linux/kernel.config
+guests/linux/busybox.config
+guests/linux/linux-tvm.dts
+```
+
+See [`../guests/linux/README.md`](../guests/linux/README.md) for the complete build, DTB patching,
+and boot procedure. The current test entrypoint uses the lazy ELF loader, normalizes the kernel's ELF
+physical addresses into a 64 MiB guest-physical RAM region starting at `0x00200000`, and supplies the
+DTB address in the Linux boot argument register.

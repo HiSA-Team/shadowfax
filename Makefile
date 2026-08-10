@@ -79,7 +79,7 @@ $(shell mkdir -p $(BIN_DIR))
 ## all: build tsm, firmware and attestation payload
 all: guests $(DICE_INPUT) build-info
 
-## guests: build guests in guests/
+## guests: build bare-metal guests in guests/bare-metal/
 guests:
 	$(MAKE) -C guests/
 

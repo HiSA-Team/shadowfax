@@ -32,20 +32,20 @@ mod sbi;
 mod state;
 
 // #[link_section = ".rodata"]
-// pub static GUEST_ELF: [u8; include_bytes!("../../guests/attestation.out").len()] =
-//     *include_bytes!("../../guests/attestation.out");
+// pub static GUEST_ELF: [u8; include_bytes!("../../guests/bare-metal/attestation.out").len()] =
+//     *include_bytes!("../../guests/bare-metal/attestation.out");
 
 #[link_section = ".rodata"]
 pub static GUEST_ELF: [u8; include_bytes!("../../linux/guest/vmlinux").len()] =
     *include_bytes!("../../linux/guest/vmlinux");
 
 #[link_section = ".rodata"]
-pub static GUEST_DTB: [u8; include_bytes!("../../bin/guest.dtb").len()] =
-    *include_bytes!("../../bin/guest.dtb");
+pub static GUEST_DTB: [u8; include_bytes!("../../bin/linux-tvm.dtb").len()] =
+    *include_bytes!("../../bin/linux-tvm.dtb");
 
 // #[link_section = ".rodata"]
-pub static GUEST_INITRD: [u8; include_bytes!("../../bin/guest-initramfs.cpio.gz").len()] =
-    *include_bytes!("../../bin/guest-initramfs.cpio.gz");
+pub static GUEST_INITRD: [u8; include_bytes!("../../bin/linux-tvm-initramfs.cpio.gz").len()] =
+    *include_bytes!("../../bin/linux-tvm-initramfs.cpio.gz");
 
 extern crate alloc;
 #[global_allocator]

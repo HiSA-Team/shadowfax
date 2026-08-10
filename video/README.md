@@ -2,7 +2,8 @@
 Here are 3 different demos:
 
 - **helloworld**: Provides a complete CoVE demonstration using the multistep TVM creation flow
-described in the paper. The hellotvm.c binary is mapped into guest memory at address 0x1000,
+described in the paper. The `guests/bare-metal/hellotvm.c` binary is mapped into guest memory at
+address 0x1000,
 and a single vCPU is instantiated. The TVM prints a hello world message to the console.
 Output is produced by forwarding an SBI ECALL from the TSM trap handler to the OpenSBI firmware.
 - **hypervisor-standalone**: shows how to test the hypervisor without the multistep creation. This
