@@ -40,7 +40,7 @@ for benchmark in aes dhrystone miniz norx primes qsort sha512; do
         "$RV8/src/$benchmark.c" -o "$WORK/bin/$benchmark"
 done
 
-echo CXX $benchmark.cc
+echo CXX bigint.cc
 "${RV_PREFIX}g++" -static -O2 -g -fPIE -march=rv64imafdc -mabi=lp64 \
     "$RV8/src/bigint.cc" -o "$WORK/bin/bigint"
 
