@@ -62,7 +62,7 @@ the RISC-V tools are not available under the default prefix. Shared compiler, as
 architecture, and QEMU defaults live in `config.mk`; see [SETUP.md](SETUP.md#shared-make-configuration)
 for supported overrides and debug behavior.
 
-## The holy grail: bare-metal host and TVM attestation
+Bare-metal host and TVM attestation
 
 The most complete standalone demonstration runs a bare-metal CoVE host, creates a bare-metal TVM,
 and retrieves the layered attestation evidence containing the platform certificate:
