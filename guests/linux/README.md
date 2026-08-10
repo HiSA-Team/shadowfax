@@ -7,7 +7,7 @@ The committed inputs are:
 
 - `kernel.config`: tested Linux 7.1 RISC-V configuration.
 - `busybox.config`: tested BusyBox 1.38 configuration for the initramfs.
-- `linux-tvm.dts`: minimal TVM device tree describing one CPU, 64 MiB of RAM, and the UART mapping.
+- `linux-tvm.dts`: minimal TVM device tree describing one CPU, 256 MiB of RAM, and the UART mapping.
 
 Generated outputs stay outside this directory:
 
@@ -88,11 +88,11 @@ The current standalone entrypoint embeds the three artifacts above and starts th
 the lazy ELF loader:
 
 ```sh
-cargo build --target riscv64imac-unknown-none-elf -p tsm
-qemu-system-riscv64 -M virt -nographic -smp 1 -m 512M \
+cargo build --target riscv64imac-unknown-none-elf -p tsm --features standalone
+qemu-system-riscv64 -M virt -nographic -smp 1 -m 1G \
     -kernel target/riscv64imac-unknown-none-elf/debug/tsm
 ```
 
-The tested setup provides one vCPU, guest RAM at GPA `0x00200000` with a size of 64 MiB, an initramfs
-at GPA `0x01000000`, and a UART at guest GPA `0x05000000`. It is a minimal console environment and
+The tested setup provides one vCPU, guest RAM at GPA `0x00200000` with a size of 256 MiB, an initramfs
+at GPA `0x01000000`, and a UART at guest GPA `0x18000000`. It is a minimal console environment and
 does not currently describe a PLIC or a virtio network device.
