@@ -89,27 +89,7 @@ implicitly.
 
 ## Boot Linux as a TVM guest
 
-The standalone TSM can boot a Linux kernel as a confidential VS-mode TVM. Users will need to change
-the hypervisor entrypoint using the following patch:
-
-```diff
-diff --git a/tsm/src/main.rs b/tsm/src/main.rs
-index 5d2204e..6205151 100644
---- a/tsm/src/main.rs
-+++ b/tsm/src/main.rs
-@@ -97,7 +97,7 @@ extern "C" fn _start() -> ! {
-
-         stack_size_per_hart = const STACK_SIZE_PER_HART,
-         stack_top = sym _stack_top,
--        main = sym test_tvm_bootstrap,
-+        main = sym main,
-     )
- }
-
-```
-This change is needed because the normally, the TSM behaves like a `trap-handler` cooperating with the
-untrusted domain through the firmware. The `test_tvm_bootstrap` skips this interaction creating the VM
-directly from the provided ELF.
+The standalone TSM can boot a Linux kernel as a confidential VS-mode TVM.
 This path consumes an ELF kernel rather than a raw `Image`, and embeds a TVM-specific DTB and initramfs:
 
 ```text
@@ -122,13 +102,16 @@ Build those artifacts using the committed configurations and instructions in
 [`guests/linux/README.md`](guests/linux/README.md), then run:
 
 ```sh
-make -B tsm
-qemu-system-riscv64 -M virt -nographic -smp 1 -m 512M \
+make -B tsm CARGO_FLAGS="--features standalone"
+qemu-system-riscv64 -M virt -nographic -smp 1 -m 1G \
     -kernel target/riscv64imac-unknown-none-elf/debug/tsm
 ```
 
+The `standalone` feature is needed because, normally, the TSM behaves like a `trap-handler`
+cooperating with the untrusted domain through the firmware.
+
 This is intentionally separate from the Linux host workflow below. The Linux TVM guest runs inside
-the TSM's confidential 64 MiB guest-physical address space; the Linux host runs as Shadowfax's
+the TSM's confidential 256 MiB guest-physical address space; the Linux host runs as Shadowfax's
 untrusted supervisor domain.
 
 ## Boot Linux as the untrusted host
@@ -172,5 +155,5 @@ hardware, address-layout, and SBI assumptions near the implementation.
 Shadowfax builds on the RISC-V
 [AP-TEE specification](https://github.com/riscv-non-isa/riscv-ap-tee),
 [OpenSBI](https://github.com/riscv-software-src/opensbi), and selected H-CSR code from
-[Hikami](https://github.com/Alignof/hikami). CoreMark and RISC-V test workloads remain in their
+[Hikami](https://github.com/Alignof/hikami). RV8 and RISC-V test workloads remain in their
 respective vendored directories.
