@@ -23,8 +23,8 @@
 			compatible = "riscv";
 
 			riscv,isa-base = "rv64i";
-			riscv,isa-extensions = "i", "m", "c", "zaamo", "zalrsc", "zicsr", "zifencei", "zicntr", "sstc";
-			riscv,isa = "rv64imc_zaamo_zalrsc_zicntr_zicsr_zifencei_sstc";
+			riscv,isa-extensions = "i", "m", "f", "d", "c", "zaamo", "zalrsc", "zicsr", "zifencei", "zicntr", "sstc";
+			riscv,isa = "rv64imafdc_zaamo_zalrsc_zicntr_zicsr_zifencei_sstc";
 			mmu-type = "riscv,sv39";
 
 			cpu_intc0: interrupt-controller {
@@ -40,9 +40,9 @@
 	};
 
 	chosen {
-  	bootargs = "earlycon=uart8250,mmio,0x05000000 console=ttyS0,115200";
+		bootargs = "earlycon=uart8250,mmio,0x05000000 console=ttyS0,115200";
 		linux,initrd-start = <0x0 0x01000000>;
-    linux,initrd-end = <0x0 0x0140201F>;
+		linux,initrd-end = <0x0 0x01124bbd>;
 	};
 
 	soc {
