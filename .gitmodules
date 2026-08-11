@@ -4,3 +4,6 @@
 [submodule "guests/linux/rv8-bench"]
 	path = guests/linux/rv8-bench
 	url = https://github.com/larkmjc/rv8-bench.git
+[submodule "guests/bare-metal/embench-iot"]
+	path = guests/bare-metal/embench-iot
+	url = https://github.com/embench/embench-iot.git

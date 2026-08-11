@@ -1,0 +1,297 @@
+Log file: /home/giuseppe/dev/shadowfax-project/shadowfax/experiments/embench/run-20260811T215449Z/logs/s-mode-build/build-2026-08-11-235501.log
+
+
+Supplied arguments
+==================
+--builddir            : /tmp/shadowfax-embench.XqQuML/s-mode/build
+--logdir              : /home/giuseppe/dev/shadowfax-project/shadowfax/experiments/embench/run-20260811T215449Z/logs/s-mode-build
+--arch                : riscv32
+--chip                : generic
+--board               : ri5cyverilator
+--cc                  : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh
+--ld                  : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh
+--cflags              : -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench
+--ldflags             : -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld
+--env                 : None
+--cc-define1-pattern  : None
+--cc-define2-pattern  : None
+--cc-incdir-pattern   : None
+--cc-input-pattern    : None
+--cc-output-pattern   : None
+--ld-input-pattern    : None
+--ld-output-pattern   : None
+--user-libs           : /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+--dummy-libs          : None
+--cpu-mhz             : 10
+--warmup-heat         : 1
+--verbose             : True
+--clean               : True
+--timeout             : 60
+
+Benchmarks
+==========
+aha-mont64
+crc32
+cubic
+edn
+huffbench
+matmult-int
+minver
+nbody
+nettle-aes
+nettle-sha256
+nsichneu
+picojpeg
+qrduino
+sglib-combined
+slre
+st
+statemate
+ud
+wikisort
+
+Global parameters
+=================
+rootdir              : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot
+verbose              : True
+bd                   : /tmp/shadowfax-embench.XqQuML/s-mode/build
+configdir            : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config
+bd_configdir         : /tmp/shadowfax-embench.XqQuML/s-mode/build/config
+archdir              : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32
+bd_archdir           : /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32
+chipdir              : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic
+bd_chipdir           : /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic
+boarddir             : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator
+bd_boarddir          : /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator
+env                  : {}
+benchdir             : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src
+bd_benchdir          : /tmp/shadowfax-embench.XqQuML/s-mode/build/src
+supportdir           : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support
+bd_supportdir        : /tmp/shadowfax-embench.XqQuML/s-mode/build/support
+cflags               : ['-c', '-O2', '-g', '-std=gnu17', '-ffunction-sections', '-fdata-sections', '-fno-common', '-march=rv64imafdc', '-mabi=lp64', '-mcmodel=medany', '-msmall-data-limit=0', '-I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench', '-I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support', '-I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator', '-I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic', '-I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32', '-DCPU_MHZ=10', '-DWARMUP_HEAT=1']
+ldflags              : ['-nostdlib', '-static', '-Wl,--gc-sections', '-Wl,--wrap=start_trigger', '-Wl,--wrap=stop_trigger', '-Wl,--defsym=EMBENCH_RAM_BASE=0x200000', '-Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000', '-T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld']
+cc                   : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh
+cc_define1_pattern   : -D{0}
+cc_define2_pattern   : -D{0}={1}
+cc_incdir_pattern    : -I{0}
+cc_input_pattern     : {0}
+cc_output_pattern    : -o {0}
+ld_input_pattern     : {0}
+ld_output_pattern    : -o {0}
+user_libs            : ['/tmp/shadowfax-embench.XqQuML/s-mode/start.o', '/tmp/shadowfax-embench.XqQuML/s-mode/runtime.o', '/tmp/shadowfax-embench.XqQuML/lib.o', '-lgcc']
+dummy_libs           : {}
+cpu_mhz              : 10
+warmup_heat          : 1
+timeout              : 60
+ld                   : /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh
+
+General log
+===========
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/support
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o beebsc.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support/beebsc.c
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/support
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o main.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support/main.c
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o chipsupport.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic/chipsupport.c
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o boardsupport.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator/boardsupport.c
+Compilation of support files successful
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/aha-mont64
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o mont64.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/aha-mont64/mont64.c
+Compilation of benchmark "aha-mont64" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/aha-mont64
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o aha-mont64 mont64.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: aha-mont64 has a LOAD segment with RWX permissions
+
+Linking of benchmark "aha-mont64" successful
+aha-mont64
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/crc32
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o crc_32.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/crc32/crc_32.c
+Compilation of benchmark "crc32" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/crc32
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o crc32 crc_32.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: crc32 has a LOAD segment with RWX permissions
+
+Linking of benchmark "crc32" successful
+crc32
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/cubic
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libcubic.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/cubic/libcubic.c
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/cubic
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o basicmath_small.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/cubic/basicmath_small.c
+Compilation of benchmark "cubic" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/cubic
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o cubic basicmath_small.o libcubic.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: cubic has a LOAD segment with RWX permissions
+
+Linking of benchmark "cubic" successful
+cubic
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/edn
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libedn.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/edn/libedn.c
+Compilation of benchmark "edn" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/edn
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o edn libedn.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: edn has a LOAD segment with RWX permissions
+
+Linking of benchmark "edn" successful
+edn
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/huffbench
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libhuffbench.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/huffbench/libhuffbench.c
+Compilation of benchmark "huffbench" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/huffbench
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o huffbench libhuffbench.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: huffbench has a LOAD segment with RWX permissions
+
+Linking of benchmark "huffbench" successful
+huffbench
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/matmult-int
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o matmult-int.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/matmult-int/matmult-int.c
+Compilation of benchmark "matmult-int" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/matmult-int
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o matmult-int matmult-int.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: matmult-int has a LOAD segment with RWX permissions
+
+Linking of benchmark "matmult-int" successful
+matmult-int
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/minver
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libminver.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/minver/libminver.c
+Compilation of benchmark "minver" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/minver
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o minver libminver.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: minver has a LOAD segment with RWX permissions
+
+Linking of benchmark "minver" successful
+minver
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/nbody
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o nbody.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/nbody/nbody.c
+Compilation of benchmark "nbody" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/nbody
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o nbody nbody.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: nbody has a LOAD segment with RWX permissions
+
+Linking of benchmark "nbody" successful
+nbody
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/nettle-aes
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o nettle-aes.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/nettle-aes/nettle-aes.c
+Compilation of benchmark "nettle-aes" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/nettle-aes
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o nettle-aes nettle-aes.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: nettle-aes has a LOAD segment with RWX permissions
+
+Linking of benchmark "nettle-aes" successful
+nettle-aes
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/nettle-sha256
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o nettle-sha256.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/nettle-sha256/nettle-sha256.c
+Compilation of benchmark "nettle-sha256" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/nettle-sha256
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o nettle-sha256 nettle-sha256.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: nettle-sha256 has a LOAD segment with RWX permissions
+
+Linking of benchmark "nettle-sha256" successful
+nettle-sha256
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/nsichneu
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libnsichneu.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/nsichneu/libnsichneu.c
+Compilation of benchmark "nsichneu" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/nsichneu
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o nsichneu libnsichneu.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: nsichneu has a LOAD segment with RWX permissions
+
+Linking of benchmark "nsichneu" successful
+nsichneu
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/picojpeg
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libpicojpeg.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/picojpeg/libpicojpeg.c
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/picojpeg
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o picojpeg_test.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/picojpeg/picojpeg_test.c
+Compilation of benchmark "picojpeg" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/picojpeg
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o picojpeg libpicojpeg.o picojpeg_test.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: picojpeg has a LOAD segment with RWX permissions
+
+Linking of benchmark "picojpeg" successful
+picojpeg
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/qrduino
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o qrencode.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/qrduino/qrencode.c
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/qrduino
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o qrtest.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/qrduino/qrtest.c
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/qrduino
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o qrframe.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/qrduino/qrframe.c
+Compilation of benchmark "qrduino" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/qrduino
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o qrduino qrencode.o qrframe.o qrtest.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: qrduino has a LOAD segment with RWX permissions
+
+Linking of benchmark "qrduino" successful
+qrduino
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/sglib-combined
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o combined.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/sglib-combined/combined.c
+Compilation of benchmark "sglib-combined" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/sglib-combined
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o sglib-combined combined.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: sglib-combined has a LOAD segment with RWX permissions
+
+Linking of benchmark "sglib-combined" successful
+sglib-combined
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/slre
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libslre.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/slre/libslre.c
+Compilation of benchmark "slre" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/slre
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o slre libslre.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: slre has a LOAD segment with RWX permissions
+
+Linking of benchmark "slre" successful
+slre
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/st
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libst.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/st/libst.c
+Compilation of benchmark "st" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/st
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o st libst.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: st has a LOAD segment with RWX permissions
+
+Linking of benchmark "st" successful
+st
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/statemate
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libstatemate.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/statemate/libstatemate.c
+Compilation of benchmark "statemate" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/statemate
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o statemate libstatemate.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: statemate has a LOAD segment with RWX permissions
+
+Linking of benchmark "statemate" successful
+statemate
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/ud
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libud.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/ud/libud.c
+Compilation of benchmark "ud" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/ud
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o ud libud.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: ud has a LOAD segment with RWX permissions
+
+Linking of benchmark "ud" successful
+ud
+Compiling in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/wikisort
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -c -O2 -g -std=gnu17 -ffunction-sections -fdata-sections -fno-common -march=rv64imafdc -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/support -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/boards/ri5cyverilator -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32/chips/generic -I/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/config/riscv32 -DCPU_MHZ=10 -DWARMUP_HEAT=1 -o libwikisort.o /home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench-iot/src/wikisort/libwikisort.c
+Compilation of benchmark "wikisort" successful
+Linking in directory /tmp/shadowfax-embench.XqQuML/s-mode/build/src/wikisort
+/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/cc.sh -nostdlib -static -Wl,--gc-sections -Wl,--wrap=start_trigger -Wl,--wrap=stop_trigger -Wl,--defsym=EMBENCH_RAM_BASE=0x200000 -Wl,--defsym=EMBENCH_RAM_SIZE=0x1000000 -T/home/giuseppe/dev/shadowfax-project/shadowfax/guests/bare-metal/embench/linker.ld -o wikisort libwikisort.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/chips/generic/chipsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/config/riscv32/boards/ri5cyverilator/boardsupport.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/main.o /tmp/shadowfax-embench.XqQuML/s-mode/build/support/beebsc.o /tmp/shadowfax-embench.XqQuML/s-mode/start.o /tmp/shadowfax-embench.XqQuML/s-mode/runtime.o /tmp/shadowfax-embench.XqQuML/lib.o -lgcc
+
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: wikisort has a LOAD segment with RWX permissions
+
+Linking of benchmark "wikisort" successful
+wikisort
+All benchmarks built successfully
