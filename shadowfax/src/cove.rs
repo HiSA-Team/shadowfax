@@ -159,7 +159,12 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // TEECALL
     if has_tsm {
         let domain_ctx = context_addr as *mut Context;
-        let src_id = state.boot_domain_id;
+        let src_id = unsafe {
+            let hart_id = riscv::register::mhartid::read();
+            let hart_index = opensbi::sbi_hartid_to_hartindex(hart_id as u32);
+            let domain = opensbi::sbi_hartindex_to_domain(hart_index);
+            (*domain).index as usize
+        };
         // check if the domain is trusted. If not just return an error to the caller
         if !state.domains[dst_id].is_trusted(src_id) {
             return unsafe { return_error(base_ctx, -1) };
