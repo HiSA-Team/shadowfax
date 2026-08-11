@@ -1,0 +1,14 @@
+[package]
+name = "libfdt-sys"
+version = "0.0.3"
+edition = "2021"
+links = "fdt"
+build = "build.rs"
+
+[lib]
+name = "libfdt_sys"
+path = "src/lib.rs"
+
+[features]
+static = []
+shared = []

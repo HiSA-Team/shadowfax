@@ -64,7 +64,7 @@ fn main() {
         println!("cargo::rerun-if-changed={}", &libopensbi_path.display());
     }
 
-    // Compile the device tree
+    // Compile the platform device tree. Runtime configuration is parsed from a1.
     {
         let dts_file = &platform_dir.join("device-tree.dts").canonicalize().unwrap();
         let dtb_file = &bin_dir.join("device-tree.dtb");

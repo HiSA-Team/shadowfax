@@ -10,7 +10,7 @@ DTB          ?= $(ROOT)/bin/device-tree.dtb
 GUEST_ELF    ?= $(ROOT)/guests/bare-metal/attestation.out
 GUEST_DTB    ?=
 
-LOAD_ADDR    ?= $(BOOT_DOMAIN_ADDRESS)
+LOAD_ADDR    ?=
 
 ELF           = $(BUILD_DIR)/standalone-tvm-launcher
 BIN           = $(ELF).bin
@@ -36,19 +36,45 @@ $(BUILD_DIR)/startup.o: startup.S $(EMBED_INPUTS) | $(BUILD_DIR)
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(ELF): $(OBJECTS) linker.ld
-	$(CC) $(LDFLAGS) -Tlinker.ld $(OBJECTS) -o $@
+$(ELF): $(OBJECTS) linker.ld $(DTB)
+	@set -- $$(fdtget -t x $(DTB) /chosen/shadowfax host-fdt); \
+	host_fdt_addr=$$((0x$$1 << 32 | 0x$$2)); \
+	set -- $$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem base); \
+	ram_base=$$((0x$$1 << 32 | 0x$$2)); \
+	ram_low_order=$$((0x$$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem order))); \
+	set -- $$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem-high base); \
+	guest_base=$$((0x$$1 << 32 | 0x$$2)); \
+	guest_order=$$((0x$$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem-high order))); \
+	ram_low_end=$$((ram_base + (1 << ram_low_order))); \
+	test $$ram_low_end -eq $$guest_base || { \
+		echo "standalone launcher requires contiguous umem and umem-high regions" >&2; \
+		exit 1; \
+	}; \
+	guest_size=$$((1 << guest_order)); \
+	ram_size=$$((guest_base + guest_size - ram_base)); \
+	$(CC) $(LDFLAGS) \
+		-Wl,--defsym=SHADOWFAX_RAM_BASE=$$ram_base \
+		-Wl,--defsym=SHADOWFAX_RAM_SIZE=$$ram_size \
+		-Wl,--defsym=SHADOWFAX_HOST_FDT_ADDR=$$host_fdt_addr \
+		-Wl,--defsym=SHADOWFAX_GUEST_BASE=$$guest_base \
+		-Wl,--defsym=SHADOWFAX_GUEST_SIZE=$$guest_size \
+		-Tlinker.ld $(OBJECTS) -o $@
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@
 
 # Run only with existing firmware inputs; this target never builds them.
 run: $(BIN) $(FIRMWARE) $(DICE_INPUT) $(DTB)
+	@set -- $$(fdtget -t x $(DTB) /chosen/shadowfax dice-input); \
+	dice_input_addr=$$((0x$$1 << 32 | 0x$$2)); \
+	set -- $$(fdtget -t x $(DTB) /chosen/opensbi-domains/untrusted-domain next-addr); \
+	boot_domain_address=$$((0x$$1 << 32 | 0x$$2)); \
+	load_addr='$(LOAD_ADDR)'; test -n "$$load_addr" || load_addr="$$boot_domain_address"; \
 	$(QEMU) $(QEMU_FLAGS) \
 		-bios $(FIRMWARE) \
-		-device loader,file=$(DTB),addr=$(FDT_ADDR),force-raw=on \
-		-device loader,file=$(DICE_INPUT),addr=$(DICE_INPUT_ADDR),force-raw=on \
-		-device loader,file=$(BIN),addr=$(LOAD_ADDR),force-raw=on
+		-dtb $(DTB) \
+		-device loader,file=$(DICE_INPUT),addr=$$dice_input_addr,force-raw=on \
+		-device loader,file=$(BIN),addr=$$load_addr,force-raw=on
 
 clean:
 	$(RM) -r $(BUILD_DIR)

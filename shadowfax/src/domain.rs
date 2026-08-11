@@ -1,9 +1,9 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use common::attestation::TsmAttestationContext;
 use ed25519_compact::Signature;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
-use crate::{constants::memory_layout::TRUSTED_DOMAIN_REGIONS, context::Context, error::TsmError};
+use crate::{context::Context, error::TsmError, platform::DomainConfig};
 
 mod tsm {
     #[link_section = ".rodata"]
@@ -27,23 +27,16 @@ pub struct MemoryRegion {
 
 #[derive(Clone)]
 pub struct Domain {
+    pub name: String,
     pub trust_map: usize,
     pub memory_regions: Vec<MemoryRegion>,
-
+    pub next_addr: usize,
     pub context_addr: usize,
     pub has_tsm: bool,
+    pub boot_hart: bool,
 }
 
 impl Domain {
-    pub fn empty() -> Self {
-        Self {
-            trust_map: 0,
-            memory_regions: Vec::new(),
-            context_addr: 0,
-            has_tsm: false,
-        }
-    }
-
     /// Loads the TSM elf, verify it's signature
     pub fn verify_and_load_tsm(
         bin: &[u8],
@@ -129,28 +122,20 @@ impl Domain {
 }
 
 pub fn create_confidential_domain(
+    config: DomainConfig,
     context_addr: usize,
     attestation_context: TsmAttestationContext,
 ) -> Domain {
-    // Assume that the specified domain is a trusted domain -> need to load the TSM in it
-    // TODO: parse domain from FDT
     let tsm_ctx = context_addr as *mut Context;
-    let mut domain = Domain::empty();
-
-    // Trust both root and untrusted domains
-    domain.trust_map = (1 << 2) | (1 << 0);
-
-    // Hardcoded memory regions for now
-    domain.memory_regions = TRUSTED_DOMAIN_REGIONS.to_vec();
-
-    // Save the context address and the state address
-    domain.context_addr = context_addr;
-
-    // Mark the domain as a TSM containing domain -> can accept TEECALL
-    domain.has_tsm = true;
-
-    // Configure PMP entry for TMem
-    let tmem_region = &domain.memory_regions[0];
+    let domain = Domain {
+        name: config.name,
+        trust_map: config.trust_map,
+        memory_regions: config.memory_regions,
+        next_addr: config.next_addr,
+        context_addr,
+        has_tsm: true,
+        boot_hart: config.boot_hart,
+    };
 
     // zero out the tsm supervisor state area
     // setup basic registers for first context switch
@@ -159,7 +144,7 @@ pub fn create_confidential_domain(
         core::ptr::write_bytes(tsm_ctx, 0, 1);
 
         // init values
-        (*tsm_ctx).mepc = tmem_region.base_addr;
+        (*tsm_ctx).mepc = domain.next_addr;
     }
 
     Domain::verify_and_load_tsm(

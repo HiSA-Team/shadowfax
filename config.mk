@@ -32,7 +32,3 @@ QEMU_FLAGS  = -M virt -m 512M -smp 1 -nographic
 ifeq ($(DEBUG),1)
 QEMU_FLAGS += -s -S -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait
 endif
-
-BOOT_DOMAIN_ADDRESS ?= 0x8A000000
-FDT_ADDR            ?= 0x8BF00000
-DICE_INPUT_ADDR     ?= 0x88000000

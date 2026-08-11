@@ -11,3 +11,6 @@ members = [
   "test/functional",
   "tsm",
 ]
+
+[patch.crates-io]
+libfdt-sys = { path = "shadowfax/libfdt-sys" }

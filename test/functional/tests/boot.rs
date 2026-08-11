@@ -5,12 +5,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const FDT_ADDR: &str = "0x8bf00000";
-
 fn spawn_qemu_and_stream(
     firmware: &Path,
     dtb: &Path,
     dice: &Path,
+    dice_input_addr: &str,
 ) -> (Child, Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>) {
     let mut child = Command::new("qemu-system-riscv64")
         .args(&[
@@ -23,15 +22,10 @@ fn spawn_qemu_and_stream(
             "1",
             "-bios",
             firmware.to_str().unwrap(),
+            "-dtb",
+            dtb.to_str().unwrap(),
             "-device",
-            format!("loader,file={},addr=0x88000000", dice.display()).as_str(),
-            "-device",
-            format!(
-                "loader,file={},addr={},force-raw=on",
-                dtb.display(),
-                FDT_ADDR
-            )
-            .as_str(),
+            format!("loader,file={},addr={}", dice.display(), dice_input_addr).as_str(),
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -74,6 +68,23 @@ fn firmware_boots_correctly() {
     let firmware = PathBuf::from("../../target/riscv64imac-unknown-none-elf/debug/shadowfax");
     let dtb = PathBuf::from("../../bin/device-tree.dtb");
     let dice = PathBuf::from("../../bin/shadowfax.dice.bin");
+    let output = Command::new("fdtget")
+        .args([
+            "-t",
+            "x",
+            dtb.to_str().unwrap(),
+            "/chosen/shadowfax",
+            "dice-input",
+        ])
+        .output()
+        .expect("failed to read dice-input from the platform DTB");
+    assert!(output.status.success());
+    let cells: Vec<_> = String::from_utf8(output.stdout)
+        .unwrap()
+        .split_whitespace()
+        .map(|cell| u64::from_str_radix(cell, 16).unwrap())
+        .collect();
+    let dice_input_addr = format!("0x{:x}", (cells[0] << 32) | cells[1]);
 
     assert!(
         firmware.exists(),
@@ -91,7 +102,8 @@ fn firmware_boots_correctly() {
         dice.display()
     );
 
-    let (mut child, out_lines, err_lines) = spawn_qemu_and_stream(&firmware, &dtb, &dice);
+    let (mut child, out_lines, err_lines) =
+        spawn_qemu_and_stream(&firmware, &dtb, &dice, &dice_input_addr);
 
     let timeout = Duration::from_secs(60);
     let deadline = Instant::now() + timeout;

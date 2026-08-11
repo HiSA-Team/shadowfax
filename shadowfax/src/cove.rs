@@ -159,8 +159,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // TEECALL
     if has_tsm {
         let domain_ctx = context_addr as *mut Context;
-        // TODO: get current domain
-        let src_id = 2;
+        let src_id = state.boot_domain_id;
         // check if the domain is trusted. If not just return an error to the caller
         if !state.domains[dst_id].is_trusted(src_id) {
             return unsafe { return_error(base_ctx, -1) };
@@ -272,7 +271,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     Err(_e) => panic!("memory stealing detected"),
                 }
                 // Remove the pages from the trusted domain
-                let domain = state.domains.get_mut(1).unwrap();
+                let domain = state.domains.get_mut(dst_id).unwrap();
                 domain.memory_regions =
                     compute_new_regions(&domain.memory_regions, base_addr, num_pages);
             }
@@ -290,9 +289,12 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // We don't need to store the calling context since we are implementing the
     // non reentrant TSM. We need a0 and a1 registers to deliver the result
 
-    // Restore the original TSM id
-    // TODO make this dynamic
-    let tsmid = 1;
+    // Identify the TSM which accepted this caller according to the DT trust map.
+    let tsmid = state
+        .domains
+        .iter()
+        .position(|domain| domain.has_tsm && domain.is_trusted(dst_id))
+        .expect("no trusted domain accepts the returning domain");
 
     unsafe {
         let domain_ctx = context_addr as *mut Context;

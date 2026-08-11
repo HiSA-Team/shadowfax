@@ -3,7 +3,6 @@
 # sets up reasonable defaults. Variable users may want to override:
 #
 # - RV_PREFIX:           specify with the path to the target riscv toolchain prefix
-# - BOOT_DOMAIN_ADDRESS: specify the address of the untrusted domain which should start the execution
 # - PLATFORM:            target platform, this is used for OpenSBI initialization
 # - GDB_COVE_SCRIPT:     path to the example to run
 # - QEMU_DEVICES:        additional QEMU device/loader arguments
@@ -57,8 +56,6 @@ export RV_PREFIX
 # Needed to avoid passing manually to Cargo
 export RUSTFLAGS
 
-# Needed by Python GDB process
-export BOOT_DOMAIN_ADDRESS
 export PLATFORM
 
 ifeq ($(HOST_LIBC), musl)
@@ -122,12 +119,16 @@ generate-keys:
 
 ## qemu-run: runs the script on qemu
 qemu-run: firmware
+	@set -- $$(fdtget -t x $(FDT_IMAGE) /chosen/shadowfax dice-input); \
+	dice_input_addr=$$((0x$$1 << 32 | 0x$$2)); \
 	$(QEMU) $(QEMU_FLAGS) -bios $(FW_ELF) \
-		-device loader,file=$(FDT_IMAGE),addr=$(FDT_ADDR),force-raw=on \
-		-device loader,file=$(DICE_INPUT),addr=$(DICE_INPUT_ADDR),force-raw=on $(QEMU_DEVICES)
+		-dtb $(FDT_IMAGE) \
+		-device loader,file=$(DICE_INPUT),addr=$$dice_input_addr,force-raw=on $(QEMU_DEVICES)
 
 ## debug: attach to a gdb server and load $(GDB_COVE_SCRIPT)
 debug:
+	@set -- $$(fdtget -t x $(FDT_IMAGE) /chosen/opensbi-domains/untrusted-domain next-addr); \
+	export BOOT_DOMAIN_ADDRESS=$$(printf '0x%x' $$((0x$$1 << 32 | 0x$$2))); \
 	$(GDB) -x $(GDB_SETTINGS_SCRIPT) -x $(GDB_COVE_SCRIPT) $(FW_ELF)
 
 # Ensure bin directory exists
@@ -152,7 +153,6 @@ build-info:
 	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
 	@echo "  QEMU_FLAGS:                $(QEMU_FLAGS)"
 	@echo "  OPENSBI_VERSION:           $(OPENSBI_VERSION)"
-	@echo "  BOOT_DOMAIN_ADDRESS:       $(BOOT_DOMAIN_ADDRESS)"
 ifeq ($(HOST_LIBC), musl)
 	@echo "  LLVM_CONFIG_PATH:          $(LLVM_CONFIG_PATH)"
 	@echo "  LIBCLANG_STATIC_PATH:      $(LIBCLANG_STATIC_PATH)"

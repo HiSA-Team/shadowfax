@@ -3,7 +3,7 @@ ENTRY(_start)
 
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x8A000000, LENGTH = 96M
+    RAM (rwx) : ORIGIN = SHADOWFAX_RAM_BASE, LENGTH = SHADOWFAX_RAM_SIZE
 }
 
 SECTIONS
@@ -45,9 +45,9 @@ SECTIONS
         __confidential_metadata_end = .;
     } > RAM
 
-    .confidential_guest (NOLOAD) : ALIGN(64M) {
+    .confidential_guest SHADOWFAX_GUEST_BASE (NOLOAD) : {
         __confidential_guest_start = .;
-        . += 64M;
+        . += SHADOWFAX_GUEST_SIZE;
         __confidential_guest_end = .;
     } > RAM
 
@@ -59,9 +59,13 @@ SECTIONS
     }
 }
 
-ASSERT(__confidential_metadata_end <= 0x8BF00000,
+ASSERT(__confidential_metadata_end <= SHADOWFAX_HOST_FDT_ADDR,
        "standalone launcher overlaps the device tree")
-ASSERT(__confidential_guest_start == 0x8C000000,
-       "guest confidential RAM must start at 0x8C000000")
+ASSERT(SHADOWFAX_HOST_FDT_ADDR < SHADOWFAX_GUEST_BASE,
+       "device tree must precede confidential guest RAM")
+ASSERT(__confidential_guest_start == SHADOWFAX_GUEST_BASE,
+       "guest confidential RAM starts at the wrong address")
+ASSERT(__confidential_guest_end == SHADOWFAX_GUEST_BASE + SHADOWFAX_GUEST_SIZE,
+       "guest confidential RAM has the wrong size")
 ASSERT(__confidential_guest_end <= ORIGIN(RAM) + LENGTH(RAM),
        "standalone launcher exceeds untrusted-domain RAM")
