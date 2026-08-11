@@ -14,11 +14,7 @@ SHADOWFAX_PYTHON=${SHADOWFAX_PYTHON:-"uv run --with cbor2"}
 PLATFORM_NAME=${PLATFORM:-generic}
 SSH_FORWARD_PORT=${SSH_FORWARD_PORT:-2222}
 
-LINUX_LOAD_ADDR=$((0x8a000000))
-SUPERVISOR_REGION_SIZE=$((96 * 1024 * 1024))
-SUPERVISOR_END_ADDR=$((LINUX_LOAD_ADDR + SUPERVISOR_REGION_SIZE))
 INITRAMFS_ALIGNMENT=$((0x200000))
-FDT_LOAD_ADDR=$((0x8bf00000))
 
 usage() {
     cat <<EOF
@@ -36,6 +32,24 @@ EOF
 die() {
     echo "run-linux.sh: $*" >&2
     exit 1
+}
+
+read_u64_property() {
+    local dtb=$1
+    local node=$2
+    local property=$3
+    local high low
+    read -r high low < <(fdtget -t x "$dtb" "$node" "$property")
+    printf '%u\n' "$(((16#$high << 32) | 16#$low))"
+}
+
+read_u32_property() {
+    local dtb=$1
+    local node=$2
+    local property=$3
+    local value
+    value=$(fdtget -t x "$dtb" "$node" "$property")
+    printf '%u\n' "$((16#$value))"
 }
 
 print_range() {
@@ -72,8 +86,8 @@ check_in_supervisor_region() {
     local start_addr=$2
     local end_addr=$3
 
-    if (( start_addr < LINUX_LOAD_ADDR || SUPERVISOR_END_ADDR < end_addr )); then
-        die "$label [0x$(printf '%x' "$start_addr"), 0x$(printf '%x' "$end_addr")) is outside supervisor RAM [0x$(printf '%x' "$LINUX_LOAD_ADDR"), 0x$(printf '%x' "$SUPERVISOR_END_ADDR"))"
+    if (( start_addr < SUPERVISOR_START_ADDR || SUPERVISOR_END_ADDR < end_addr )); then
+        die "$label [0x$(printf '%x' "$start_addr"), 0x$(printf '%x' "$end_addr")) is outside supervisor RAM [0x$(printf '%x' "$SUPERVISOR_START_ADDR"), 0x$(printf '%x' "$SUPERVISOR_END_ADDR"))"
     fi
 }
 
@@ -99,7 +113,7 @@ case "$INITRAMFS_IMAGE_PATH" in
     *) die "unsupported initramfs format; use .cpio or .cpio.gz" ;;
 esac
 
-for tool in dtc fdtput make od qemu-system-riscv64 stat tr; do
+for tool in dtc fdtget fdtput make od qemu-system-riscv64 stat tr; do
     command -v "$tool" >/dev/null || die "required command not found: $tool"
 done
 
@@ -112,49 +126,50 @@ LINUX_RUNTIME_SIZE=$(od -An -j 16 -N 8 -tu8 "$LINUX_IMAGE_PATH" | tr -d '[:space
 [[ "$LINUX_RUNTIME_SIZE" =~ ^[0-9]+$ ]] || die "cannot read the RISC-V Image runtime size"
 (( LINUX_RUNTIME_SIZE >= LINUX_IMAGE_SIZE )) || LINUX_RUNTIME_SIZE=$LINUX_IMAGE_SIZE
 
-LINUX_FILE_END_ADDR=$((LINUX_LOAD_ADDR + LINUX_IMAGE_SIZE))
-LINUX_RUNTIME_END_ADDR=$((LINUX_LOAD_ADDR + LINUX_RUNTIME_SIZE))
-INITRAMFS_LOAD_ADDR=$(((LINUX_RUNTIME_END_ADDR + INITRAMFS_ALIGNMENT - 1) & ~(INITRAMFS_ALIGNMENT - 1)))
-INITRAMFS_END_ADDR=$((INITRAMFS_LOAD_ADDR + INITRAMFS_IMAGE_SIZE))
-
-# Compile and patch a private DTB so its final size participates in validation.
+# Compile and patch a private platform DTB.
 PATCHED_DTB="$RUN_LINUX_TMP/device-tree.dtb"
 dtc -I dts -O dtb \
     -o "$PATCHED_DTB" \
     "$PROJECT_ROOT/shadowfax/platform/$PLATFORM_NAME/device-tree.dts"
+
+DOMAIN_PATH=/chosen/opensbi-domains
+LINUX_LOAD_ADDR=$(read_u64_property "$PATCHED_DTB" "$DOMAIN_PATH/untrusted-domain" next-addr)
+LOW_RAM_BASE=$(read_u64_property "$PATCHED_DTB" "$DOMAIN_PATH/umem" base)
+LOW_RAM_ORDER=$(read_u32_property "$PATCHED_DTB" "$DOMAIN_PATH/umem" order)
+HIGH_RAM_BASE=$(read_u64_property "$PATCHED_DTB" "$DOMAIN_PATH/umem-high" base)
+HIGH_RAM_ORDER=$(read_u32_property "$PATCHED_DTB" "$DOMAIN_PATH/umem-high" order)
+SUPERVISOR_START_ADDR=$LOW_RAM_BASE
+SUPERVISOR_END_ADDR=$((HIGH_RAM_BASE + (1 << HIGH_RAM_ORDER)))
+SUPERVISOR_REGION_SIZE=$((SUPERVISOR_END_ADDR - SUPERVISOR_START_ADDR))
+
+(( LOW_RAM_BASE + (1 << LOW_RAM_ORDER) == HIGH_RAM_BASE )) || \
+    die "boot-domain RAM regions are not contiguous"
+
+LINUX_FILE_END_ADDR=$((LINUX_LOAD_ADDR + LINUX_IMAGE_SIZE))
+LINUX_RUNTIME_END_ADDR=$((LINUX_LOAD_ADDR + LINUX_RUNTIME_SIZE))
+INITRAMFS_LOAD_ADDR=$(((LINUX_RUNTIME_END_ADDR + INITRAMFS_ALIGNMENT - 1) & ~(INITRAMFS_ALIGNMENT - 1)))
+INITRAMFS_END_ADDR=$((INITRAMFS_LOAD_ADDR + INITRAMFS_IMAGE_SIZE))
 
 fdtput -t x "$PATCHED_DTB" /chosen linux,initrd-start \
     0 "0x$(printf '%x' "$INITRAMFS_LOAD_ADDR")"
 fdtput -t x "$PATCHED_DTB" /chosen linux,initrd-end \
     0 "0x$(printf '%x' "$INITRAMFS_END_ADDR")"
 
-FDT_IMAGE_SIZE=$(stat -c %s "$PATCHED_DTB")
-FDT_END_ADDR=$((FDT_LOAD_ADDR + FDT_IMAGE_SIZE))
-
 print_range "Supervisor RAM" \
-    "$LINUX_LOAD_ADDR" "$SUPERVISOR_END_ADDR" "$SUPERVISOR_REGION_SIZE" \
-    "Domain2: 32 MiB + 64 MiB regions"
+    "$SUPERVISOR_START_ADDR" "$SUPERVISOR_END_ADDR" "$SUPERVISOR_REGION_SIZE" \
+    "boot domain from platform DTB"
 print_range "Linux Image" \
     "$LINUX_LOAD_ADDR" "$LINUX_FILE_END_ADDR" "$LINUX_IMAGE_SIZE" "$LINUX_IMAGE_PATH"
 print_range "Linux runtime" \
     "$LINUX_LOAD_ADDR" "$LINUX_RUNTIME_END_ADDR" "$LINUX_RUNTIME_SIZE" "Image header"
 print_range "Initramfs" \
     "$INITRAMFS_LOAD_ADDR" "$INITRAMFS_END_ADDR" "$INITRAMFS_IMAGE_SIZE" "$INITRAMFS_IMAGE_PATH"
-print_range "Device tree" \
-    "$FDT_LOAD_ADDR" "$FDT_END_ADDR" "$FDT_IMAGE_SIZE" "$PATCHED_DTB"
-
 check_no_overlap "Linux runtime" "$LINUX_LOAD_ADDR" "$LINUX_RUNTIME_END_ADDR" \
     "initramfs" "$INITRAMFS_LOAD_ADDR" "$INITRAMFS_END_ADDR"
-check_no_overlap "Linux runtime" "$LINUX_LOAD_ADDR" "$LINUX_RUNTIME_END_ADDR" \
-    "device tree" "$FDT_LOAD_ADDR" "$FDT_END_ADDR"
-check_no_overlap "initramfs" "$INITRAMFS_LOAD_ADDR" "$INITRAMFS_END_ADDR" \
-    "device tree" "$FDT_LOAD_ADDR" "$FDT_END_ADDR"
 
 check_in_supervisor_region "Linux runtime" "$LINUX_LOAD_ADDR" "$LINUX_RUNTIME_END_ADDR"
 check_in_supervisor_region "initramfs" "$INITRAMFS_LOAD_ADDR" "$INITRAMFS_END_ADDR"
-check_in_supervisor_region "device tree" "$FDT_LOAD_ADDR" "$FDT_END_ADDR"
 
-# Only build and start QEMU after the complete layout has passed validation.
 make -B -C "$PROJECT_ROOT" PYTHON="$SHADOWFAX_PYTHON" PLATFORM="$PLATFORM_NAME" firmware
 
 LINUX_QEMU_DEVICES="-device loader,file=$LINUX_IMAGE_PATH,addr=0x$(printf '%x' "$LINUX_LOAD_ADDR"),force-raw=on"

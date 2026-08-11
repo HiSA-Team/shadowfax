@@ -53,10 +53,10 @@ mod opensbi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-mod constants;
 mod context;
 mod domain;
 mod error;
+mod platform;
 mod state;
 mod trap;
 
@@ -146,10 +146,6 @@ extern "C" fn _start() -> ! {
         // Loop if s4 is less than s5
         blt s4, s5, 0b
 
-        // Ignore the previous boot stage's FDT and use the DTB loaded at our
-        // fixed supervisor-domain address.
-        li a1, {fdt_addr}
-
         // call fw_platform_init
         // save registers a0-a4
         add s0, a0, zero
@@ -180,7 +176,6 @@ extern "C" fn _start() -> ! {
         bss_start = sym _start_bss,
         bss_end = sym _end_bss,
         pointer_size = const size_of::<usize>(),
-        fdt_addr = const constants::FDT_ADDR,
     )
 }
 
@@ -258,6 +253,10 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         // set a temporary trap handler
         riscv::register::mtvec::write(Mtvec::from_bits(hang as usize));
     }
+
+    // The boot environment supplies the platform FDT in a1. Relocate it to
+    // the host-visible destination declared by the FDT before enabling PMP.
+    let fdt_addr = platform::relocate_fdt(fdt_addr).unwrap();
 
     dump_linker_symbols(fdt_addr);
 
@@ -484,62 +483,9 @@ fn dump_linker_symbols(fdt_addr: usize) {
     let fdt_size =
         u32::from_be(unsafe { ((fdt_addr + size_of::<u32>()) as *const u32).read_unaligned() });
 
-    print_raw!(
-        "{:<40} : {:#010x}\n",
-        "DICE Input Address",
-        constants::DICE_INPUT_ADDR
-    );
     print_raw!("{:<40} : {:#010x}\n", "FDT Address", fdt_addr);
     print_raw!("{:<40} : {:#010x}\n", "FDT Magic", fdt_magic);
     print_raw!("{:<40} : {} bytes\n", "FDT Size", fdt_size);
-
-    print_raw!(
-        "{:<40} : {:#010x}\n",
-        "Untrusted Supervisor Entry",
-        constants::memory_layout::UNTRUSTED_DOMAIN_REGIONS[0].base_addr
-    );
-
-    for (index, region) in constants::memory_layout::UNTRUSTED_DOMAIN_REGIONS
-        .iter()
-        .enumerate()
-    {
-        let size = 1usize << region.order;
-        let end = region.base_addr + size - 1;
-        let kind = if region.mmio { "MMIO" } else { "RAM" };
-
-        print_raw!(
-            "Untrusted Supervisor Region{:<13} : {:#010x}-{:#010x} {} P:{:#04x}\n",
-            index,
-            region.base_addr,
-            end,
-            kind,
-            region.permissions
-        );
-    }
-
-    print_raw!(
-        "{:<40} : {:#010x}\n",
-        "Trusted Supervisor Entry",
-        constants::memory_layout::TRUSTED_DOMAIN_REGIONS[0].base_addr
-    );
-
-    for (index, region) in constants::memory_layout::TRUSTED_DOMAIN_REGIONS
-        .iter()
-        .enumerate()
-    {
-        let size = 1usize << region.order;
-        let end = region.base_addr + size - 1;
-        let kind = if region.mmio { "MMIO" } else { "RAM" };
-
-        print_raw!(
-            "Trusted Supervisor Region{:<15} : {:#010x}-{:#010x} {} P:{:#04x}\n",
-            index,
-            region.base_addr,
-            end,
-            kind,
-            region.permissions
-        );
-    }
 
     let hart_id = mhartid::read();
     print_raw!("{:<40} : {}\n", "Boot HART ID", hart_id);
