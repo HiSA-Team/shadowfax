@@ -95,5 +95,5 @@ guests/linux/linux-tvm.dts
 
 See [`../guests/linux/README.md`](../guests/linux/README.md) for the complete build, DTB patching,
 and boot procedure. The current test entrypoint uses the lazy ELF loader, normalizes the kernel's ELF
-physical addresses into a 64 MiB guest-physical RAM region starting at `0x00200000`, and supplies the
+physical addresses into a 256 MiB guest-physical RAM region starting at `0x00200000`, and supplies the
 DTB address in the Linux boot argument register.

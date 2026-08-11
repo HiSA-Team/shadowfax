@@ -1,6 +1,6 @@
 [submodule "shadowfax/opensbi"]
 	path = shadowfax/opensbi
 	url = https://github.com/riscv-software-src/opensbi
-[submodule "guests/coremark"]
-	path = guests/bare-metal/coremark
-	url = https://github.com/eembc/coremark.git
+[submodule "guests/linux/rv8-bench"]
+	path = guests/linux/rv8-bench
+	url = https://github.com/larkmjc/rv8-bench.git

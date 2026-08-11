@@ -3,6 +3,9 @@ name = "tsm"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+standalone = []
+
 [dependencies]
 anyhow = { version = "1.0.98", default-features = false }
 common = { path = "../common/" }

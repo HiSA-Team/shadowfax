@@ -8,7 +8,7 @@
 
 	memory@200000 {
 		device_type = "memory";
-		reg = <0x00 0x200000 0x00 0x4000000>;
+		reg = <0x00 0x200000 0x00 0x10000000>;
 	};
 
 	cpus {
@@ -40,7 +40,7 @@
 	};
 
 	chosen {
-		bootargs = "earlycon=uart8250,mmio,0x05000000 console=ttyS0,115200";
+		bootargs = "earlycon=uart8250,mmio,0x18000000 console=ttyS0,115200 rv8.mode=tvm";
 		linux,initrd-start = <0x0 0x01000000>;
 		linux,initrd-end = <0x0 0x01124bbd>;
 	};
@@ -51,9 +51,9 @@
 		compatible = "simple-bus";
 		ranges;
 
-		uart0: serial@5000000 {
+		uart0: serial@18000000 {
 			compatible = "ns16550a";
-			reg = <0x0 0x05000000 0x0 0x100>;
+			reg = <0x0 0x18000000 0x0 0x100>;
 			clock-frequency = <3686400>;
 			current-speed = <115200>;
 			status = "okay";
