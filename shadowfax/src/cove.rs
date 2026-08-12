@@ -17,9 +17,11 @@ use core::mem::offset_of;
 
 use alloc::vec::Vec;
 use common::sbi::{
-    COVH_DEFAULT_PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_EXT_ID, SBI_COVH_GET_TSM_INFO,
-    SBI_COVH_RECLAIM_PAGES, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
+    COVH_DEFAULT_PAGE_SIZE, PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_EXT_ID,
+    SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS,
+    SBI_SUPD_EXT_ID,
 };
+use zeroize::Zeroize;
 
 use crate::{_tee_stack_top, context::Context, domain::MemoryRegion, opensbi, state::STATE};
 
@@ -153,12 +155,9 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         return unsafe { return_error(base_ctx, -1) };
     }
 
-    let has_tsm = state.domains[dst_id].has_tsm;
-    let context_addr = state.domains[dst_id].context_addr;
-
     // TEECALL
-    if has_tsm {
-        let domain_ctx = context_addr as *mut Context;
+    if state.domains[dst_id].has_tsm {
+        let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
         let src_id = unsafe {
             let hart_id = riscv::register::mhartid::read();
             let hart_index = opensbi::sbi_hartid_to_hartindex(hart_id as u32);
@@ -272,13 +271,23 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let base_addr = unsafe { (*domain_ctx).regs[10] };
                 let num_pages = unsafe { (*domain_ctx).regs[11] };
                 match state.reclaim(src_id, base_addr, num_pages) {
-                    Ok(_) => {}
+                    Ok(()) => {
+                        // Remove the pages from the trusted domain
+                        let domain = state.domains.get_mut(dst_id).unwrap();
+
+                        domain.memory_regions =
+                            compute_new_regions(&domain.memory_regions, base_addr, num_pages);
+                        let vec = unsafe {
+                            core::slice::from_raw_parts_mut(
+                                base_addr as *mut u8,
+                                num_pages * PAGE_SIZE,
+                            )
+                        };
+                        // zeroize the old memory pages to avoid reading TVM memory
+                        vec.zeroize();
+                    }
                     Err(_e) => panic!("memory stealing detected"),
                 }
-                // Remove the pages from the trusted domain
-                let domain = state.domains.get_mut(dst_id).unwrap();
-                domain.memory_regions =
-                    compute_new_regions(&domain.memory_regions, base_addr, num_pages);
             }
             _ => {}
         }
@@ -286,44 +295,43 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             let ret = opensbi::sbi_domain_change_active(dst_id as u32);
             assert!(ret == 0);
         }
-        program_pmp_from_regions(&state.domains[dst_id].memory_regions);
-        return context_addr;
+    } else {
+        // TEERET
+        // We don't need to store the calling context since we are implementing the
+        // non reentrant TSM. We need a0 and a1 registers to deliver the result
+
+        // Identify the TSM which accepted this caller according to the DT trust map.
+        let tsmid = state
+            .domains
+            .iter()
+            .position(|domain| domain.has_tsm && domain.is_trusted(dst_id))
+            .expect("no trusted domain accepts the returning domain");
+
+        unsafe {
+            let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
+            let eid = (*scratch_ctx).regs[16] & 0xFFFF;
+            (*domain_ctx).regs[10] = (*scratch_ctx).regs[10];
+            (*domain_ctx).regs[11] = (*scratch_ctx).regs[11];
+            (*domain_ctx).regs[16] = (tsmid << 26) | eid;
+            // increment mepc to avoid loop
+            (*domain_ctx).mepc += 4;
+        }
+
+        // Perform operations to cleanup specific to the functionality
+        match fid {
+            // Remove the last memory region
+            SBI_COVH_GET_TSM_INFO => {}
+            SBI_COVH_CONVERT_PAGES => {}
+            _ => {}
+        }
+        unsafe {
+            let ret = opensbi::sbi_domain_change_active(dst_id as u32);
+            assert!(ret == 0);
+        }
     }
 
-    // TEERET
-    // We don't need to store the calling context since we are implementing the
-    // non reentrant TSM. We need a0 and a1 registers to deliver the result
-
-    // Identify the TSM which accepted this caller according to the DT trust map.
-    let tsmid = state
-        .domains
-        .iter()
-        .position(|domain| domain.has_tsm && domain.is_trusted(dst_id))
-        .expect("no trusted domain accepts the returning domain");
-
-    unsafe {
-        let domain_ctx = context_addr as *mut Context;
-        let eid = (*scratch_ctx).regs[16] & 0xFFFF;
-        (*domain_ctx).regs[10] = (*scratch_ctx).regs[10];
-        (*domain_ctx).regs[11] = (*scratch_ctx).regs[11];
-        (*domain_ctx).regs[16] = (tsmid << 26) | eid;
-        // increment mepc to avoid loop
-        (*domain_ctx).mepc += 4;
-    }
-
-    // Perform operations to cleanup specific to the functionality
-    match fid {
-        // Remove the last memory region
-        SBI_COVH_GET_TSM_INFO => {}
-        SBI_COVH_CONVERT_PAGES => {}
-        _ => {}
-    }
-    unsafe {
-        let ret = opensbi::sbi_domain_change_active(dst_id as u32);
-        assert!(ret == 0);
-    }
     program_pmp_from_regions(&state.domains[dst_id].memory_regions);
-    return context_addr;
+    return state.domains[dst_id].context_addr;
 }
 
 #[unsafe(naked)]

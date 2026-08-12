@@ -30,3 +30,4 @@ libfdt-rs = { version = "0.0.3", default-features = false }
 linked_list_allocator = "0.10.5"
 riscv = "0.13.0"
 spin = { version = "0.10.0", features = ["spin_mutex"] }
+zeroize = { version = "1.9.0", default-features = false }
