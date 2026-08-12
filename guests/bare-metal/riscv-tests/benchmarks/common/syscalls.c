@@ -11,6 +11,7 @@
 #define SYS_write 64
 #define HTIF_DEV_CONSOLE 1
 #define HTIF_CONSOLE_CMD_PUTC 1
+#define SBI_EXT_SRST 0x53525354
 
 #undef strcmp
 
@@ -48,6 +49,11 @@ static inline struct sbiret sbi_ecall(unsigned long arg0, unsigned long arg1,
 #else
 volatile uint64_t tohost __attribute__ ((section (".tohost")));
 volatile uint64_t fromhost __attribute__ ((section (".tohost")));
+#define UART_THR ((volatile uint8_t *)0x10000000)
+#define UART_LSR ((volatile uint8_t *)0x10000005)
+#define UART_LSR_EMPTY 0x20
+#define UART_LSR_IDLE 0x40
+#define QEMU_TEST ((volatile uint32_t *)0x100000)
 #endif
 
 static uintptr_t syscall(uintptr_t which, uint64_t arg0, uint64_t arg1, uint64_t arg2)
@@ -61,20 +67,13 @@ static uintptr_t syscall(uintptr_t which, uint64_t arg0, uint64_t arg1, uint64_t
   }
   return -1;
 #else
-  volatile uint64_t magic_mem[8] __attribute__((aligned(64)));
-  magic_mem[0] = which;
-  magic_mem[1] = arg0;
-  magic_mem[2] = arg1;
-  magic_mem[3] = arg2;
-  __sync_synchronize();
-
-  tohost = (uintptr_t)magic_mem;
-  while (fromhost == 0)
-    ;
-  fromhost = 0;
-
-  __sync_synchronize();
-  return magic_mem[0];
+  if (which == SYS_write && arg0 == HTIF_DEV_CONSOLE) {
+    while ((*UART_LSR & UART_LSR_EMPTY) == 0)
+      ;
+    *UART_THR = *(const uint8_t *)arg1;
+    return 0;
+  }
+  return -1;
 #endif
 }
 
@@ -106,10 +105,15 @@ void setStats(int enable)
 void __attribute__((noreturn)) tohost_exit(uintptr_t code)
 {
 #ifdef SMODE
-  while (1); // Do not exit in S-mode
+  sbi_ecall(0, code ? 1 : 0, 0, 0, 0, 0, SBI_EXT_SRST, 0);
+  while (1)
+    ;
 #else
-  tohost = (code << 1) | 1;
-  while (1);
+  while ((*UART_LSR & UART_LSR_IDLE) == 0)
+    ;
+  *QEMU_TEST = code ? 0x3333 : 0x5555;
+  while (1)
+    ;
 #endif
 }
 
@@ -163,11 +167,12 @@ void _init(int cid, int nc)
 
   int ret = main(0, 0);
 
-  char buf[NUM_COUNTERS * 32] __attribute__((aligned(64)));
+  char buf[NUM_COUNTERS * 32 + 32] __attribute__((aligned(64)));
   char* pbuf = buf;
   for (int i = 0; i < NUM_COUNTERS; i++)
     if (counters[i])
       pbuf += sprintf(pbuf, "%s = %lu\n", counter_names[i], counters[i]);
+  pbuf += sprintf(pbuf, "status = %d\n", ret);
   if (pbuf != buf)
     printstr(buf);
 
