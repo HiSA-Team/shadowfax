@@ -1,0 +1,1 @@
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: /tmp/shadowfax-riscv-tests.OxYMpN/s-mode/rsort has a LOAD segment with RWX permissions

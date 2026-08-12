@@ -47,9 +47,13 @@ _start:
   li  x30,0
   li  x31,0
 
-  # enable FPU, vector, and accelerator if present
+  # enable floating-point state for the configured execution mode
   li t0, MSTATUS_FS | MSTATUS_XS | MSTATUS_VS
+#ifdef SMODE
+  csrs sstatus, t0
+#else
   csrs mstatus, t0
+#endif
 
   # make sure XLEN agrees with compilation choice
   li t0, 1
@@ -60,15 +64,21 @@ _start:
   bltz t0, 1f
 #endif
 2:
+#ifdef SMODE
+  j 2b
+#else
   li a0, 1
   sw a0, tohost, t0
   j 2b
+#endif
 1:
 
 #ifdef __riscv_flen
   # initialize FPU if we have one
   la t0, 1f
+#ifndef SMODE
   csrw mtvec, t0
+#endif
 
   fssr    x0
   fmv.s.x f0, x0
@@ -106,9 +116,11 @@ _start:
 1:
 #endif
 
-  # initialize trap vector
+  # initialize trap vector in native M-mode
+#ifndef SMODE
   la t0, trap_entry
   csrw mtvec, t0
+#endif
 
   # initialize global pointer
 .option push
@@ -121,7 +133,11 @@ _start:
   and tp, tp, -64
 
   # get core id
+#ifdef SMODE
+  li a0, 0
+#else
   csrr a0, mhartid
+#endif
   # for now, assume only 1 core
   li a1, 1
 1:bgeu a0, a1, 1b
@@ -136,6 +152,7 @@ _start:
 
   j _init
 
+#ifndef SMODE
   .align 2
 trap_entry:
   addi sp, sp, -272
@@ -216,3 +233,4 @@ trap_entry:
 
   addi sp, sp, 272
   mret
+#endif
