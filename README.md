@@ -31,7 +31,6 @@ the F and D extensions to its userspace.
 - `guests/linux/`: Linux TVM kernel, BusyBox, and device-tree source configurations.
 - `test/`: standalone launchers, functional tests, GDB scripts, and security scenarios.
 - `scripts/`: host setup, DICE tooling, and the Linux/QEMU launcher.
-- `docs/source/`: Sphinx reference documentation.
 - `bin/` and `target/`: generated firmware, signatures, payloads, and build artifacts.
 
 ## Architecture
