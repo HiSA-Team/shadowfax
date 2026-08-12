@@ -1,0 +1,212 @@
+
+OpenSBI v1.7
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name               : riscv-virtio,qemu
+Platform Features           : medeleg
+Platform HART Count         : 1
+Platform IPI Device         : aclint-mswi
+Platform Timer Device       : aclint-mtimer @ 10000000Hz
+Platform Console Device     : uart8250
+Platform HSM Device         : ---
+Platform PMU Device         : ---
+Platform Reboot Device      : syscon-reboot
+Platform Shutdown Device    : syscon-poweroff
+Platform Suspend Device     : ---
+Platform CPPC Device        : ---
+Firmware Base               : 0x80000000
+Firmware Size               : 317 KB
+Firmware RW Offset          : 0x40000
+Firmware RW Size            : 61 KB
+Firmware Heap Offset        : 0x46000
+Firmware Heap Size          : 37 KB (total), 2 KB (reserved), 11 KB (used), 23 KB (free)
+Firmware Scratch Size       : 4096 B (total), 1400 B (used), 2696 B (free)
+Runtime SBI Version         : 3.0
+Standard SBI Extensions     : time,rfnc,ipi,base,hsm,srst,pmu,dbcn,fwft,legacy,dbtr,sse
+Experimental SBI Extensions : none
+
+Domain0 Name                : root
+Domain0 Boot HART           : 0
+Domain0 HARTs               : 0*
+Domain0 Region00            : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region01            : 0x0000000010000000-0x0000000010000fff M: (I,R,W) S/U: (R,W)
+Domain0 Region02            : 0x0000000002000000-0x000000000200ffff M: (I,R,W) S/U: ()
+Domain0 Region03            : 0x0000000080040000-0x000000008004ffff M: (R,W) S/U: ()
+Domain0 Region04            : 0x0000000080000000-0x000000008003ffff M: (R,X) S/U: ()
+Domain0 Region05            : 0x000000000c400000-0x000000000c5fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region06            : 0x000000000c000000-0x000000000c3fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region07            : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address        : 0x0000000090000000
+Domain0 Next Arg1           : 0x00000000bfe00000
+Domain0 Next Mode           : S-mode
+Domain0 SysReset            : yes
+Domain0 SysSuspend          : yes
+
+Boot HART ID                : 0
+Boot HART Domain            : root
+Boot HART Priv Version      : v1.12
+Boot HART Base ISA          : rv64imafdch
+Boot HART ISA Extensions    : sstc,zicntr,zihpm,zicboz,zicbom,sdtrig,svadu
+Boot HART PMP Count         : 16
+Boot HART PMP Granularity   : 2 bits
+Boot HART PMP Address Bits  : 54
+Boot HART MHPM Info         : 16 (0x0007fff8)
+Boot HART Debug Triggers    : 2 triggers
+Boot HART MIDELEG           : 0x0000000000001666
+Boot HART MEDELEG           : 0x0000000000f4b509
+[OLORIN] Starting Mapping TVM from ELF
+ELF paddr 0x0 -> guest GPA 0x200000
+ELF paddr 0x1f6000 -> guest GPA 0x3f6000
+[OLORIN] initialized page fault state: 0x94101000 - 0xa4101000
+[OLORIN] Guest entrypoint: 0x200000
+[OLORIN] Guest dtb at : 0x101ff000
+[OLORIN] Bootstrap complete. Entering Guest...
+Linux version 7.1.0 (giuseppe@taurino) (riscv64-unknown-linux-gnu-gcc (g1b306039a) 15.1.0, GNU ld (GNU Binutils) 2.45) #8 PREEMPT Mon Aug 10 14:00:03 CEST 2026
+Machine model: riscv-virtio,qemu
+SBI specification v3.0 detected
+SBI implementation ID=0x1 Version=0x10007
+SBI TIME extension detected
+SBI IPI extension detected
+SBI RFENCE extension detected
+SBI SRST extension detected
+SBI DBCN extension detected
+SBI FWFT extension detected
+earlycon: uart8250 at MMIO 0x0000000018000000 (options '')
+printk: legacy bootconsole [uart8250] enabled
+efi: UEFI not found.
+OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+riscv: base ISA extensions cdfim
+riscv: ELF capabilities cdfim
+Ticket spinlock: enabled
+Zone ranges:
+  DMA32    [mem 0x0000000000200000-0x00000000101fffff]
+  Normal   empty
+Movable zone start for each node
+Early memory node ranges
+  node   0: [mem 0x0000000000200000-0x00000000101fffff]
+Initmem setup node 0 [mem 0x0000000000200000-0x00000000101fffff]
+On node 0, zone DMA32: 512 pages in unavailable ranges
+Kernel command line: earlycon=uart8250,mmio,0x18000000 console=ttyS0,115200 coremark.mode=linux-tvm
+printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+Dentry cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+Inode-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+Built 1 zonelists, mobility grouping on.  Total pages: 65536
+mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+SLUB: HWalign=64, Order=0-1, MinObjects=0, CPUs=1, Nodes=1
+NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+riscv-intc: 64 local interrupts mapped
+clocksource: riscv_clocksource: mask: 0xffffffffffffffff max_cycles: 0x24e6a1710, max_idle_ns: 440795202120 ns
+sched_clock: 64 bits at 10MHz, resolution 100ns, wraps every 4398046511100ns
+riscv-timer: Timer interrupt in S-mode is available via sstc extension
+Console: colour dummy device 80x25
+Calibrating delay loop (skipped), value calculated using timer frequency.. 20.00 BogoMIPS (lpj=40000)
+pid_max: default: 32768 minimum: 301
+Mount-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+Mountpoint-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+VFS: Finished mounting rootfs on nullfs
+ASID allocator using 16 bits (65536 entries)
+EFI services will not be available.
+Memory: 252032K/262144K available (1858K kernel code, 606K rwdata, 363K rodata, 230K init, 248K bss, 9444K reserved, 0K cma-reserved)
+devtmpfs: initialized
+clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+posixtimers hash table entries: 512 (order: 0, 4096 bytes, linear)
+futex hash table entries: 256 (8192 bytes on 1 NUMA nodes, total 8 KiB, linear).
+NET: Registered PF_NETLINK/PF_ROUTE protocol family
+clocksource: Switched to clocksource riscv_clocksource
+NET: Registered PF_INET protocol family
+IP idents hash table entries: 4096 (order: 3, 32768 bytes, linear)
+tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes, linear)
+Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+TCP established hash table entries: 2048 (order: 2, 16384 bytes, linear)
+TCP bind hash table entries: 2048 (order: 3, 32768 bytes, linear)
+TCP: Hash tables configured (established 2048 bind 2048)
+UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+workingset: timestamp_bits=62 (anon: 58) max_order=16 bucket_order=0 (anon: 0)
+Unpacking initramfs...
+Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+of_serial 18000000.serial: error -6: IRQ index 0 not found
+printk: legacy console [ttyS0] disabled
+18000000.serial: ttyS0 at MMIO 0x18000000 (irq = 0, base_baud = 230400) is a 16550A
+printk: legacy console [ttyS0] enabled
+printk: legacy console [ttyS0] enabled
+printk: legacy bootconsole [uart8250] disabled
+printk: legacy bootconsole [uart8250] disabled
+NET: Registered PF_INET6 protocol family
+Segment Routing with IPv6
+In-situ OAM (IOAM) with IPv6
+sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+cpu0: scalar unaligned word access speed is 6.83x byte access speed (fast)
+clk: Disabling unused clocks
+Freeing initrd memory: 1528K
+Freeing unused kernel image (initmem) memory: 228K
+Kernel memory protection not selected by kernel config.
+Run /init as init process
+COREMARK_RUN,linux-tvm,1,3
+2K performance run parameters for coremark.
+CoreMark Size    : 666
+Total ticks      : 31676
+Total time (secs): 31.676000
+Iterations/Sec   : 947.089279
+Iterations       : 30000
+Compiler version : GCC15.1.0
+Compiler flags   : -O2 -static -march=rv64imafdc -mabi=lp64 -DSEED_METHOD=SEED_VOLATILE  -lrt
+Memory location  : Please put data memory location here
+			(e.g. code in flash, data on heap etc)
+seedcrc          : 0xe9f5
+[0]crclist       : 0xe714
+[0]crcmatrix     : 0x1fd7
+[0]crcstate      : 0x8e3a
+[0]crcfinal      : 0x5275
+Correct operation validated. See README.md for run and reporting rules.
+CoreMark 1.0 : 947.089279 / GCC15.1.0 -O2 -static -march=rv64imafdc -mabi=lp64 -DSEED_METHOD=SEED_VOLATILE  -lrt / Heap
+
+COREMARK_RESULT,linux,linux-tvm,1,31676,1000,31.676000,30000,947.089279,0
+COREMARK_RUN,linux-tvm,2,3
+2K performance run parameters for coremark.
+CoreMark Size    : 666
+Total ticks      : 31494
+Total time (secs): 31.494000
+Iterations/Sec   : 952.562393
+Iterations       : 30000
+Compiler version : GCC15.1.0
+Compiler flags   : -O2 -static -march=rv64imafdc -mabi=lp64 -DSEED_METHOD=SEED_VOLATILE  -lrt
+Memory location  : Please put data memory location here
+			(e.g. code in flash, data on heap etc)
+seedcrc          : 0xe9f5
+[0]crclist       : 0xe714
+[0]crcmatrix     : 0x1fd7
+[0]crcstate      : 0x8e3a
+[0]crcfinal      : 0x5275
+Correct operation validated. See README.md for run and reporting rules.
+CoreMark 1.0 : 952.562393 / GCC15.1.0 -O2 -static -march=rv64imafdc -mabi=lp64 -DSEED_METHOD=SEED_VOLATILE  -lrt / Heap
+
+COREMARK_RESULT,linux,linux-tvm,2,31494,1000,31.494000,30000,952.562393,0
+COREMARK_RUN,linux-tvm,3,3
+random: crng init done
+2K performance run parameters for coremark.
+CoreMark Size    : 666
+Total ticks      : 31046
+Total time (secs): 31.046000
+Iterations/Sec   : 966.308059
+Iterations       : 30000
+Compiler version : GCC15.1.0
+Compiler flags   : -O2 -static -march=rv64imafdc -mabi=lp64 -DSEED_METHOD=SEED_VOLATILE  -lrt
+Memory location  : Please put data memory location here
+			(e.g. code in flash, data on heap etc)
+seedcrc          : 0xe9f5
+[0]crclist       : 0xe714
+[0]crcmatrix     : 0x1fd7
+[0]crcstate      : 0x8e3a
+[0]crcfinal      : 0x5275
+Correct operation validated. See README.md for run and reporting rules.
+CoreMark 1.0 : 966.308059 / GCC15.1.0 -O2 -static -march=rv64imafdc -mabi=lp64 -DSEED_METHOD=SEED_VOLATILE  -lrt / Heap
+
+COREMARK_RESULT,linux,linux-tvm,3,31046,1000,31.046000,30000,966.308059,0
+reboot: Power down

@@ -1,0 +1,16 @@
+2K performance run parameters for coremark.
+CoreMark Size    : 666
+Total ticks      : 555440871
+Total time (secs): 55.544087
+Iterations/Sec   : 540.111496
+Iterations       : 30000
+Compiler version : GCC15.1.0
+Compiler flags   : -O1 -march=rv64gc -mabi=lp64 -Wall -Wextra -mcmodel=medany -msmall-data-limit=0   -lm -lgcc
+Memory location  : STACK
+seedcrc          : 0xe9f5
+[0]crclist       : 0xe714
+[0]crcmatrix     : 0x1fd7
+[0]crcstate      : 0x8e3a
+[0]crcfinal      : 0x5275
+Correct operation validated. See README.md for run and reporting rules.
+CoreMark 1.0 : 540.111496 / GCC15.1.0 -O1 -march=rv64gc -mabi=lp64 -Wall -Wextra -mcmodel=medany -msmall-data-limit=0   -lm -lgcc / STACK

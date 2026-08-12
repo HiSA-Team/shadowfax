@@ -1,0 +1,25 @@
+core_main.c:109:1: warning: return type of 'main' is not 'int' [-Wmain]
+  109 | main(void)
+      | ^~~~
+riscv/ee_printf.c: In function 'eaddr':
+riscv/ee_printf.c:152:53: warning: unused parameter 'precision' [-Wunused-parameter]
+  152 | eaddr(char *str, unsigned char *addr, int size, int precision, int type)
+      |                                                 ~~~~^~~~~~~~~
+riscv/ee_printf.c: In function 'iaddr':
+riscv/ee_printf.c:181:53: warning: unused parameter 'precision' [-Wunused-parameter]
+  181 | iaddr(char *str, unsigned char *addr, int size, int precision, int type)
+      |                                                 ~~~~^~~~~~~~~
+riscv/ee_printf.c: In function 'ee_vsprintf':
+riscv/ee_printf.c:598:23: warning: this statement may fall through [-Wimplicit-fallthrough=]
+  598 |                 flags |= UPPERCASE;
+      |                       ^
+riscv/ee_printf.c:600:13: note: here
+  600 |             case 'a':
+      |             ^~~~
+riscv/ee_printf.c:621:23: warning: this statement may fall through [-Wimplicit-fallthrough=]
+  621 |                 flags |= UPPERCASE;
+      |                       ^
+riscv/ee_printf.c:623:13: note: here
+  623 |             case 'x':
+      |             ^~~~
+/home/giuseppe/dev/toolchains/riscv-gnu-2025.10.28/rv64/bin/../lib/gcc/riscv64-unknown-elf/15.1.0/../../../../riscv64-unknown-elf/bin/ld: warning: /tmp/shadowfax-coremark.s78WAm/s-mode/coremark.bin has a LOAD segment with RWX permissions
