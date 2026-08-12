@@ -1,9 +1,9 @@
-OUTPUT_ARCH("riscv")
+OUTPUT_ARCH(riscv)
 ENTRY(_start)
 
 PHDRS
 {
-  text PT_LOAD FLAGS(7);
+  text PT_LOAD FLAGS(SHF_ALLOC | SHF_EXECINSTR);
 }
 
 SECTIONS
