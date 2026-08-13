@@ -2,6 +2,8 @@
 #![no_main]
 
 pub mod sbi {
+    pub const SBI_SYSTEM_RESET_EXT_ID: usize = 0x53525354;
+
     pub const COVH_DEFAULT_PAGE_SIZE: usize = 4096;
     // CoVH constants
     pub const SBI_COVH_EXT_ID: usize = 0x434F5648;

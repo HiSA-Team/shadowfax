@@ -18,7 +18,7 @@ use core::mem::offset_of;
 use common::sbi::{
     COVH_DEFAULT_PAGE_SIZE, PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM,
     SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES,
-    SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
+    SBI_COVH_RUN_TVM_VCPU, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
 use heapless::Vec;
 use zeroize::Zeroize;
@@ -395,6 +395,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     state.cancel_borrow(ticket).unwrap();
                 }
             }
+            SBI_COVH_RUN_TVM_VCPU => {}
             _ => {}
         }
         unsafe {

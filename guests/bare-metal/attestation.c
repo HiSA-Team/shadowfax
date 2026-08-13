@@ -12,6 +12,7 @@ struct sbiret {
 
 #define SBI_EXT_DBCN                    0x4442434E
 #define SBI_EXT_DBCN_CONSOLE_WRITE      0x00
+#define SBI_EXT_SRST                    0x53525354
 #define SBI_EXT_COVG                    0x434F5647
 #define SBI_EXT_COVG_GET_EVIDENCE_FID   8
 
@@ -359,8 +360,6 @@ int main(void) {
         print_hex(CERT_BUFFER, evidence_len);
     }
 
-    print_str("[GUEST] Test Complete. Halting.\n");
-    while(1) {
-        asm volatile ("wfi");
-    }
+    print_str("[GUEST] Test Complete.\n");
+    sbi_call(SBI_EXT_SRST, 0, 0, 0, 0, 0, 0,0);
 }
