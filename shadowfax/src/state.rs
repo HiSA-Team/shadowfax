@@ -62,29 +62,104 @@
 
 use core::cell::OnceCell;
 
-use alloc::{string::String, vec, vec::Vec};
+use alloc::string::String;
 use common::attestation::{DiceLayer, PlatformAttestationContext};
+use heapless::Vec;
 use spin::mutex::Mutex;
 
 use crate::{
     context::Context,
     cove::TEE_SCRATCH_SIZE,
     domain::{create_confidential_domain, Domain, MemoryRegion},
-    platform::{DomainConfig, PlatformConfig},
+    platform::{DomainConfig, PlatformConfig, MAX_SUPERVISOR_DOMAINS},
     print_raw,
 };
+
+/* This comes from exploting CoVE FID (register a6) format. The idea is to store the ticket in
+ * bits[25.16]
+31          26 25              16 15                           0
++-------------+------------------+------------------------------+
+|    SDID     |     Reserved     |             FID              |
++-------------+------------------+------------------------------+
+ * */
+const TICKET_BITS: usize = 10;
+const TICKET_MASK: usize = (1 << TICKET_BITS) - 1; // 0x3ff
+const MAX_TICKET: usize = TICKET_MASK; // 1023
+const TICKET_SLOTS: usize = MAX_TICKET + 1; // includes unused slot 0
 
 #[link_section = ".rodata"]
 static DICE_PLATFORM_PUBLIC_KEY: &[u8; 32] = include_bytes!("../keys/root_of_trust_pub.bin");
 
 pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
 
+pub enum BorrowKind {
+    Convert {
+        base_address: usize,
+        num_pages: usize,
+        owner_id: usize,
+        tsm_id: usize,
+    },
+    Reclaim {
+        base_address: usize,
+        num_pages: usize,
+        owner_id: usize,
+        tsm_id: usize,
+    },
+}
+
+impl BorrowKind {
+    pub fn new_alloc(
+        owner_id: usize,
+        tsm_id: usize,
+        base_address: usize,
+        num_pages: usize,
+    ) -> Self {
+        Self::Convert {
+            base_address,
+            num_pages,
+            owner_id,
+            tsm_id,
+        }
+    }
+    pub fn new_reclaim(
+        owner_id: usize,
+        tsm_id: usize,
+        base_address: usize,
+        num_pages: usize,
+    ) -> Self {
+        Self::Reclaim {
+            base_address,
+            num_pages,
+            owner_id,
+            tsm_id,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Allocation {
+    pub base_address: usize,
+    pub num_pages: usize,
+    pub owner_id: usize,
+    pub tsm_id: usize,
+}
+
+#[derive(Clone, Copy)]
+struct BootstrapGrant {
+    owner_id: usize,
+    tsm_id: usize,
+}
+
 pub struct State {
-    pub domains: Vec<Domain>,
+    pub domains: Vec<Domain, MAX_SUPERVISOR_DOMAINS>,
     pub boot_domain_id: usize,
     pub attestation_context: PlatformAttestationContext,
-    // Ongoing trusted memory: base_address, num_pages, original owner
-    memory_allocations: Vec<(usize, usize, usize)>,
+    /* Pending trusted memory: base_address, num_pages, original owner */
+    pending_memory_allocations: [Option<BorrowKind>; TICKET_SLOTS],
+    next_ticket: usize,
+    /* Real memory allocations */
+    memory_allocations: Vec<Allocation, MAX_TICKET>,
+    bootstrap_grant: Option<BootstrapGrant>,
 }
 
 impl State {
@@ -93,31 +168,116 @@ impl State {
             domains: Vec::new(),
             boot_domain_id,
             attestation_context,
+            pending_memory_allocations: core::array::from_fn(|_| None),
+            next_ticket: 1,
             memory_allocations: Vec::new(),
+            bootstrap_grant: None,
         }
     }
 
-    pub fn reclaim(&mut self, d: usize, base_addr: usize, num_pages: usize) -> anyhow::Result<()> {
-        let idx = self
-            .memory_allocations
-            .iter()
-            .enumerate()
-            .position(|(_, (addr, npages, owner))| {
-                *addr == base_addr && *npages == num_pages && *owner == d
-            })
-            .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
+    pub fn start_bootstrap(&mut self, owner_id: usize, tsm_id: usize) -> anyhow::Result<()> {
+        if self.bootstrap_grant.is_some() {
+            return Err(anyhow::anyhow!("a bootstrap grant is already active"));
+        }
 
-        self.memory_allocations.remove(idx);
+        self.bootstrap_grant = Some(BootstrapGrant { owner_id, tsm_id });
         Ok(())
     }
 
-    pub fn track_borrow(
-        &mut self,
-        d: usize,
-        base_addr: usize,
-        num_pages: usize,
-    ) -> anyhow::Result<()> {
-        Ok(self.memory_allocations.push((base_addr, num_pages, d)))
+    pub fn finish_bootstrap(&mut self, owner_id: usize, tsm_id: usize) -> anyhow::Result<()> {
+        match self.bootstrap_grant {
+            Some(grant) if grant.owner_id == owner_id && grant.tsm_id == tsm_id => {
+                self.bootstrap_grant = None;
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!("invalid bootstrap grant completion")),
+        }
+    }
+
+    pub fn bootstrap_owner_for(&self, tsm_id: usize) -> Option<usize> {
+        match self.bootstrap_grant {
+            Some(grant) if grant.tsm_id == tsm_id => Some(grant.owner_id),
+            _ => None,
+        }
+    }
+
+    /* This does not start borrowing, but returns a ticket to the transaction */
+    pub fn request_borrow(&mut self, req: BorrowKind) -> anyhow::Result<usize> {
+        for _ in 0..MAX_TICKET {
+            self.next_ticket = if self.next_ticket == MAX_TICKET {
+                1
+            } else {
+                self.next_ticket + 1
+            };
+
+            if self.pending_memory_allocations[self.next_ticket].is_none() {
+                self.pending_memory_allocations[self.next_ticket] = Some(req);
+                return Ok(self.next_ticket);
+            }
+        }
+
+        Err(anyhow::anyhow!("no ticket available for memory allocation"))
+    }
+
+    /* Confirms the transaction */
+    pub fn take_borrow(&mut self, ticket: usize) -> anyhow::Result<Allocation> {
+        if !(1..=MAX_TICKET).contains(&ticket) {
+            return Err(anyhow::anyhow!("invalid ticket"));
+        }
+        let br = self.pending_memory_allocations[ticket].take();
+        if let Some(br) = br {
+            self.pending_memory_allocations[ticket] = None;
+            match br {
+                BorrowKind::Convert {
+                    base_address,
+                    num_pages,
+                    owner_id,
+                    tsm_id,
+                } => {
+                    let a = Allocation {
+                        base_address,
+                        num_pages,
+                        owner_id,
+                        tsm_id,
+                    };
+                    self.memory_allocations
+                        .push(a.clone())
+                        .map_err(|_| anyhow::anyhow!("cannot confirm borrow"))?;
+                    return Ok(a);
+                }
+                BorrowKind::Reclaim {
+                    base_address,
+                    num_pages,
+                    owner_id,
+                    tsm_id,
+                } => {
+                    let idx = self
+                        .memory_allocations
+                        .iter()
+                        .enumerate()
+                        .position(|(_, br)| {
+                            br.base_address == base_address
+                                && br.num_pages == num_pages
+                                && br.owner_id == owner_id
+                                && br.tsm_id == tsm_id
+                        })
+                        .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
+
+                    return Ok(self.memory_allocations.remove(idx));
+                }
+            }
+        }
+        Err(anyhow::anyhow!("invalid ticket"))
+    }
+
+    /* Delete the transaction */
+    pub fn cancel_borrow(&mut self, ticket: usize) -> anyhow::Result<()> {
+        if !(1..=MAX_TICKET).contains(&ticket) {
+            return Err(anyhow::anyhow!("invalid ticket"));
+        }
+        self.pending_memory_allocations[ticket] = None;
+
+        Ok(())
     }
 }
 
@@ -145,12 +305,13 @@ pub fn init(fdt_addr: usize) -> Result<usize, anyhow::Error> {
     // Create the root domain. The root domain id is always zero, so it has to be the first
     let root_domain = Domain {
         name: String::from("root"),
-        memory_regions: vec![MemoryRegion {
-            base_addr: 0,
+        memory_regions: Vec::from_slice(&[MemoryRegion {
+            base_address: 0,
             order: usize::BITS,
             mmio: false,
             permissions: 0x3f,
-        }],
+        }])
+        .map_err(|_| anyhow::anyhow!("cannot create root memory domain region"))?,
         // The root domain should not be involved in Confidential call
         trust_map: 0,
         next_addr: 0,
@@ -158,7 +319,10 @@ pub fn init(fdt_addr: usize) -> Result<usize, anyhow::Error> {
         has_tsm: false,
         boot_hart: false,
     };
-    state.domains.push(root_domain);
+    state
+        .domains
+        .push(root_domain)
+        .map_err(|_| anyhow::anyhow!("too many domains"))?;
 
     let base_context = tee_stack - (TEE_SCRATCH_SIZE + size_of::<Context>());
     for config in platform.domains {
@@ -169,7 +333,10 @@ pub fn init(fdt_addr: usize) -> Result<usize, anyhow::Error> {
         } else {
             domain_from_config(config, context_addr)
         };
-        state.domains.push(domain);
+        state
+            .domains
+            .push(domain)
+            .map_err(|_| anyhow::anyhow!("too many domains"))?;
     }
 
     dump_domains(state, platform.dice_input_addr, fdt_addr);
@@ -238,11 +405,11 @@ fn dump_domains(state: &State, dice_input_addr: usize, fdt_addr: usize) {
                 );
                 continue;
             }
-            let end = region.base_addr + (1usize << region.order);
+            let end = region.base_address + (1usize << region.order);
             print_raw!(
                 "    region {}: {:#x}-{:#x} {}, P:{:#04x}\n",
                 region_id,
-                region.base_addr,
+                region.base_address,
                 end,
                 if region.mmio { "MMIO" } else { "RAM" },
                 region.permissions
