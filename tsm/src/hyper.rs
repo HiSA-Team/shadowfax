@@ -1,44 +1,31 @@
-use alloc::vec::Vec;
 use common::{
     attestation::{DiceLayer, TvmAttestationContext},
-    sbi::{sbi_call, SbiRet, COVG_EXTENSION, PAGE_SIZE},
+    sbi::PAGE_SIZE,
 };
-use core::{alloc::Layout, num};
+use core::alloc::Layout;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
-use riscv::{
-    interrupt::Trap,
-    register::{
-        sepc,
-        sstatus::{self, FS, SPP},
-        stvec::{self, Stvec},
-    },
+use heapless::Vec;
+use riscv::register::{
+    sepc,
+    sstatus::{self, FS, SPP},
+    stvec::{self, Stvec},
 };
 use sha2::{Digest, Sha384};
-use spin::Mutex;
 use zeroize::Zeroize;
 
 use crate::{
-    h_extension::{
-        csrs::{hedeleg, henvcfg, hgatp, hideleg, hstatus, htval, vsatp},
-        instruction::hfence_gvma_all,
-        HvException,
+    constants::{
+        GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE, MAX_TVM_MEMORY_REGIONS, MIN_PAGE_DIRECTORY_SIZE,
+        PTE_A, PTE_D, PTE_R, PTE_SIZE, PTE_U, PTE_V, PTE_W, PTE_X, UART_GPA, UART_HPA,
     },
-    perf::{self, read_cycle},
+    h_extension::{
+        csrs::{hedeleg, henvcfg, hgatp, hideleg, hstatus, vsatp},
+        instruction::hfence_gvma_all,
+    },
     println,
-    sbi::{self, handle_covg},
+    trap::{hyper_trap, LazySegment, LazyState, VmTrapContext, LAZY_STATE},
     TsmState, GUEST_DTB, GUEST_ELF, GUEST_INITRD, MEASUREMENT,
 };
-
-const MIN_PAGE_DIRECTORY_SIZE: usize = 16 * 1024;
-
-const PTE_SIZE: usize = 8;
-const PTE_V: u64 = 1 << 0;
-const PTE_R: u64 = 1 << 1;
-const PTE_W: u64 = 1 << 2;
-const PTE_X: u64 = 1 << 3;
-const PTE_U: u64 = 1 << 4;
-const PTE_A: u64 = 1 << 6;
-const PTE_D: u64 = 1 << 7;
 
 // -----------------------------
 // Helper functions for SV39
@@ -73,7 +60,7 @@ fn ppn_to_pa(ppn: u64) -> usize {
 ///   root_pt + 0x2000 + VPN[1] * 0x1000: L0 tables
 ///
 /// Note: This assumes all mappings use VPN[2]=0 (addresses < 1GB)
-fn map_4k_leaf(root_pt: usize, page_table_size: usize, gpa: usize, pa: usize, perms: u64) {
+pub fn map_4k_leaf(root_pt: usize, page_table_size: usize, gpa: usize, pa: usize, perms: u64) {
     assert_eq!(gpa % PAGE_SIZE, 0, "GPA must be page-aligned");
     assert_eq!(pa % PAGE_SIZE, 0, "PA must be page-aligned");
 
@@ -253,10 +240,17 @@ pub struct MemoryRegion {
     pub num_pages: usize,
 }
 
+struct PhysicalMemory {
+    base_address: usize,
+    size: usize,
+    guest_id: Option<usize>,
+}
+
 pub struct HypervisorState {
     pub tvm: Option<Tvm>,
     /* Base page address, num pages, vmid */
-    confidential_memory: Vec<(usize, usize, Option<usize>)>,
+    confidential_memory: Vec<PhysicalMemory, MAX_TVM_MEMORY_REGIONS>,
+    run_return_fid: Option<usize>,
 }
 
 impl HypervisorState {
@@ -264,17 +258,22 @@ impl HypervisorState {
         Self {
             tvm: None,
             confidential_memory: Vec::new(),
+            run_return_fid: None,
         }
     }
     // TODO: Zero out the confidential pages
     pub fn add_confidential_pages(
         &mut self,
-        base_page_addr: usize,
+        base_address: usize,
         num_pages: usize,
     ) -> anyhow::Result<()> {
         self.confidential_memory
-            .push((base_page_addr, num_pages, None));
-        Ok(())
+            .push(PhysicalMemory {
+                base_address,
+                size: num_pages * PAGE_SIZE,
+                guest_id: None,
+            })
+            .map_err(|_| anyhow::anyhow!("too many memory regions"))
     }
 
     pub fn create_tvm(
@@ -307,18 +306,18 @@ impl HypervisorState {
             .ok_or_else(|| anyhow::anyhow!("state addr not in confidential memory"))?;
 
         {
-            let (_base, _npages, owner) = self
+            let PhysicalMemory { guest_id, .. } = self
                 .confidential_memory
                 .get_mut(pd_block_idx)
                 .ok_or_else(|| anyhow::anyhow!("invalid pd block idx"))?;
-            *owner = Some(1);
+            *guest_id = Some(1);
         }
         {
-            let (_base, _npages, owner) = self
+            let PhysicalMemory { guest_id, .. } = self
                 .confidential_memory
                 .get_mut(state_block_idx)
                 .ok_or_else(|| anyhow::anyhow!("invalid state block idx"))?;
-            *owner = Some(1);
+            *guest_id = Some(1);
         }
 
         unsafe {
@@ -353,15 +352,27 @@ impl HypervisorState {
         Ok(())
     }
 
-    pub fn destroy_tvm(&mut self) -> anyhow::Result<()> {
-        if let Some(tvm) = &self.tvm {
-            unsafe {
-                let ptr = tvm.page_table_addr as *mut u8;
-                core::ptr::write_bytes(ptr, 0, tvm.page_table_size);
+    pub fn destroy_tvm(&mut self, tvmid: usize) -> anyhow::Result<()> {
+        match &self.tvm {
+            Some(tvm) => {
+                if tvm.id != tvmid {
+                    return Err(anyhow::anyhow!("invalid tvm id"));
+                }
+                match tvm.state_enum {
+                    TvmState::TvmStopped => {
+                        unsafe {
+                            let ptr = tvm.page_table_addr as *mut u8;
+                            let v = core::slice::from_raw_parts_mut(ptr, tvm.page_table_size);
+                            v.zeroize();
+                        }
+                        self.tvm = None;
+                        Ok(())
+                    }
+                    _ => Err(anyhow::anyhow!("tvm is not stopped")),
+                }
             }
+            None => Err(anyhow::anyhow!("no tvm available")),
         }
-        self.tvm = None;
-        Ok(())
     }
 
     pub fn add_tvm_memory_region(
@@ -403,11 +414,12 @@ impl HypervisorState {
             }
         }
 
-        t.memory_regions.push(MemoryRegion {
-            guest_gpa_base: tvm_gpa_addr,
-            num_pages,
-        });
-        Ok(())
+        t.memory_regions
+            .push(MemoryRegion {
+                guest_gpa_base: tvm_gpa_addr,
+                num_pages,
+            })
+            .map_err(|_| anyhow::anyhow!("cannot push confidential memory regions"))
     }
 
     pub fn add_tvm_mmio_region(
@@ -519,13 +531,18 @@ impl HypervisorState {
         let dest_end = dest_addr + num_pages * PAGE_SIZE;
         let mut in_confidential = false;
 
-        for (base, npages, owner) in self.confidential_memory.iter() {
-            let conf_start = *base;
-            let conf_end = base + npages * PAGE_SIZE;
+        for PhysicalMemory {
+            base_address,
+            size,
+            guest_id,
+        } in self.confidential_memory.iter()
+        {
+            let conf_start = *base_address;
+            let conf_end = base_address + size;
 
             if dest_addr >= conf_start && dest_end <= conf_end {
                 // Check if already owned by this TVM
-                if owner.is_some() && *owner != Some(tvm_id) {
+                if guest_id.is_some() && *guest_id != Some(tvm_id) {
                     anyhow::bail!("confidential memory already owned by another TVM");
                 }
                 in_confidential = true;
@@ -584,13 +601,18 @@ impl HypervisorState {
         let mut in_confidential = false;
 
         let dest_end = base_page_address + num_pages * PAGE_SIZE;
-        for (base, npages, owner) in self.confidential_memory.iter() {
-            let conf_start = *base;
-            let conf_end = base + npages * PAGE_SIZE;
+        for PhysicalMemory {
+            base_address,
+            size,
+            guest_id,
+        } in self.confidential_memory.iter()
+        {
+            let conf_start = *base_address;
+            let conf_end = base_address + size;
 
             if base_page_address >= conf_start && dest_end <= conf_end {
                 // Check if already owned by this TVM
-                if owner.is_some() && *owner != Some(tvm_id) {
+                if guest_id.is_some() && *guest_id != Some(tvm_id) {
                     anyhow::bail!("confidential memory already owned by another TVM");
                 }
                 in_confidential = true;
@@ -653,7 +675,12 @@ impl HypervisorState {
         Ok(())
     }
 
-    pub fn run_tvm_vcpu(&self, tvm_id: usize, _vcpu_id: usize) -> anyhow::Result<!> {
+    pub fn prepare_tvm_vcpu(
+        &mut self,
+        tvm_id: usize,
+        _vcpu_id: usize,
+        return_fid: usize,
+    ) -> anyhow::Result<(usize, usize, usize)> {
         if self.tvm.is_none() {
             anyhow::bail!("no tvm present");
         }
@@ -676,7 +703,39 @@ impl HypervisorState {
         // Setup H-extension for guest execution
         self.setup_h_extension(&tvm)?;
 
-        unsafe { vcpu.enter(tvm.entry_sepc, tvm.entry_arg) }
+        self.run_return_fid = Some(return_fid);
+
+        Ok((
+            vcpu as *const TvmVcpuState as usize,
+            tvm.entry_sepc,
+            tvm.entry_arg,
+        ))
+    }
+
+    pub unsafe fn enter_prepared_tvm_vcpu(
+        vcpu_addr: usize,
+        entry_sepc: usize,
+        entry_arg: usize,
+    ) -> ! {
+        (*(vcpu_addr as *const TvmVcpuState)).enter(entry_sepc, entry_arg)
+    }
+
+    pub fn guest_shutdown(&mut self) -> anyhow::Result<usize> {
+        let tvm = self
+            .tvm
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no TVM present"))?;
+
+        match tvm.state_enum {
+            TvmState::TvmRunnable => {
+                tvm.state_enum = TvmState::TvmStopped;
+            }
+            _ => anyhow::bail!("TVM is not running"),
+        }
+
+        self.run_return_fid
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no active RUN_TVM_VCPU call"))
     }
 
     pub fn reclaim_pages(
@@ -685,22 +744,19 @@ impl HypervisorState {
         num_pages: usize,
     ) -> anyhow::Result<()> {
         if self.tvm.is_some() {
-            anyhow::bail!("TVM is still running");
+            return Err(anyhow::anyhow!("TVM is still running"));
         }
 
         let idx = self
             .confidential_memory
             .iter()
-            .position(|(addr, npages, _)| *addr == base_page_address && *npages == num_pages)
+            .position(|pm| {
+                pm.base_address == base_page_address && (pm.size / PAGE_SIZE) == num_pages
+            })
             .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
 
         let total_bytes = num_pages * PAGE_SIZE;
 
-        unsafe {
-            let slice = core::slice::from_raw_parts_mut(base_page_address as *mut u8, total_bytes);
-            // This ensures the compiler doesn't optimize away the zeroing operation
-            slice.zeroize();
-        }
         self.confidential_memory.remove(idx);
 
         Ok(())
@@ -737,9 +793,15 @@ impl HypervisorState {
     fn find_confidential_block_idx_covering(&self, addr: usize, size: usize) -> Option<usize> {
         let addr_end = addr + size;
 
-        for (idx, (base, npages, _)) in self.confidential_memory.iter().enumerate() {
-            let block_start = *base;
-            let block_end = base + npages * PAGE_SIZE;
+        for (
+            idx,
+            PhysicalMemory {
+                base_address, size, ..
+            },
+        ) in self.confidential_memory.iter().enumerate()
+        {
+            let block_start = *base_address;
+            let block_end = base_address + size;
 
             if addr >= block_start && addr_end <= block_end {
                 return Some(idx);
@@ -755,14 +817,14 @@ pub struct Tvm {
     page_table_addr: usize,
     page_table_size: usize,
     state_addr: usize,
-    memory_regions: Vec<MemoryRegion>,
+    memory_regions: Vec<MemoryRegion, MAX_TVM_MEMORY_REGIONS>,
     state_enum: TvmState,
     vcpu: Option<TvmVcpuState>,
     entry_sepc: usize,
     entry_arg: usize,
     tvm_identity_addr: usize,
     hasher: sha2::Sha384,
-    measure: Vec<u8>,
+    measure: alloc::vec::Vec<u8>,
     attestation_context: TvmAttestationContext,
 }
 
@@ -785,7 +847,7 @@ impl Tvm {
             entry_arg: 0,
             tvm_identity_addr: 0,
             hasher: Sha384::new(),
-            measure: Vec::new(),
+            measure: alloc::vec::Vec::new(),
             attestation_context,
         }
     }
@@ -811,7 +873,7 @@ impl Tvm {
         self.hasher.update(data);
     }
 
-    pub fn get_measure(&self) -> Vec<u8> {
+    pub fn get_measure(&self) -> alloc::vec::Vec<u8> {
         self.measure.clone()
     }
 }
@@ -820,16 +882,7 @@ impl Tvm {
 enum TvmState {
     TvmInitializing = 0,
     TvmRunnable = 1,
-}
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct VmTrapContext {
-    // Guest registers x0-x31 (Offset 0-248)
-    // We save x0 as a placeholder to keep indexing simple: regs[i] == x(i)
-    pub regs: [usize; 32],
-    // Hypervisor Stack Pointer (Offset 256)
-    pub hs_sp: usize,
+    TvmStopped = 2,
 }
 
 #[repr(C, align(4))]
@@ -916,335 +969,7 @@ impl TvmVcpuState {
     }
 }
 
-#[no_mangle]
-#[unsafe(naked)]
-pub unsafe extern "C" fn hyper_trap() -> ! {
-    core::arch::naked_asm!(
-        // --- 1. ENTRY: Save Guest Context ---
-        // Swap Guest t6 (x31) with sscratch (which holds pointer to VmTrapContext)
-        "csrrw t6, sscratch, t6",
-        // Save Guest GPRs x1-x30 into the context
-        "sd x1,   8(t6)",  // ra
-        "sd x2,  16(t6)",  // sp
-        "sd x3,  24(t6)",  // gp
-        "sd x4,  32(t6)",  // tp
-        "sd x5,  40(t6)",  // t0
-        "sd x6,  48(t6)",  // t1
-        "sd x7,  56(t6)",  // t2
-        "sd x8,  64(t6)",  // s0
-        "sd x9,  72(t6)",  // s1
-        "sd x10, 80(t6)",  // a0
-        "sd x11, 88(t6)",  // a1
-        "sd x12, 96(t6)",  // a2
-        "sd x13, 104(t6)", // a3
-        "sd x14, 112(t6)", // a4
-        "sd x15, 120(t6)", // a5
-        "sd x16, 128(t6)", // a6
-        "sd x17, 136(t6)", // a7
-        "sd x18, 144(t6)", // s2
-        "sd x19, 152(t6)", // s3
-        "sd x20, 160(t6)", // s4
-        "sd x21, 168(t6)", // s5
-        "sd x22, 176(t6)", // s6
-        "sd x23, 184(t6)", // s7
-        "sd x24, 192(t6)", // s8
-        "sd x25, 200(t6)", // s9
-        "sd x26, 208(t6)", // s10
-        "sd x27, 216(t6)", // s11
-        "sd x28, 224(t6)", // t3
-        "sd x29, 232(t6)", // t4
-        "sd x30, 240(t6)", // t5
-        // Save the Guest's original t6 (currently in sscratch)
-        "csrr t0, sscratch",
-        "sd t0, 248(t6)",
-        // --- 2. TRANSITION: Switch to HS-mode Stack ---
-        "ld sp, 256(t6)", // Load hs_sp
-        // Call the Rust handler.
-        // a0 must be the pointer to VmTrapContext.
-        "mv a0, t6",
-        "call hyper_trap_handler_rust",
-        // --- 3. EXIT: Restore Guest Context ---
-        // Rust returns the pointer to VmTrapContext in a0
-        "mv t6, a0",
-        // Restore GPRs x1-x30
-        "ld x1,   8(t6)",
-        "ld x2,  16(t6)",
-        "ld x3,  24(t6)",
-        "ld x4,  32(t6)",
-        "ld x5,  40(t6)",
-        "ld x6,  48(t6)",
-        "ld x7,  56(t6)",
-        "ld x8,  64(t6)",
-        "ld x9,  72(t6)",
-        "ld x10, 80(t6)",
-        "ld x11, 88(t6)",
-        "ld x12, 96(t6)",
-        "ld x13, 104(t6)",
-        "ld x14, 112(t6)",
-        "ld x15, 120(t6)",
-        "ld x16, 128(t6)",
-        "ld x17, 136(t6)",
-        "ld x18, 144(t6)",
-        "ld x19, 152(t6)",
-        "ld x20, 160(t6)",
-        "ld x21, 168(t6)",
-        "ld x22, 176(t6)",
-        "ld x23, 184(t6)",
-        "ld x24, 192(t6)",
-        "ld x25, 200(t6)",
-        "ld x26, 208(t6)",
-        "ld x27, 216(t6)",
-        "ld x28, 224(t6)",
-        "ld x29, 232(t6)",
-        "ld x30, 240(t6)",
-        "csrw sscratch, t6", // Put VmTrapContext pointer back into sscratch
-        "ld t6, 248(t6)",    // Finally restore Guest t6
-        "sret",
-    )
-}
-
-#[no_mangle]
-extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapContext {
-    let scause = riscv::register::scause::read();
-    let htval = htval::read();
-    let stval = riscv::register::stval::read();
-    let mut sepc = riscv::register::sepc::read();
-
-    match scause.cause() {
-        Trap::Interrupt(interrupt_number) => {
-            panic!("Interrupt {} not handled", interrupt_number);
-        }
-
-        Trap::Exception(exception_number) => match exception_number {
-            _ => match HvException::from(scause.code()) {
-                HvException::EcallFromVsMode => {
-                    let regs = unsafe { &mut (*ctx).regs };
-
-                    // 1.Check if the call was a CoVE-G
-                    let sbi_ret = if regs[17] == COVG_EXTENSION {
-                        handle_covg(
-                            regs[17],
-                            regs[16],
-                            &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
-                        )
-                    } else {
-                        sbi_call(
-                            regs[17],
-                            regs[16],
-                            &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
-                        )
-                    };
-                    // 3. Write return values back to Guest a0, a1
-                    regs[10] = sbi_ret.a0 as usize;
-                    regs[11] = sbi_ret.a1 as usize;
-
-                    // 3. Skip the 'ecall' instruction in the guest
-                    sepc += 4;
-
-                    unsafe {
-                        riscv::register::sepc::write(sepc);
-                    }
-                }
-
-                HvException::InstructionGuestPageFault
-                | HvException::LoadGuestPageFault
-                | HvException::StoreAmoGuestPageFault => {
-                    // 'stval' holds the Guest Physical Address that caused the fault
-                    handle_page_fault(htval.bits(), stval);
-                    // We do NOT increment sepc; we want to retry the instruction
-                }
-                _ => {
-                    panic!(
-                        "Unhandled Exception: {:?}, SEPC: {:#x}",
-                        scause.cause(),
-                        sepc
-                    );
-                }
-            },
-        },
-    }
-
-    ctx
-}
-
-// Track ELF segments to know what to copy where
-struct LazySegment {
-    gpa: usize,
-    memsz: usize,
-    filesz: usize,
-    offset: usize,
-}
-
-// Global state accessible by the trap handler
-struct LazyState {
-    // elf
-    segments: Vec<LazySegment>,
-    elf_data: &'static [u8],
-
-    // dtb
-    dtb_gpa: usize,
-    dtb_data: &'static [u8],
-
-    // initrd
-    initrd_gpa: usize,
-    initrd_data: &'static [u8],
-
-    // allocator
-    next_free_phys: usize, // Simple bump allocator for physical pages
-    phys_limit: usize,
-    page_table_size: usize,
-}
-
-// Mutex to safely access this from the trap handler
-static LAZY_STATE: Mutex<Option<LazyState>> = Mutex::new(None);
 static mut PAGE_FAULT_COUNTER: usize = 0;
-
-fn handle_page_fault(htval: usize, stval: usize) {
-    // let cycle_start = read_cycle();
-    let mut lock = LAZY_STATE.lock();
-    let gpa = (htval << 2) | (stval & 0x3);
-    let gpa_page = gpa & !(PAGE_SIZE - 1);
-    let gpa_page_end = gpa_page + PAGE_SIZE;
-
-    if gpa_page < GUEST_DRAM_GPA_START || gpa_page_end > GUEST_DRAM_GPA_END {
-        panic!("GPA 0x{:x} is outside guest RAM", gpa);
-    }
-
-    if let Some(lazy) = lock.as_mut() {
-        // Allocate a physical page (simple bump allocation)
-        if lazy.next_free_phys >= lazy.phys_limit {
-            panic!(
-                "OOM: run out of confidential memory for lazy loading (gpa=0x{:x})",
-                gpa,
-            );
-        }
-
-        let pa = lazy.next_free_phys;
-        lazy.next_free_phys += PAGE_SIZE;
-
-        // println!(
-        //     "[OLORIN] page_fault_handler: htval 0x{:x}; stval 0x{:x}; gpa 0x{:x}; gpa_page 0x{:x}; next_free_phys 0x{:x}; phys_limit 0x{:x}",
-        //     htval, stval, gpa, gpa_page, lazy.next_free_phys, lazy.phys_limit
-        // );
-
-        // Initialize page with zeros (important for BSS or partial pages)
-        unsafe { core::ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE) };
-
-        let dtb_start = lazy.dtb_gpa;
-        let dtb_end = lazy.dtb_gpa + lazy.dtb_data.len();
-        if gpa_page < dtb_end && dtb_start < gpa_page_end {
-            let copy_gpa_start = core::cmp::max(gpa_page, dtb_start);
-            let copy_gpa_end = core::cmp::min(gpa_page_end, dtb_end);
-
-            let source_offset = copy_gpa_start - dtb_start;
-            let destination_offset = copy_gpa_start - gpa_page;
-            let copy_length = copy_gpa_end - copy_gpa_start;
-
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    lazy.dtb_data.as_ptr().add(source_offset),
-                    (pa as *mut u8).add(destination_offset),
-                    copy_length,
-                );
-            }
-        }
-
-        let initrd_start = lazy.initrd_gpa;
-        let initrd_end = lazy.initrd_gpa + lazy.initrd_data.len();
-        if gpa_page < initrd_end && initrd_start < gpa_page_end {
-            let copy_gpa_start = core::cmp::max(gpa_page, initrd_start);
-            let copy_gpa_end = core::cmp::min(gpa_page_end, initrd_end);
-
-            let source_offset = copy_gpa_start - initrd_start;
-            let destination_offset = copy_gpa_start - gpa_page;
-            let copy_length = copy_gpa_end - copy_gpa_start;
-
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    lazy.initrd_data.as_ptr().add(source_offset),
-                    (pa as *mut u8).add(destination_offset),
-                    copy_length,
-                );
-            }
-        }
-
-        // unsafe {
-        //     PAGE_FAULT_COUNTER += 1;
-        //     let a = PAGE_FAULT_COUNTER;
-        //     println!("PAGE_FAULT_COUNTER = {}", a);
-        // }
-        // Fill with ELF data if the page overlaps a segment
-        for segment in &lazy.segments {
-            let seg_start = segment.gpa;
-            let seg_end = segment.gpa + segment.memsz;
-
-            if gpa_page_end <= seg_start || gpa_page >= seg_end {
-                continue;
-            }
-
-            let segment_file_start = segment.gpa;
-            let segment_file_end = segment.gpa + segment.filesz;
-
-            // Intersection of this page and the file-backed portion.
-            let copy_gpa_start = core::cmp::max(gpa_page, segment_file_start);
-            let copy_gpa_end = core::cmp::min(gpa_page_end, segment_file_end);
-
-            if copy_gpa_start >= copy_gpa_end {
-                // This is BSS: page was already zeroed.
-                continue;
-            }
-
-            let source_offset = segment.offset + (copy_gpa_start - segment.gpa);
-            let destination_offset = copy_gpa_start - gpa_page;
-            let copy_length = copy_gpa_end - copy_gpa_start;
-
-            // println!(
-            //     "[OLORIN] page_fault_handler: copy ELF offset 0x{:x}, len {} -> GPA 0x{:x}, HPA 0x{:x}",
-            //     source_offset,
-            //     copy_length,
-            //     copy_gpa_start,
-            //     pa + destination_offset,
-            // );
-
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    lazy.elf_data.as_ptr().add(source_offset),
-                    (pa as *mut u8).add(destination_offset),
-                    copy_length,
-                );
-            }
-        }
-
-        // Map the page into the Guest Page Table
-        // Retrieve the root PPN from HGATP to find the page table location
-        let hgatp_val = hgatp::read().bits();
-        let root_ppn = hgatp_val & 0xFF_FFFF_FFFF_F;
-        let root_pt = (root_ppn << 12) as usize;
-
-        // Map with full permissions for now (R/W/X/U)
-        map_4k_leaf(
-            root_pt,
-            lazy.page_table_size,
-            gpa_page,
-            pa,
-            PTE_R | PTE_W | PTE_X | PTE_U | PTE_A | PTE_D,
-        );
-
-        // 6. Flush TLB so the CPU sees the new mapping immediately
-        hfence_gvma_all();
-    } else {
-        panic!(
-            "Guest Page Fault occurred but Lazy Loading state is not initialized! (GPA={:x}; gpa_page={:x})",
-            gpa,gpa_page
-        );
-    }
-    // let cycle_end = read_cycle();
-    // println!("pfaultcycle = {}", cycle_end - cycle_start);
-}
-
-const GUEST_DRAM_SIZE: usize = 256 * 1024 * 1024;
-const GUEST_DRAM_GPA_START: usize = 0x20_0000;
-const GUEST_DRAM_GPA_END: usize = 0x20_0000 + GUEST_DRAM_SIZE;
 
 pub fn bootstrap_load_elf_lazy(
     state: &mut TsmState,
@@ -1271,7 +996,7 @@ pub fn bootstrap_load_elf_lazy(
             })
             .ok_or_else(|| anyhow::anyhow!("ELF has no PT_LOAD segments"))? as usize;
 
-    let mut segments = Vec::new();
+    let mut segments = alloc::vec::Vec::new();
     if let Some(hdrs) = elf.segments() {
         for ph in hdrs.iter().filter(|ph| ph.p_type == PT_LOAD) {
             let elf_paddr = ph.p_paddr as usize;
@@ -1284,12 +1009,12 @@ pub fn bootstrap_load_elf_lazy(
                 .checked_add(relative)
                 .ok_or_else(|| anyhow::anyhow!("GPA overflow"))?;
 
-            segments.push(LazySegment {
+            segments.push(LazySegment::new(
                 gpa,
-                memsz: ph.p_memsz as usize,
-                filesz: ph.p_filesz as usize,
-                offset: ph.p_offset as usize,
-            });
+                ph.p_memsz as usize,
+                ph.p_filesz as usize,
+                ph.p_offset as usize,
+            ));
 
             println!("ELF paddr 0x{:x} -> guest GPA 0x{:x}", elf_paddr, gpa);
         }
@@ -1301,19 +1026,17 @@ pub fn bootstrap_load_elf_lazy(
 
     {
         let mut lock = LAZY_STATE.lock();
-        *lock = Some(LazyState {
+        *lock = Some(LazyState::new(
             segments,
-            elf_data: GUEST_ELF.as_slice(),
-
-            dtb_gpa: dtb_addr,
-            dtb_data: GUEST_DTB.as_slice(),
-
-            initrd_gpa: 0x01000000,
-            initrd_data: GUEST_INITRD.as_slice(),
-            next_free_phys: conf_pool_base,
-            phys_limit: conf_pool_base + GUEST_DRAM_SIZE,
-            page_table_size: state_addr - pt_addr,
-        });
+            GUEST_ELF.as_slice(),
+            dtb_addr,
+            GUEST_DTB.as_slice(),
+            0x01000000,
+            GUEST_INITRD.as_slice(),
+            conf_pool_base,
+            conf_pool_base + GUEST_DRAM_SIZE,
+            state_addr - pt_addr,
+        ));
         println!(
             "[OLORIN] initialized page fault state: 0x{:x} - 0x{:x}",
             conf_pool_base,
@@ -1330,9 +1053,6 @@ pub fn bootstrap_load_elf_lazy(
     state
         .hypervisor
         .add_tvm_memory_region(tvm_id, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
-
-    const UART_GPA: usize = 0x1800_0000;
-    const UART_HPA: usize = 0x1000_0000;
 
     state
         .hypervisor

@@ -15,15 +15,22 @@
 
 use core::mem::offset_of;
 
-use alloc::vec::Vec;
 use common::sbi::{
-    COVH_DEFAULT_PAGE_SIZE, PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_EXT_ID,
-    SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS,
-    SBI_SUPD_EXT_ID,
+    COVH_DEFAULT_PAGE_SIZE, PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM,
+    SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES,
+    SBI_COVH_RUN_TVM_VCPU, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
+use heapless::Vec;
 use zeroize::Zeroize;
 
-use crate::{_tee_stack_top, context::Context, domain::MemoryRegion, opensbi, state::STATE};
+use crate::{
+    _tee_stack_top,
+    context::Context,
+    domain::MemoryRegion,
+    opensbi,
+    platform::MAX_MEMORY_REGIONS,
+    state::{Allocation, BorrowKind, State, STATE},
+};
 
 macro_rules! cove_unpack_fid {
     ($fid:expr) => {
@@ -143,6 +150,12 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // unlock the state
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
+    let src_id = unsafe {
+        let hart_id = riscv::register::mhartid::read();
+        let hart_index = opensbi::sbi_hartid_to_hartindex(hart_id as u32);
+        let domain = opensbi::sbi_hartindex_to_domain(hart_index);
+        (*domain).index as usize
+    };
 
     let (dst_id, fid) = cove_unpack_fid!(fid);
 
@@ -158,12 +171,6 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // TEECALL
     if state.domains[dst_id].has_tsm {
         let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
-        let src_id = unsafe {
-            let hart_id = riscv::register::mhartid::read();
-            let hart_index = opensbi::sbi_hartid_to_hartindex(hart_id as u32);
-            let domain = opensbi::sbi_hartindex_to_domain(hart_index);
-            (*domain).index as usize
-        };
         // check if the domain is trusted. If not just return an error to the caller
         if !state.domains[dst_id].is_trusted(src_id) {
             return unsafe { return_error(base_ctx, -1) };
@@ -195,15 +202,18 @@ extern "C" fn covh_handler(fid: usize) -> usize {
 
         // Perform operations to allow the specific functionality
         match fid {
+            SBI_COVH_CREATE_TVM => {
+                state.start_bootstrap(src_id, dst_id).unwrap();
+            }
             // For sbi_covh_get_domain_info we need to give the TSM access to the memory space
             // where he will write the domain_info struct (a0) for the necessary size (a1).
             SBI_COVH_GET_TSM_INFO => {
-                let base_addr = unsafe { (*domain_ctx).regs[10] };
+                let base_address = unsafe { (*domain_ctx).regs[10] };
                 let size = unsafe { (*domain_ctx).regs[11] };
 
                 // Base address must be page aligned, we cannot exceed number of available pmp
                 // registers
-                assert!(base_addr % COVH_DEFAULT_PAGE_SIZE == 0);
+                assert!(base_address % COVH_DEFAULT_PAGE_SIZE == 0);
 
                 let order = if (size & (size - 1)) == 0 {
                     size.trailing_zeros()
@@ -217,76 +227,57 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                  */
                 {
                     let domain = &mut state.domains[dst_id];
-                    assert!(domain.memory_regions.len() < 8);
 
-                    domain.memory_regions.push(MemoryRegion {
-                        base_addr,
-                        order,
-                        mmio: false,
-                        permissions: 0x3f,
-                    });
+                    domain
+                        .memory_regions
+                        .push(MemoryRegion {
+                            base_address,
+                            order,
+                            mmio: false,
+                            permissions: 0x3f,
+                        })
+                        .unwrap();
                 }
             }
             SBI_COVH_CONVERT_PAGES => {
-                let base_addr = unsafe { (*domain_ctx).regs[10] };
+                let base_address = unsafe { (*domain_ctx).regs[10] };
                 let num_pages = unsafe { (*domain_ctx).regs[11] };
 
                 // Base address must be page aligned, we cannot exceed number of available pmp
                 // registers
-                assert!(base_addr % COVH_DEFAULT_PAGE_SIZE == 0);
+                assert!(base_address % COVH_DEFAULT_PAGE_SIZE == 0);
 
-                let order = (num_pages * COVH_DEFAULT_PAGE_SIZE).trailing_zeros();
+                let ticket = state
+                    .request_borrow(BorrowKind::new_alloc(
+                        src_id,
+                        dst_id,
+                        base_address,
+                        num_pages,
+                    ))
+                    .unwrap();
 
-                /*
-                 * First mutate the domain.
-                 */
-                {
-                    let domain = &mut state.domains[dst_id];
-
-                    assert!(domain.memory_regions.len() < 8);
-
-                    domain.memory_regions.push(MemoryRegion {
-                        base_addr,
-                        order,
-                        mmio: false,
-                        permissions: 0x3f,
-                    });
-                }
-
-                state.track_borrow(src_id, base_addr, num_pages).unwrap();
-
-                /*
-                 * Borrow the domain again afterward.
-                 */
-                {
-                    let domain = &mut state.domains[dst_id];
-                    assert!(domain.memory_regions.len() < 8);
-
-                    domain.memory_regions =
-                        compute_new_regions(&domain.memory_regions, base_addr, num_pages);
+                /* Store the ticket in a6 register */
+                unsafe {
+                    (*domain_ctx).regs[16] |= (ticket & 0x3FF) << 16;
                 }
             }
 
             SBI_COVH_RECLAIM_PAGES => {
-                let base_addr = unsafe { (*domain_ctx).regs[10] };
+                let base_address = unsafe { (*domain_ctx).regs[10] };
                 let num_pages = unsafe { (*domain_ctx).regs[11] };
-                match state.reclaim(src_id, base_addr, num_pages) {
-                    Ok(()) => {
-                        // Remove the pages from the trusted domain
-                        let domain = state.domains.get_mut(dst_id).unwrap();
 
-                        domain.memory_regions =
-                            compute_new_regions(&domain.memory_regions, base_addr, num_pages);
-                        let vec = unsafe {
-                            core::slice::from_raw_parts_mut(
-                                base_addr as *mut u8,
-                                num_pages * PAGE_SIZE,
-                            )
-                        };
-                        // zeroize the old memory pages to avoid reading TVM memory
-                        vec.zeroize();
-                    }
-                    Err(_e) => panic!("memory stealing detected"),
+                let ticket = state
+                    .request_borrow(BorrowKind::new_reclaim(
+                        src_id,
+                        dst_id,
+                        base_address,
+                        num_pages,
+                    ))
+                    .unwrap();
+
+                /* Store the ticket in a6 register */
+                unsafe {
+                    (*domain_ctx).regs[16] |= (ticket & 0x3FF) << 16;
                 }
             }
             _ => {}
@@ -299,29 +290,112 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         // TEERET
         // We don't need to store the calling context since we are implementing the
         // non reentrant TSM. We need a0 and a1 registers to deliver the result
+        //
+        // dst_id is the untrusted domain
 
         // Identify the TSM which accepted this caller according to the DT trust map.
-        let tsmid = state
-            .domains
-            .iter()
-            .position(|domain| domain.has_tsm && domain.is_trusted(dst_id))
-            .expect("no trusted domain accepts the returning domain");
 
-        unsafe {
+        let success = unsafe {
             let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
             let eid = (*scratch_ctx).regs[16] & 0xFFFF;
             (*domain_ctx).regs[10] = (*scratch_ctx).regs[10];
             (*domain_ctx).regs[11] = (*scratch_ctx).regs[11];
-            (*domain_ctx).regs[16] = (tsmid << 26) | eid;
-            // increment mepc to avoid loop
+            (*domain_ctx).regs[16] = (src_id << 26) | eid;
+            /* increment mepc to avoid loop */
             (*domain_ctx).mepc += 4;
+
+            /* Based on a0 register we know if the TEECALL was successful */
+            (*domain_ctx).regs[10] as isize == 0
+        };
+
+        if fid == SBI_COVH_FINALIZE_TVM && success {
+            state.finish_bootstrap(dst_id, src_id).unwrap();
         }
 
-        // Perform operations to cleanup specific to the functionality
         match fid {
-            // Remove the last memory region
-            SBI_COVH_GET_TSM_INFO => {}
-            SBI_COVH_CONVERT_PAGES => {}
+            SBI_COVH_CONVERT_PAGES => {
+                /* Confirm the borrow */
+                let a6 = unsafe { (*scratch_ctx).regs[16] };
+                let ticket = (a6 & (0x3FF << 16)) >> 16;
+                if success {
+                    let Allocation {
+                        base_address,
+                        num_pages,
+                        owner_id,
+                        tsm_id,
+                    } = state.take_borrow(ticket).unwrap();
+                    let order = (num_pages * COVH_DEFAULT_PAGE_SIZE).trailing_zeros();
+                    /* Remove the region from the dst domain (aka the untrusted) */
+                    let domain = &mut state.domains[dst_id];
+
+                    domain.memory_regions = compute_new_regions(
+                        &domain.memory_regions,
+                        base_address,
+                        base_address + num_pages * PAGE_SIZE,
+                    )
+                    .unwrap();
+
+                    /* Add the region to the src domain (aka the tsm)*/
+                    let tsm = &mut state.domains[src_id];
+                    tsm.memory_regions
+                        .push(MemoryRegion {
+                            base_address,
+                            order,
+                            mmio: false,
+                            permissions: 0x3f,
+                        })
+                        .unwrap();
+                } else {
+                    state.cancel_borrow(ticket).unwrap();
+                }
+            }
+            SBI_COVH_RECLAIM_PAGES => {
+                /* Confirm the borrow */
+                let a6 = unsafe { (*scratch_ctx).regs[16] };
+                let ticket = (a6 & (0x3FF << 16)) >> 16;
+                if success {
+                    let Allocation {
+                        base_address,
+                        num_pages,
+                        owner_id,
+                        tsm_id,
+                    } = state.take_borrow(ticket).unwrap();
+                    let order = (num_pages * COVH_DEFAULT_PAGE_SIZE).trailing_zeros();
+                    /* Remove the region from the src domain (aka the tsm ) */
+                    let tsm = &mut state.domains[src_id];
+
+                    tsm.memory_regions = compute_new_regions(
+                        &tsm.memory_regions,
+                        base_address,
+                        base_address + num_pages * PAGE_SIZE,
+                    )
+                    .unwrap();
+
+                    /* Add the region to the dst (aka the untrusted domain)*/
+                    let tsm = &mut state.domains[dst_id];
+                    tsm.memory_regions
+                        .push(MemoryRegion {
+                            base_address,
+                            order,
+                            mmio: false,
+                            permissions: 0x3f,
+                        })
+                        .unwrap();
+                    /* Zero out the memory block */
+                    {
+                        let vec = unsafe {
+                            core::slice::from_raw_parts_mut(
+                                base_address as *mut u8,
+                                num_pages * PAGE_SIZE,
+                            )
+                        };
+                        vec.zeroize();
+                    }
+                } else {
+                    state.cancel_borrow(ticket).unwrap();
+                }
+            }
+            SBI_COVH_RUN_TVM_VCPU => {}
             _ => {}
         }
         unsafe {
@@ -330,7 +404,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         }
     }
 
-    program_pmp_from_regions(&state.domains[dst_id].memory_regions);
+    program_domain_pmp(state, dst_id);
     return state.domains[dst_id].context_addr;
 }
 
@@ -523,15 +597,37 @@ unsafe fn return_error(ctx_addr: usize, code: isize) -> usize {
 }
 
 // Program the PMP as stated in 3.7 in Privileged ISA
-pub fn program_pmp_from_regions(regions: &[MemoryRegion]) {
+fn program_domain_pmp(state: &State, domain_id: usize) {
+    let mut regions = Vec::<MemoryRegion, MAX_MEMORY_REGIONS>::new();
+
+    for region in &state.domains[domain_id].memory_regions {
+        regions.push(region.clone()).unwrap();
+    }
+
+    if let Some(owner_id) = state.bootstrap_owner_for(domain_id) {
+        for region in &state.domains[owner_id].memory_regions {
+            regions
+                .push(region.clone())
+                .expect("bootstrap PMP map exceeds available entries");
+        }
+    }
+
+    program_pmp_from_regions(&regions);
+}
+
+fn program_pmp_from_regions(regions: &[MemoryRegion]) {
+    // Disable all managed entries first: no stale bootstrap access.
+    for index in 0..MAX_MEMORY_REGIONS {
+        write_pmpcfg(index, 0);
+    }
     for (i, r) in regions.iter().enumerate() {
         let ones = (1 << (r.order - 3)) - 1;
         let range = riscv::register::Range::NAPOT as usize;
-        let permission = riscv::register::Permission::RWX as usize;
+        let permission = (r.permissions & 0x7) as usize;
 
         // This should be a byte and be shifted by index
         let pmpcfg = ((0) << 7 | (range) << 3 | (permission)) & 0xFF;
-        let pmpaddr = ((r.base_addr >> 2) as usize) | ones as usize;
+        let pmpaddr = ((r.base_address >> 2) as usize) | ones as usize;
 
         write_pmpaddr(i, pmpaddr);
         write_pmpcfg(i, pmpcfg);
@@ -562,23 +658,20 @@ fn write_pmpaddr(index: usize, val: usize) {
     }
 }
 
-// TODO: adapt this for 32bit
-// According to the spec, RV64 has only even numbers for pmpcfgX. pmpcfg0, pmpcfg2,
-// pmpcfg4...pmpcfg14
+// TODO: adapt this for 32bit.
+// On RV64 each implemented pmpcfg CSR holds eight entries: pmpcfg0 controls
+// entries 0..7 and pmpcfg2 controls entries 8..15.
 fn write_pmpcfg(index: usize, val: usize) {
-    let n = index / 8;
+    assert!(index < 16);
+
+    let cfg_index = index / 8;
     let shift = (index % 8) * 8;
     let old: usize;
 
     unsafe {
-        match n {
+        match cfg_index {
             0 => core::arch::asm!("csrr {0}, pmpcfg0", out(reg) old),
-            2 => core::arch::asm!("csrr {0}, pmpcfg2", out(reg) old),
-            4 => core::arch::asm!("csrr {0}, pmpcfg4", out(reg) old),
-            8 => core::arch::asm!("csrr {0}, pmpcfg8", out(reg) old),
-            10 => core::arch::asm!("csrr {0}, pmpcfg10", out(reg) old),
-            12 => core::arch::asm!("csrr {0}, pmpcfg12", out(reg) old),
-            14 => core::arch::asm!("csrr {0}, pmpcfg14", out(reg) old),
+            1 => core::arch::asm!("csrr {0}, pmpcfg2", out(reg) old),
             _ => unreachable!(),
         };
     }
@@ -587,14 +680,9 @@ fn write_pmpcfg(index: usize, val: usize) {
     let new = (old & mask) | (val << shift);
 
     unsafe {
-        match n {
+        match cfg_index {
             0 => core::arch::asm!("csrw pmpcfg0, {0}", in(reg) new),
-            2 => core::arch::asm!("csrw pmpcfg2, {0}", in(reg) new),
-            4 => core::arch::asm!("csrw pmpcfg4, {0}", in(reg) new),
-            8 => core::arch::asm!("csrw pmpcfg8, {0}", in(reg) new),
-            10 => core::arch::asm!("csrw pmpcfg10, {0}", in(reg)new),
-            12 => core::arch::asm!("csrw pmpcfg12, {0}", in(reg) new),
-            14 => core::arch::asm!("csrw pmpcfg14, {0}", in(reg) new),
+            1 => core::arch::asm!("csrw pmpcfg2, {0}", in(reg) new),
             _ => unreachable!(),
         };
     }
@@ -604,19 +692,21 @@ fn write_pmpcfg(index: usize, val: usize) {
  * If a region contains the target start and target end it will be split into 2 regions
  * */
 fn compute_new_regions(
-    regions: &Vec<MemoryRegion>,
+    regions: &Vec<MemoryRegion, MAX_MEMORY_REGIONS>,
     target_start: usize,
     target_end: usize,
-) -> Vec<MemoryRegion> {
+) -> anyhow::Result<Vec<MemoryRegion, MAX_MEMORY_REGIONS>> {
     let mut new_regions = Vec::new();
 
     for region in regions {
-        let region_start = region.base_addr;
+        let region_start = region.base_address;
         let region_end = region_start + (1 << region.order);
 
         // Case 1: No overlap - keep the region as is
         if region_end <= target_start || region_start >= target_end {
-            new_regions.push(region.clone());
+            new_regions
+                .push(region.clone())
+                .map_err(|_| anyhow::anyhow!("cannot push memory region"))?;
             continue;
         }
 
@@ -630,7 +720,7 @@ fn compute_new_regions(
                 before_end,
                 region.mmio,
                 region.permissions,
-            );
+            )?;
         }
         // Case 3: Keep the fragment after the removed range
         if region_end > target_end {
@@ -641,19 +731,19 @@ fn compute_new_regions(
                 region_end,
                 region.mmio,
                 region.permissions,
-            );
+            )?;
         }
     }
-    new_regions
+    Ok(new_regions)
 }
 
 fn add_region_range(
-    regions: &mut Vec<MemoryRegion>,
+    regions: &mut Vec<MemoryRegion, MAX_MEMORY_REGIONS>,
     mut start: usize,
     end: usize,
     mmio: bool,
     permissions: u8,
-) {
+) -> anyhow::Result<()> {
     while start < end {
         let remaining = end - start;
 
@@ -665,13 +755,17 @@ fn add_region_range(
 
         let order = alignment_order.min(size_order);
 
-        regions.push(MemoryRegion {
-            base_addr: start,
-            order: order as u32,
-            mmio,
-            permissions,
-        });
+        regions
+            .push(MemoryRegion {
+                base_address: start,
+                order: order as u32,
+                mmio,
+                permissions,
+            })
+            .map_err(|_| anyhow::anyhow!("cannot push memory region"))?;
 
         start += 1usize << order;
     }
+
+    Ok(())
 }

@@ -1,7 +1,8 @@
 //! Runtime platform configuration parsed from the boot-provided FDT with libfdt.
 
-use alloc::{boxed::Box, format, string::String, vec::Vec};
+use alloc::{boxed::Box, format, string::String};
 use core::slice;
+use heapless::Vec;
 
 use anyhow::{anyhow, bail, Context as _};
 use libfdt_rs::{Fdt, FdtNode, Phandle, PropertyCellParser, PropertyReader};
@@ -11,11 +12,14 @@ use crate::domain::MemoryRegion;
 const FDT_MAGIC: u32 = 0xd00d_feed;
 const FDT_HEADER_SIZE: usize = 40;
 
+pub const MAX_MEMORY_REGIONS: usize = 16;
+pub const MAX_SUPERVISOR_DOMAINS: usize = 64;
+
 #[derive(Clone)]
 pub struct DomainConfig {
     pub id: usize,
     pub name: String,
-    pub memory_regions: Vec<MemoryRegion>,
+    pub memory_regions: Vec<MemoryRegion, MAX_MEMORY_REGIONS>,
     pub trust_map: usize,
     pub next_addr: usize,
     pub load_tsm: bool,
@@ -25,7 +29,7 @@ pub struct DomainConfig {
 pub struct PlatformConfig {
     pub dice_input_addr: usize,
     pub boot_domain_id: usize,
-    pub domains: Vec<DomainConfig>,
+    pub domains: Vec<DomainConfig, MAX_SUPERVISOR_DOMAINS>,
 }
 
 impl PlatformConfig {
@@ -45,7 +49,7 @@ impl PlatformConfig {
 
         // OpenSBI assigns IDs by iterating instance subnodes in DT order.
         // Keep the nodes until all trust phandles have been resolved.
-        let mut parsed = Vec::new();
+        let mut parsed: Vec<(FdtNode<'_>, DomainConfig), MAX_SUPERVISOR_DOMAINS> = Vec::new();
         for node in domain_root
             .subnodes_iter()
             .map_err(|error| anyhow!("cannot iterate OpenSBI domains: {error:?}"))?
@@ -58,18 +62,20 @@ impl PlatformConfig {
             }
 
             let id = parsed.len() + 1; // OpenSBI reserves domain zero for root.
-            parsed.push((
-                node.clone(),
-                DomainConfig {
-                    id,
-                    name: String::from(node.name()),
-                    memory_regions: read_regions(&fdt, &node)?,
-                    trust_map: 0,
-                    next_addr: read_u64_property(&node, "next-addr")? as usize,
-                    load_tsm: node.get_property("shadowfax,load-tsm").is_ok(),
-                    boot_hart: node.get_property("boot-hart").is_ok(),
-                },
-            ));
+            parsed
+                .push((
+                    node.clone(),
+                    DomainConfig {
+                        id,
+                        name: String::from(node.name()),
+                        memory_regions: read_regions(&fdt, &node)?,
+                        trust_map: 0,
+                        next_addr: read_u64_property(&node, "next-addr")? as usize,
+                        load_tsm: node.get_property("shadowfax,load-tsm").is_ok(),
+                        boot_hart: node.get_property("boot-hart").is_ok(),
+                    },
+                ))
+                .map_err(|_| anyhow::anyhow!("max supervisor domain exceeded"))?;
         }
 
         if parsed.is_empty() {
@@ -166,7 +172,10 @@ fn read_u32_property(node: &FdtNode<'_>, name: &str) -> anyhow::Result<u32> {
         .with_context(|| format!("{}/{name} has no value", node.name()))
 }
 
-fn read_regions(fdt: &Fdt, domain: &FdtNode<'_>) -> anyhow::Result<Vec<MemoryRegion>> {
+fn read_regions(
+    fdt: &Fdt,
+    domain: &FdtNode<'_>,
+) -> anyhow::Result<Vec<MemoryRegion, MAX_MEMORY_REGIONS>> {
     let property = domain
         .get_property("regions")
         .map_err(|error| anyhow!("domain {} has no regions: {error:?}", domain.name()))?;
@@ -191,12 +200,14 @@ fn read_regions(fdt: &Fdt, domain: &FdtNode<'_>) -> anyhow::Result<Vec<MemoryReg
                 region.name()
             );
         }
-        regions.push(MemoryRegion {
-            base_addr: read_u64_property(&region, "base")? as usize,
-            order,
-            mmio: region.get_property("mmio").is_ok(),
-            permissions: permissions & 0x3f,
-        });
+        regions
+            .push(MemoryRegion {
+                base_address: read_u64_property(&region, "base")? as usize,
+                order,
+                mmio: region.get_property("mmio").is_ok(),
+                permissions: permissions & 0x3f,
+            })
+            .map_err(|_| anyhow::anyhow!("cannot push memory region"))?;
     }
 
     if regions.is_empty() {

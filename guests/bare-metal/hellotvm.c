@@ -7,8 +7,9 @@ struct sbiret {
 };
 
 /* SBI IDs */
-#define SBI_EXT_DBCN  0x4442434E
+#define SBI_EXT_DBCN                     0x4442434E
 #define SBI_EXT_DBCN_CONSOLE_WRITE_BYTE  2
+#define SBI_EXT_SRST                     0x53525354
 
 static inline struct sbiret sbi_ecall(
     unsigned long arg0, unsigned long arg1,
@@ -52,5 +53,6 @@ int main (void) {
     while (*msg)
         putc(*msg++);
 
+    sbi_ecall(0, 0, 0, 0, 0, 0, 0, SBI_EXT_SRST);
     return 0;
 }

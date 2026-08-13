@@ -1,9 +1,14 @@
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, string::String};
 use common::attestation::TsmAttestationContext;
 use ed25519_compact::Signature;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
+use heapless::Vec;
 
-use crate::{context::Context, error::TsmError, platform::DomainConfig};
+use crate::{
+    context::Context,
+    error::TsmError,
+    platform::{DomainConfig, MAX_MEMORY_REGIONS},
+};
 
 mod tsm {
     #[link_section = ".rodata"]
@@ -17,9 +22,9 @@ mod tsm {
     pub static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey.pem");
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MemoryRegion {
-    pub base_addr: usize,
+    pub base_address: usize,
     pub order: u32,
     pub mmio: bool,
     pub permissions: u8,
@@ -29,7 +34,7 @@ pub struct MemoryRegion {
 pub struct Domain {
     pub name: String,
     pub trust_map: usize,
-    pub memory_regions: Vec<MemoryRegion>,
+    pub memory_regions: Vec<MemoryRegion, MAX_MEMORY_REGIONS>,
     pub next_addr: usize,
     pub context_addr: usize,
     pub has_tsm: bool,
@@ -73,7 +78,8 @@ impl Domain {
             .ok_or_else(|| anyhow::anyhow!("ELF has no program headers"))?;
 
         // Collect only loadable segments
-        let load_segments: Vec<_> = segments.iter().filter(|ph| ph.p_type == PT_LOAD).collect();
+        let load_segments: alloc::vec::Vec<_> =
+            segments.iter().filter(|ph| ph.p_type == PT_LOAD).collect();
 
         if load_segments.is_empty() {
             return Err(anyhow::anyhow!("No loadable segments found"));

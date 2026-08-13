@@ -24,12 +24,14 @@ use crate::{
     state::{TsmInfo, TSM_IMPL_ID, TSM_VERSION},
 };
 
+mod constants;
 mod h_extension;
 mod hyper;
 mod log;
 mod perf;
 mod sbi;
 mod state;
+mod trap;
 
 #[link_section = ".rodata"]
 pub static GUEST_ELF: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.elf")).len()] =
@@ -232,6 +234,18 @@ fn handle_covh(
     // bits[15:0]: function ID
     let fid = a6 & 0xFFFF;
 
+    if fid == SBI_COVH_RUN_TVM_VCPU {
+        let prepared = state.hypervisor.prepare_tvm_vcpu(a0, a1, a6);
+        drop(lock);
+
+        match prepared {
+            Ok((vcpu_addr, entry_sepc, entry_arg)) => unsafe {
+                HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg)
+            },
+            Err(_) => return SbiRet { a0: -1, a1: 0 },
+        }
+    }
+
     match fid {
         SBI_COVH_GET_TSM_INFO => {
             assert!(a1 >= core::mem::size_of::<TsmInfo>());
@@ -308,12 +322,7 @@ fn handle_covh(
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
 
-        SBI_COVH_RUN_TVM_VCPU => match state.hypervisor.run_tvm_vcpu(a0, a1) {
-            Ok(_) => unreachable!(),
-            Err(_) => SbiRet { a0: -1, a1: 0 },
-        },
-
-        SBI_COVH_DESTROY_TVM => match state.hypervisor.destroy_tvm() {
+        SBI_COVH_DESTROY_TVM => match state.hypervisor.destroy_tvm(a0) {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
@@ -372,10 +381,13 @@ fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Bootstrap complete. Entering Guest...");
 
     // 6. Run it!
-    state
+    let (vcpu_addr, entry_sepc, entry_arg) = state
         .hypervisor
-        .run_tvm_vcpu(tvm_id, 0)
-        .expect("Failed to run VCPU");
+        .prepare_tvm_vcpu(tvm_id, 0, SBI_COVH_RUN_TVM_VCPU)
+        .expect("Failed to prepare VCPU");
+    drop(lock);
+
+    unsafe { HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg) }
 }
 
 fn test_tvm_bootstrap_perf() -> ! {

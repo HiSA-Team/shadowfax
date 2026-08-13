@@ -1,6 +1,7 @@
 /**/build
 /**/.venv
 *.elf
+/**/.out
 *.bin
 *.o
 /**/keys

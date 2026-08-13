@@ -14,13 +14,16 @@
 #define SBI_EXT_COVH               0x434F5648UL
 #define COVH_TARGET_TSM            (1UL << 26)
 #define COVH_CONVERT_PAGES         1UL
+#define COVH_RECLAIM_PAGES         2UL
 #define COVH_CREATE_TVM            5UL
 #define COVH_FINALIZE_TVM          6UL
+#define COVH_DESTROY_TVM           8UL
 #define COVH_ADD_MEMORY_REGION     9UL
 #define COVH_ADD_MEASURED_PAGES    11UL
 #define COVH_ADD_ZERO_PAGES        12UL
 #define COVH_CREATE_VCPU           14UL
 #define COVH_RUN_VCPU              15UL
+#define COVH_REMOVE_PAGES          19UL
 
 #define ELFCLASS64                 2
 #define ELFDATA2LSB                1
@@ -337,7 +340,7 @@ int main(void)
     clear_bytes(__confidential_guest_start,
                 (size_t)(__confidential_guest_end -
                          __confidential_guest_start));
-    require_ok("CONVERT_PAGES",
+    require_ok("CONVERT_META_PAGES",
                covh_call(COVH_CONVERT_PAGES,
                          metadata_start,
                          (metadata_end - metadata_start) / PAGE_SIZE,
@@ -370,5 +373,27 @@ int main(void)
 
     puts("[HOST] Entering TVM\n");
     ret = covh_call(COVH_RUN_VCPU, tvm_id, 0, 0, 0, 0, 0);
-    fail("RUN_VCPU", ret.error);
+
+    puts("[HOST] TVM exited with code ");
+    puthex(ret.error);
+    putchar('\n');
+
+    /* Destroy the TVM */
+    require_ok("DESTROY_TVM",
+               covh_call(COVH_DESTROY_TVM, tvm_id, 0, 0, 0,0,0));
+    require_ok("RECLAIM_META_PAGES",
+               covh_call(COVH_RECLAIM_PAGES,
+                   metadata_start,
+                   (metadata_end - metadata_start) / PAGE_SIZE,
+                   0, 0,0,0));
+
+    require_ok("RECLAIM_GUEST_PAGES",
+               covh_call(COVH_RECLAIM_PAGES,
+                   guest_memory_start,
+                   (guest_memory_end - guest_memory_start) / PAGE_SIZE,
+                   0, 0,0,0));
+
+
+    puts("[HOST] program completed. Halting\n");
+    halt();
 }
