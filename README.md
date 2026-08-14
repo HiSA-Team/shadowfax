@@ -52,16 +52,21 @@ local development keys:
 ```sh
 git clone --recurse-submodules https://github.com/HiSA-Team/shadowfax
 cd shadowfax
-make generate-keys PYTHON='uv run --with cbor2'
+make generate-keys
+make guests
 make -B PYTHON='uv run --with cbor2'
 ```
+
+> [!WARNING]
+> It is very important to generate guests using `make guests` since other target do not attempt to build
+> guests on their own.
 
 Use `make build-info` to check the detected toolchain and platform. Pass `RV_PREFIX` explicitly if
 the RISC-V tools are not available under the default prefix. Shared compiler, assembler, linker,
 architecture, and QEMU defaults live in `config.mk`; see [SETUP.md](SETUP.md#shared-make-configuration)
 for supported overrides and debug behavior.
 
-Bare-metal host and TVM attestation
+## Bare-metal host and TVM attestation
 
 The most complete standalone demonstration runs a bare-metal CoVE host, creates a bare-metal TVM,
 and retrieves the layered attestation evidence containing the platform certificate:
