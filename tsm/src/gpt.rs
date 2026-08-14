@@ -56,7 +56,7 @@ pub fn map_4k_leaf(root_pt: usize, page_table_size: usize, gpa: usize, pa: usize
 
     let l1_base = if pte2 & PTE_V == 0 {
         // L1 table doesn't exist, create it
-        let l1_base = root_pt + 0x1000;
+        let l1_base = root_pt + 0x4000;
         let pte = (pa_to_ppn(l1_base) << 10) | PTE_V;
         unsafe {
             core::ptr::write_volatile(pte2_addr as *mut u64, pte);
@@ -83,7 +83,7 @@ pub fn map_4k_leaf(root_pt: usize, page_table_size: usize, gpa: usize, pa: usize
             vpn1
         );
 
-        let pte = (pa_to_ppn(l0_base) << 10) | PTE_V;
+        let pte = (pa_to_ppn(l0_base) << 10) | PTE_V | PTE_U;
         unsafe {
             core::ptr::write_volatile(pte1_addr as *mut u64, pte);
         }

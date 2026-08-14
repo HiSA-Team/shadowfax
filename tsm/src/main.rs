@@ -24,7 +24,7 @@ mod gpt;
 mod h_extension;
 mod hyper;
 mod log;
-#[cfg(feature = "standalone")]
+// #[cfg(feature = "standalone")]
 mod standalone;
 mod trap;
 

@@ -104,94 +104,94 @@ pub unsafe extern "C" fn hyper_trap() -> ! {
     core::arch::naked_asm!(
         // --- 1. ENTRY: Save Guest Context ---
         // Swap Guest t6 (x31) with sscratch (which holds pointer to VmTrapContext)
-        "csrrw t6, sscratch, t6",
+        "csrrw t6, sscratch, t6
         // Save Guest GPRs x1-x30 into the context
-        "sd x1,   8(t6)",  // ra
-        "sd x2,  16(t6)",  // sp
-        "sd x3,  24(t6)",  // gp
-        "sd x4,  32(t6)",  // tp
-        "sd x5,  40(t6)",  // t0
-        "sd x6,  48(t6)",  // t1
-        "sd x7,  56(t6)",  // t2
-        "sd x8,  64(t6)",  // s0
-        "sd x9,  72(t6)",  // s1
-        "sd x10, 80(t6)",  // a0
-        "sd x11, 88(t6)",  // a1
-        "sd x12, 96(t6)",  // a2
-        "sd x13, 104(t6)", // a3
-        "sd x14, 112(t6)", // a4
-        "sd x15, 120(t6)", // a5
-        "sd x16, 128(t6)", // a6
-        "sd x17, 136(t6)", // a7
-        "sd x18, 144(t6)", // s2
-        "sd x19, 152(t6)", // s3
-        "sd x20, 160(t6)", // s4
-        "sd x21, 168(t6)", // s5
-        "sd x22, 176(t6)", // s6
-        "sd x23, 184(t6)", // s7
-        "sd x24, 192(t6)", // s8
-        "sd x25, 200(t6)", // s9
-        "sd x26, 208(t6)", // s10
-        "sd x27, 216(t6)", // s11
-        "sd x28, 224(t6)", // t3
-        "sd x29, 232(t6)", // t4
-        "sd x30, 240(t6)", // t5
-        "csrr t0, sstatus",
-        "sd t0, 264(t6)",
-        "csrr t0, sepc",
-        "sd t0, 272(t6)",
+        sd x1,   8(t6)  // ra
+        sd x2,  16(t6)  // sp
+        sd x3,  24(t6)  // gp
+        sd x4,  32(t6)  // tp
+        sd x5,  40(t6)  // t0
+        sd x6,  48(t6)  // t1
+        sd x7,  56(t6)  // t2
+        sd x8,  64(t6)  // s0
+        sd x9,  72(t6)  // s1
+        sd x10, 80(t6)  // a0
+        sd x11, 88(t6)  // a1
+        sd x12, 96(t6)  // a2
+        sd x13, 104(t6) // a3
+        sd x14, 112(t6) // a4
+        sd x15, 120(t6) // a5
+        sd x16, 128(t6) // a6
+        sd x17, 136(t6) // a7
+        sd x18, 144(t6) // s2
+        sd x19, 152(t6) // s3
+        sd x20, 160(t6) // s4
+        sd x21, 168(t6) // s5
+        sd x22, 176(t6) // s6
+        sd x23, 184(t6) // s7
+        sd x24, 192(t6) // s8
+        sd x25, 200(t6) // s9
+        sd x26, 208(t6) // s10
+        sd x27, 216(t6) // s11
+        sd x28, 224(t6) // t3
+        sd x29, 232(t6) // t4
+        sd x30, 240(t6) // t5
+        csrr t0, sepc
+        sd t0, 264(t6)
+        csrr t0, sstatus
+        sd t0, 272(t6)
         // Save the Guest's original t6 (currently in sscratch)
-        "csrr t0, sscratch",
-        "sd t0, 248(t6)",
+        csrr t0, sscratch
+        sd t0, 248(t6)
         // --- 2. TRANSITION: Switch to HS-mode Stack ---
-        "ld sp, 256(t6)", // Load hs_sp
+        ld sp, 256(t6) // Load hs_sp
         // Call the Rust handler.
         // a0 must be the pointer to VmTrapContext.
-        "mv a0, t6",
-        "call hyper_trap_handler_rust",
+        mv a0, t6
+        call hyper_trap_handler_rust
         // --- 3. EXIT: Restore Guest Context ---
         // Rust returns the pointer to VmTrapContext in a0
-        "mv t6, a0",
+        mv t6, a0
         // Restore GPRs x1-x30, skip x5 (t0) because it is needed to do some stuff
-        "ld x1,   8(t6)",
-        "ld x2,  16(t6)",
-        "ld x3,  24(t6)",
-        "ld x4,  32(t6)",
-        "ld x6,  48(t6)",
-        "ld x7,  56(t6)",
-        "ld x8,  64(t6)",
-        "ld x9,  72(t6)",
-        "ld x10, 80(t6)",
-        "ld x11, 88(t6)",
-        "ld x12, 96(t6)",
-        "ld x13, 104(t6)",
-        "ld x14, 112(t6)",
-        "ld x15, 120(t6)",
-        "ld x16, 128(t6)",
-        "ld x17, 136(t6)",
-        "ld x18, 144(t6)",
-        "ld x19, 152(t6)",
-        "ld x20, 160(t6)",
-        "ld x21, 168(t6)",
-        "ld x22, 176(t6)",
-        "ld x23, 184(t6)",
-        "ld x24, 192(t6)",
-        "ld x25, 200(t6)",
-        "ld x26, 208(t6)",
-        "ld x27, 216(t6)",
-        "ld x28, 224(t6)",
-        "ld x29, 232(t6)",
-        "ld x30, 240(t6)",
+        ld x1,   8(t6)
+        ld x2,  16(t6)
+        ld x3,  24(t6)
+        ld x4,  32(t6)
+        ld x6,  48(t6)
+        ld x7,  56(t6)
+        ld x8,  64(t6)
+        ld x9,  72(t6)
+        ld x10, 80(t6)
+        ld x11, 88(t6)
+        ld x12, 96(t6)
+        ld x13, 104(t6)
+        ld x14, 112(t6)
+        ld x15, 120(t6)
+        ld x16, 128(t6)
+        ld x17, 136(t6)
+        ld x18, 144(t6)
+        ld x19, 152(t6)
+        ld x20, 160(t6)
+        ld x21, 168(t6)
+        ld x22, 176(t6)
+        ld x23, 184(t6)
+        ld x24, 192(t6)
+        ld x25, 200(t6)
+        ld x26, 208(t6)
+        ld x27, 216(t6)
+        ld x28, 224(t6)
+        ld x29, 232(t6)
+        ld x30, 240(t6)
         /* Restore s* register using t0 register*/
-        "ld t0, 264(t6)",
-        "csrw sstatus, t0",
-        "ld t0, 272(t6)",
-        "csrw sepc, t0",
+        ld t0, 264(t6)
+        csrw sepc, t0
+        ld t0, 272(t6)
+        csrw sstatus, t0
         /* Restore t0*/
-        "ld x5, 40(t6)",
-        "csrw sscratch, t6", // Put VmTrapContext pointer back into sscratch
-        "ld t6, 248(t6)",    // Finally restore Guest t6
-        "sret",
+        ld x5, 40(t6)
+        csrw sscratch, t6 // Put VmTrapContext pointer back into sscratch
+        ld t6, 248(t6)    // Finally restore Guest t6
+        sret"
     )
 }
 
@@ -233,6 +233,7 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                         (*ctx).regs[10] = sbi_ret.a0 as usize;
                         (*ctx).regs[11] = sbi_ret.a1 as usize;
                         (*ctx).sepc += 4;
+                        riscv::register::sepc::write((*ctx).sepc);
                     }
                 }
 

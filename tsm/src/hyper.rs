@@ -19,6 +19,7 @@ use crate::{
         csrs::{hedeleg, henvcfg, hgatp, hideleg, hstatus, vsatp},
         instruction::hfence_gvma_all,
     },
+    println,
     trap::{hyper_trap, VmTrapContext},
 };
 
