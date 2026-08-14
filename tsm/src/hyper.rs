@@ -19,7 +19,6 @@ use crate::{
         csrs::{hedeleg, henvcfg, hgatp, hideleg, hstatus, vsatp},
         instruction::hfence_gvma_all,
     },
-    println,
     trap::{hyper_trap, VmTrapContext},
 };
 
@@ -197,14 +196,20 @@ impl HypervisorState {
             Some(tvm) => {
                 match tvm.state_enum {
                     TvmState::TvmInitializing => {}
-                    _ => anyhow::bail!("cannot add memory region unless TVM_INITIALIZING"),
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "cannot add memory region unless TVM_INITIALIZING"
+                        ))
+                    }
                 }
 
                 if (tvm_gpa_addr % PAGE_SIZE) != 0
                     || (region_len_bytes % PAGE_SIZE) != 0
                     || region_len_bytes == 0
                 {
-                    anyhow::bail!("tvm_gpa_addr and region_len must be 4KB-aligned and non-zero");
+                    return Err(anyhow::anyhow!(
+                        "tvm_gpa_addr and region_len must be 4KB-aligned and non-zero"
+                    ));
                 }
 
                 let num_pages = region_len_bytes / PAGE_SIZE;
@@ -215,7 +220,7 @@ impl HypervisorState {
                     let r_a = r.guest_gpa_base;
                     let r_b = r.guest_gpa_base + r.num_pages * PAGE_SIZE;
                     if !(new_b <= r_a || r_b <= new_a) {
-                        anyhow::bail!("region overlap with existing region");
+                        return Err(anyhow::anyhow!("region overlap with existing region"));
                     }
                 }
 
@@ -252,7 +257,7 @@ impl HypervisorState {
             Some(tvm) => {
                 match tvm.state_enum {
                     TvmState::TvmInitializing => {}
-                    _ => anyhow::bail!("cannot add MMIO after finalization"),
+                    _ => return Err(anyhow::anyhow!("cannot add MMIO after finalization")),
                 }
                 // Check that the MMIO GPA does not overlap guest RAM.
                 let mmio_end = guest_gpa + size;
@@ -262,7 +267,7 @@ impl HypervisorState {
                     let region_end = region_start + region.num_pages * PAGE_SIZE;
 
                     if guest_gpa < region_end && region_start < mmio_end {
-                        anyhow::bail!("MMIO overlaps an existing guest region");
+                        return Err(anyhow::anyhow!("MMIO overlaps an existing guest region"));
                     }
                 }
 
@@ -293,7 +298,9 @@ impl HypervisorState {
         assert_eq!(tsm_page_type, 0, "accepting 4k pages for now");
 
         if dest_addr % PAGE_SIZE != 0 || tvm_guest_gpa % PAGE_SIZE != 0 || num_pages == 0 {
-            anyhow::bail!("destination/GPA must be page-aligned and num_pages non-zero");
+            return Err(anyhow::anyhow!(
+                "destination/GPA must be page-aligned and num_pages non-zero"
+            ));
         }
 
         let bytes = num_pages
@@ -313,7 +320,9 @@ impl HypervisorState {
                 .ok_or_else(|| anyhow::anyhow!("invalid TVMID"))?;
 
             if !matches!(tvm.state_enum, TvmState::TvmInitializing) {
-                anyhow::bail!("cannot add measured pages after finalization");
+                return Err(anyhow::anyhow!(
+                    "cannot add measured pages after finalization"
+                ));
             }
 
             let in_tvm_region = tvm.memory_regions.iter().any(|region| {
@@ -323,11 +332,11 @@ impl HypervisorState {
             });
 
             if !in_tvm_region {
-                anyhow::bail!(
+                return Err(anyhow::anyhow!(
                     "GPA range 0x{:x}-0x{:x} not within any memory region",
                     tvm_guest_gpa,
                     gpa_end
-                );
+                ));
             }
         }
 
@@ -420,11 +429,11 @@ impl HypervisorState {
                 }
 
                 if !found_region {
-                    anyhow::bail!(
+                    return Err(anyhow::anyhow!(
                         "GPA range 0x{:x}-0x{:x} not within any memory region",
                         tvm_base_page_address,
                         gpa_end
-                    );
+                    ));
                 }
 
                 map_region(
@@ -611,7 +620,11 @@ impl HypervisorState {
         match block.guest_id {
             None => block.guest_id = Some(tvmid),
             Some(owner) if owner == tvmid => {}
-            Some(_) => anyhow::bail!("confidential memory already owned by another TVM"),
+            Some(_) => {
+                return Err(anyhow::anyhow!(
+                    "confidential memory already owned by another TVM"
+                ))
+            }
         }
 
         Ok(())
