@@ -1,9 +1,9 @@
 #include <stddef.h>
 
-#define SBI_EXT_DBCN       0x4442434eUL
+#define SBI_EXT_DBCN        0x4442434eUL
 #define SBI_DBCN_WRITE_BYTE 2UL
-#define SBI_EXT_SRST       0x53525354UL
-#define SBI_SRST_RESET     0UL
+#define SBI_EXT_SRST        0x53525354UL
+#define SBI_SRST_RESET      0UL
 
 struct sbiret {
     long error;

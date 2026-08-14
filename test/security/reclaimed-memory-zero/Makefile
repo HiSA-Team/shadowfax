@@ -1,7 +1,6 @@
 ROOT         := ../../..
-include $(ROOT)/config.mk
+include      $(ROOT)/config.mk
 
-LAUNCHER_DIR := $(ROOT)/test/standalone-tvm-launcher
 BUILD_DIR    ?= $(ROOT)/target/security/reclaimed-memory-zero
 
 FIRMWARE     ?= $(ROOT)/target/$(TARGET_TRIPLET)/$(PROFILE)/shadowfax
@@ -11,8 +10,7 @@ DTB          ?= $(ROOT)/bin/device-tree.dtb
 ELF          := $(BUILD_DIR)/reclaimed-memory-zero
 BIN          := $(ELF).bin
 GUEST_ELF    := $(BUILD_DIR)/secret-guest.out
-OBJECTS      := $(BUILD_DIR)/startup.o $(BUILD_DIR)/main.o \
-	$(BUILD_DIR)/launcher.o
+OBJECTS      := $(BUILD_DIR)/startup.o $(BUILD_DIR)/main.o
 
 EMBED_FLAGS  := -DGUEST_ELF=\"$(abspath $(GUEST_ELF))\"
 
@@ -23,21 +21,18 @@ all: $(BIN)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(BUILD_DIR)/startup.o: $(LAUNCHER_DIR)/startup.S $(GUEST_ELF) | $(BUILD_DIR)
+$(BUILD_DIR)/startup.o: startup.S $(GUEST_ELF) | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) $(EMBED_FLAGS) -c $< -o $@
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/launcher.o: $(LAUNCHER_DIR)/main.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -Dmain=security_launcher_main -c $< -o $@
 
 $(GUEST_ELF): guest.c $(ROOT)/guests/bare-metal/vmstartup.S \
 		$(ROOT)/guests/bare-metal/linker.ld | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -T$(ROOT)/guests/bare-metal/linker.ld \
 		guest.c $(ROOT)/guests/bare-metal/vmstartup.S -o $@
 
-$(ELF): $(OBJECTS) $(LAUNCHER_DIR)/linker.ld $(DTB)
+$(ELF): $(OBJECTS) $(DTB)
 	@set -- $$(fdtget -t x $(DTB) /chosen/shadowfax host-fdt); \
 	host_fdt_addr=$$((0x$$1 << 32 | 0x$$2)); \
 	set -- $$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem base); \
@@ -59,7 +54,7 @@ $(ELF): $(OBJECTS) $(LAUNCHER_DIR)/linker.ld $(DTB)
 		-Wl,--defsym=SHADOWFAX_HOST_FDT_ADDR=$$host_fdt_addr \
 		-Wl,--defsym=SHADOWFAX_GUEST_BASE=$$guest_base \
 		-Wl,--defsym=SHADOWFAX_GUEST_SIZE=$$guest_size \
-		-T$(LAUNCHER_DIR)/linker.ld $(OBJECTS) -o $@
+		-Tlinker.ld $(OBJECTS) -o $@
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@

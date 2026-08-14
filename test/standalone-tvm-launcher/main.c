@@ -72,10 +72,6 @@ extern unsigned char __confidential_metadata_end[];
 extern unsigned char __confidential_guest_start[];
 extern unsigned char __confidential_guest_end[];
 
-void post_reclaim_hook(uintptr_t metadata_start, uintptr_t metadata_end,
-                       uintptr_t guest_start, uintptr_t guest_end)
-    __attribute__((weak));
-
 static unsigned char segment_staging[SEGMENT_STAGING_SIZE]
     __attribute__((aligned(PAGE_SIZE)));
 
@@ -397,10 +393,6 @@ int main(void)
                    (guest_memory_end - guest_memory_start) / PAGE_SIZE,
                    0, 0,0,0));
 
-    if (post_reclaim_hook != NULL)
-        post_reclaim_hook(metadata_start, metadata_end,
-                          guest_memory_start, guest_memory_end);
-
-    puts("[HOST] program completed. Halting\n");
+    puts("[HOST] Program completed. Halting\n");
     halt();
 }
