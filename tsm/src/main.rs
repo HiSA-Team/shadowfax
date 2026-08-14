@@ -5,11 +5,10 @@
 
 use core::panic::PanicInfo;
 
-use alloc::vec::Vec;
 use common::{
     attestation::{DiceLayer, TsmAttestationContext},
     sbi::{
-        SbiRet, PAGE_SIZE, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
+        SbiRet, SBI_COVH_ADD_TVM_MEASURED_PAGES, SBI_COVH_ADD_TVM_MEMORY_REGION,
         SBI_COVH_ADD_ZERO_PAGES, SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM,
         SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM,
         SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES, SBI_COVH_RUN_TVM_VCPU,
@@ -18,31 +17,16 @@ use common::{
 use linked_list_allocator::LockedHeap;
 use spin::Mutex;
 
-use crate::{
-    hyper::HypervisorState,
-    perf::{read_cycle, read_instret, read_time},
-    state::{TsmInfo, TSM_IMPL_ID, TSM_VERSION},
-};
+use crate::{constants::TVM_MAX_VCPUS, hyper::HypervisorState};
 
 mod constants;
+mod gpt;
 mod h_extension;
 mod hyper;
 mod log;
-mod perf;
-mod state;
+#[cfg(feature = "standalone")]
+mod standalone;
 mod trap;
-
-#[link_section = ".rodata"]
-pub static GUEST_ELF: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.elf")).len()] =
-    *include_bytes!(concat!(env!("OUT_DIR"), "/guest.elf"));
-
-#[link_section = ".rodata"]
-pub static GUEST_DTB: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.dtb")).len()] =
-    *include_bytes!(concat!(env!("OUT_DIR"), "/guest.dtb"));
-
-#[link_section = ".rodata"]
-pub static GUEST_INITRD: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.initrd")).len()] =
-    *include_bytes!(concat!(env!("OUT_DIR"), "/guest.initrd"));
 
 extern crate alloc;
 #[global_allocator]
@@ -111,11 +95,41 @@ extern "C" fn tsm_entry(
     #[cfg(feature = "standalone")]
     {
         let _ = (a0, a1, a2, a3, a4, a5, a6, a7);
-        test_tvm_bootstrap()
+        standalone::test_tvm_bootstrap()
     }
 
     #[cfg(not(feature = "standalone"))]
     main(a0, a1, a2, a3, a4, a5, a6, a7)
+}
+
+const TSM_IMPL_ID: u32 = 0x45;
+const TSM_VERSION: u32 = 0x45;
+
+#[repr(C)]
+#[derive(Clone, Debug)]
+struct TsmInfo {
+    tsm_status: TsmStatus,
+    tsm_impl_id: u32,
+    tsm_version: u32,
+    _padding: u32,
+    tsm_capabilities: usize,
+    tvm_state_pages: usize,
+    tvm_max_vcpus: usize,
+    tvm_vcpu_state_pages: usize,
+}
+
+enum TsmPageType {
+    Page4k = 0,
+    Page2mb = 1,
+    Page1gb = 2,
+    Page512gb = 3,
+}
+
+#[derive(Clone, Debug)]
+enum TsmStatus {
+    TsmNotLoaded = 0,
+    TsmLoaded = 1,
+    TsmReady = 2,
 }
 
 pub struct TsmState {
@@ -128,13 +142,13 @@ impl TsmState {
     fn new(attestation_context: TsmAttestationContext) -> Self {
         Self {
             info: TsmInfo {
-                tsm_status: state::TsmStatus::TsmReady,
+                tsm_status: TsmStatus::TsmReady,
                 tsm_impl_id: TSM_IMPL_ID,
                 tsm_version: TSM_VERSION,
                 _padding: 0,
                 tsm_capabilities: 0,
                 tvm_state_pages: 1,
-                tvm_max_vcpus: 1,
+                tvm_max_vcpus: TVM_MAX_VCPUS,
                 tvm_vcpu_state_pages: 1,
             },
             hypervisor: HypervisorState::new(),
@@ -143,9 +157,7 @@ impl TsmState {
     }
 }
 
-pub static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
-pub static MEASUREMENT: Mutex<Option<Vec<u8>>> = Mutex::new(None);
-pub static ATTESTATION_CONTEXT: Mutex<Option<TsmAttestationContext>> = Mutex::new(None);
+static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
 
 #[no_mangle]
 #[allow(dead_code)]
@@ -175,14 +187,9 @@ fn _secure_init(addr: usize) {
     // We clone into State and Attestation Context.
     // Since heap is Init, these clones allocate safely.
     let mut state = STATE.lock();
-    state.replace(TsmState::new(initial_context.clone()));
-
-    let mut att = ATTESTATION_CONTEXT.lock();
-    att.replace(initial_context);
-    // *state = Some(TsmState::new(payload.clone()));
+    state.replace(TsmState::new(initial_context));
 
     drop(state);
-    drop(att);
 }
 
 // Since this is a TSM with non reentrant model, an ECALL should be a TEERET
@@ -234,7 +241,7 @@ fn handle_covh(
     let fid = a6 & 0xFFFF;
 
     if fid == SBI_COVH_RUN_TVM_VCPU {
-        let prepared = state.hypervisor.prepare_tvm_vcpu(a0, a1, a6);
+        let prepared = state.hypervisor.prepare_tvm_vcpu(a0, a1);
         drop(lock);
 
         match prepared {
@@ -275,12 +282,17 @@ fn handle_covh(
                 (page_table_address, state_address)
             };
 
-            let attestation_context = state.attestation_context.compute_next(&[0; 32]);
+            let owner = (a6 >> 26) & 0x3F;
 
-            match state
-                .hypervisor
-                .create_tvm(attestation_context, tvm_params.0, tvm_params.1)
-            {
+            let attestation_context = state.attestation_context.compute_next(&[0; 32]);
+            println!("Creating TVM for domain {}", owner);
+
+            match state.hypervisor.create_tvm(
+                owner,
+                attestation_context,
+                tvm_params.0,
+                tvm_params.1,
+            ) {
                 Ok(id) => SbiRet {
                     a0: 0,
                     a1: id as isize,
@@ -289,10 +301,15 @@ fn handle_covh(
             }
         }
 
-        SBI_COVH_FINALIZE_TVM => match state.hypervisor.finalize_tvm(a0, a1, a2, a3) {
-            Ok(_) => SbiRet { a0: 0, a1: 0 },
-            Err(_) => SbiRet { a0: -1, a1: 0 },
-        },
+        SBI_COVH_FINALIZE_TVM => {
+            match state
+                .hypervisor
+                .finalize_tvm(a0, a1, a2, a3, &state.attestation_context)
+            {
+                Ok(_) => SbiRet { a0: 0, a1: 0 },
+                Err(_) => SbiRet { a0: -1, a1: 0 },
+            }
+        }
 
         SBI_COVH_ADD_TVM_MEMORY_REGION => {
             match state.hypervisor.add_tvm_memory_region(a0, a1, a2) {
@@ -327,133 +344,4 @@ fn handle_covh(
         },
         _ => SbiRet { a0: -1, a1: 0 },
     }
-}
-
-/// Test function to bypass SBI and jump straight into a TVM
-#[allow(dead_code)]
-fn test_tvm_bootstrap() -> ! {
-    println!("[OLORIN] Starting Mapping TVM from ELF");
-    // We'll simulate a dummy attestation context for testing.
-    _secure_init(0);
-
-    let mut lock = STATE.lock();
-    let state = lock.as_mut().expect("State not initialized");
-
-    // Assuming TSM is at 0x90000000-0x93FFFFFFFF, put TVM structures higher up.
-    //
-    let confidential_memory = 0x94000000;
-    let guest_ram_size = 256 * 1024 * 1024;
-    let tvm_page_table_addr = confidential_memory;
-    let tvm_state_addr = tvm_page_table_addr + 1024 * 1024;
-    let tvm_confidential_pool = tvm_state_addr + 4096;
-    let pool_size_pages = guest_ram_size / PAGE_SIZE;
-
-    state
-        .hypervisor
-        .add_confidential_pages(tvm_page_table_addr, 256)
-        .unwrap(); // 1 MiB
-    state
-        .hypervisor
-        .add_confidential_pages(tvm_state_addr, 1)
-        .unwrap();
-    state
-        .hypervisor
-        .add_confidential_pages(tvm_confidential_pool, pool_size_pages)
-        .unwrap();
-
-    // 4. Use the ELF loading procedure
-    // This helper parses GUEST_ELF and maps it into the TVM
-    let tvm_id = hyper::bootstrap_load_elf_lazy(
-        state,
-        tvm_page_table_addr,
-        tvm_state_addr,
-        tvm_confidential_pool,
-    )
-    .expect("Failed to load ELF");
-
-    // 5. Create VCPU (ID 0)
-    state
-        .hypervisor
-        .create_tvm_vcpu(tvm_id, 0, 0)
-        .expect("Failed to create VCPU");
-
-    println!("[OLORIN] Bootstrap complete. Entering Guest...");
-
-    // 6. Run it!
-    let (vcpu_addr, entry_sepc, entry_arg) = state
-        .hypervisor
-        .prepare_tvm_vcpu(tvm_id, 0, SBI_COVH_RUN_TVM_VCPU)
-        .expect("Failed to prepare VCPU");
-    drop(lock);
-
-    unsafe { HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg) }
-}
-
-fn test_tvm_bootstrap_perf() -> ! {
-    println!("[OLORIN] Starting Mapping TVM from ELF");
-    // 1. Initialize the TSM state manually (if _secure_init wasn't called by a driver)
-    // We'll simulate a dummy attestation context for testing.
-    // --- Start TVM measurement ---
-    let cycle_start = read_cycle();
-    let instret_start = read_instret();
-    let time_start = read_time();
-
-    let dummy_context = TsmAttestationContext::default();
-    _secure_init(&dummy_context as *const _ as usize);
-
-    let mut lock = STATE.lock();
-    let state = lock.as_mut().expect("State not initialized");
-
-    // 2. Define Memory Layout for Testing (Adjust based on your QEMU RAM)
-    // Assuming TSM is at 0x80200000, let's put TVM structures higher up.
-    let tvm_page_table_addr = 0x80800000;
-    let tvm_state_addr = tvm_page_table_addr + 256 * 1024;
-    let tvm_confidential_pool = 0x80900000; // Where guest RAM actually sits
-    let pool_size_pages = 512; // 2MB test pool
-
-    // 3. Convert pages to confidential
-    state
-        .hypervisor
-        .add_confidential_pages(tvm_page_table_addr, 64)
-        .unwrap(); // 256KB
-    state
-        .hypervisor
-        .add_confidential_pages(tvm_state_addr, 1)
-        .unwrap();
-    state
-        .hypervisor
-        .add_confidential_pages(tvm_confidential_pool, pool_size_pages)
-        .unwrap();
-
-    // 4. Use the ELF loading procedure
-    // This helper parses GUEST_ELF and maps it into the TVM
-    let tvm_id = hyper::bootstrap_load_elf(
-        state,
-        tvm_page_table_addr,
-        tvm_state_addr,
-        tvm_confidential_pool,
-    )
-    .expect("Failed to load ELF");
-
-    // 5. Create VCPU (ID 0)
-    state
-        .hypervisor
-        .create_tvm_vcpu(tvm_id, 0, 0)
-        .expect("Failed to create VCPU");
-
-    println!("[OLORIN] Bootstrap complete. Entering Guest...");
-    // --- End TVM measurement ---
-    let cycle_end = read_cycle();
-    let instret_end = read_instret();
-    let time_end = read_time();
-
-    let delta = time_end - time_start;
-    println!(
-        "cycle = {}\ninstret = {}\ndelta = {}",
-        cycle_end - cycle_start,
-        instret_end - instret_start,
-        delta
-    );
-    println!("[OLORIN] TVM bootstrap completed");
-    loop {}
 }

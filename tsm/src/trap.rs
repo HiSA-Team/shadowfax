@@ -1,25 +1,20 @@
 use alloc::vec::Vec;
-use common::{
-    attestation::DiceLayer,
-    sbi::{
-        sbi_call, SbiRet, COVG_EXTENSION, COVG_GET_EVIDENCE, PAGE_SIZE, SBI_COVH_EXT_ID,
-        SBI_SYSTEM_RESET_EXT_ID, SBI_SYSTEM_RESET_TYPE_SHUTDOWN,
-    },
+use common::sbi::{
+    sbi_call, SbiRet, COVG_EXTENSION, COVG_GET_EVIDENCE, PAGE_SIZE, SBI_COVH_EXT_ID,
+    SBI_COVH_RUN_TVM_VCPU, SBI_SYSTEM_RESET_EXT_ID, SBI_SYSTEM_RESET_TYPE_SHUTDOWN,
 };
 use riscv::interrupt::Trap;
 use spin::Mutex;
 
 use crate::{
-    constants::{
-        GUEST_DRAM_GPA_END, GUEST_DRAM_GPA_START, PTE_A, PTE_D, PTE_R, PTE_U, PTE_W, PTE_X,
-    },
+    constants::{GUEST_DRAM_GPA_END, GUEST_DRAM_GPA_START},
+    gpt::{map_4k_leaf, read_guest_memory, write_guest_memory, PTE_A, PTE_D, PTE_R, PTE_W, PTE_X},
     h_extension::{
         csrs::{hgatp, htval},
         instruction::hfence_gvma_all,
         HvException,
     },
-    hyper::{map_4k_leaf, read_guest_memory, write_guest_memory},
-    println, ATTESTATION_CONTEXT, MEASUREMENT,
+    println,
 };
 
 #[repr(C)]
@@ -30,6 +25,9 @@ pub struct VmTrapContext {
     pub regs: [usize; 32],
     // Hypervisor Stack Pointer (Offset 256)
     pub hs_sp: usize,
+
+    pub sepc: usize,
+    pub sstatus: usize,
 }
 
 // Track ELF segments to know what to copy where
@@ -138,6 +136,10 @@ pub unsafe extern "C" fn hyper_trap() -> ! {
         "sd x28, 224(t6)", // t3
         "sd x29, 232(t6)", // t4
         "sd x30, 240(t6)", // t5
+        "csrr t0, sstatus",
+        "sd t0, 264(t6)",
+        "csrr t0, sepc",
+        "sd t0, 272(t6)",
         // Save the Guest's original t6 (currently in sscratch)
         "csrr t0, sscratch",
         "sd t0, 248(t6)",
@@ -150,12 +152,11 @@ pub unsafe extern "C" fn hyper_trap() -> ! {
         // --- 3. EXIT: Restore Guest Context ---
         // Rust returns the pointer to VmTrapContext in a0
         "mv t6, a0",
-        // Restore GPRs x1-x30
+        // Restore GPRs x1-x30, skip x5 (t0) because it is needed to do some stuff
         "ld x1,   8(t6)",
         "ld x2,  16(t6)",
         "ld x3,  24(t6)",
         "ld x4,  32(t6)",
-        "ld x5,  40(t6)",
         "ld x6,  48(t6)",
         "ld x7,  56(t6)",
         "ld x8,  64(t6)",
@@ -181,6 +182,13 @@ pub unsafe extern "C" fn hyper_trap() -> ! {
         "ld x28, 224(t6)",
         "ld x29, 232(t6)",
         "ld x30, 240(t6)",
+        /* Restore s* register using t0 register*/
+        "ld t0, 264(t6)",
+        "csrw sstatus, t0",
+        "ld t0, 272(t6)",
+        "csrw sepc, t0",
+        /* Restore t0*/
+        "ld x5, 40(t6)",
         "csrw sscratch, t6", // Put VmTrapContext pointer back into sscratch
         "ld t6, 248(t6)",    // Finally restore Guest t6
         "sret",
@@ -192,7 +200,7 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
     let scause = riscv::register::scause::read();
     let htval = htval::read();
     let stval = riscv::register::stval::read();
-    let mut sepc = riscv::register::sepc::read();
+    let sepc = riscv::register::sepc::read();
 
     match scause.cause() {
         Trap::Interrupt(interrupt_number) => {
@@ -220,16 +228,11 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                         ),
                     };
 
-                    // 1.Check if the call was a CoVE-G
-                    // 3. Write return values back to Guest a0, a1
-                    regs[10] = sbi_ret.a0 as usize;
-                    regs[11] = sbi_ret.a1 as usize;
-
-                    // 3. Skip the 'ecall' instruction in the guest
-                    sepc += 4;
-
+                    /* Return value and increment sepc */
                     unsafe {
-                        riscv::register::sepc::write(sepc);
+                        (*ctx).regs[10] = sbi_ret.a0 as usize;
+                        (*ctx).regs[11] = sbi_ret.a1 as usize;
+                        (*ctx).sepc += 4;
                     }
                 }
 
@@ -266,7 +269,10 @@ fn handle_guest_system_reset(ctx: *mut VmTrapContext) -> SbiRet {
 fn guest_shutdown_to_host() -> ! {
     let return_fid = {
         let mut state = crate::STATE.lock();
-        state.as_mut().unwrap().hypervisor.guest_shutdown().unwrap()
+        let hyp = &mut state.as_mut().unwrap().hypervisor;
+        let tvmid = hyp.current_vcpu().expect("trap with no running TVM").tvmid;
+        let owner = hyp.tvm_shutdown(tvmid).unwrap();
+        ((owner & 0x3F) << 26) | SBI_COVH_RUN_TVM_VCPU
     };
 
     unsafe {
@@ -404,7 +410,7 @@ fn handle_page_fault(htval: usize, stval: usize) {
             lazy.page_table_size,
             gpa_page,
             pa,
-            PTE_R | PTE_W | PTE_X | PTE_U | PTE_A | PTE_D,
+            PTE_R | PTE_W | PTE_X | PTE_A | PTE_D,
         );
 
         // 6. Flush TLB so the CPU sees the new mapping immediately
@@ -435,42 +441,36 @@ fn handle_covg_get_evidence(
     cert_addr_out: usize,
     cert_size: usize,
 ) -> SbiRet {
-    // A. SETUP: Get Page Table
     let hgatp_val = crate::h_extension::csrs::hgatp::read().bits();
     let root_pt = ((hgatp_val & 0xFF_FFFF_FFFF_F) << 12) as usize;
 
-    // B. INPUT: Read Challenge from Guest
     let mut challenge = [0u8; 64];
     if read_guest_memory(root_pt, challenge_addr, &mut challenge).is_err() {
         return SbiRet { a0: -1, a1: 0 }; // Fault or Boundary Error
     }
 
-    // C. LOGIC: Generate Evidence (Holds Locks)
     let encoded_evidence = {
-        // We assume Measurement is also available here or passed in
-        // For this example, let's say it's in TSM or separate lock
-        let measure_lock = MEASUREMENT.lock();
-        let measurement = match measure_lock.as_ref() {
-            Some(m) => m,
+        let state_lock = crate::STATE.lock();
+        let state = match state_lock.as_ref() {
+            Some(state) => state,
             None => return SbiRet { a0: -1, a1: 0 },
         };
 
-        let attetstation_lock = ATTESTATION_CONTEXT.lock();
-        let tvm_attestation_ctx = match attetstation_lock.as_ref() {
-            Some(att) => att,
+        let tvm = match state.hypervisor.running_tvm() {
+            Some(tvm) => tvm,
             None => return SbiRet { a0: -1, a1: 0 },
-        }
-        .compute_next(measurement);
-        let evidence = tvm_attestation_ctx.get_evidence(&measurement, &challenge);
+        };
+
+        let evidence = tvm.get_evidence(&challenge);
         match evidence.to_bytes() {
-            Ok(e) => e,
-            Err(e) => {
-                println!("[OLORIN] Error during evidence encoding {}", e);
+            Ok(encoded) => encoded,
+            Err(error) => {
+                println!("[OLORIN] Error during evidence encoding {}", error);
                 return SbiRet { a0: -1, a1: 0 };
             }
         }
     };
-    // D. VALIDATION: Check Size
+
     if encoded_evidence.len() > cert_size {
         return SbiRet { a0: -1, a1: 0 }; // Buffer too small
     }
