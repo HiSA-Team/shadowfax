@@ -32,6 +32,60 @@ struct PhysicalMemory {
     guest_id: Option<usize>,
 }
 
+// Track ELF segments to know what to copy where during lazy loading.
+pub struct LazySegment {
+    pub(crate) gpa: usize,
+    pub(crate) memsz: usize,
+    pub(crate) filesz: usize,
+    pub(crate) offset: usize,
+}
+
+impl LazySegment {
+    pub fn new(gpa: usize, memsz: usize, filesz: usize, offset: usize) -> Self {
+        Self {
+            gpa,
+            memsz,
+            filesz,
+            offset,
+        }
+    }
+}
+
+pub struct LazyState {
+    pub(crate) elf_data: &'static [u8],
+    pub(crate) segments: alloc::vec::Vec<LazySegment>,
+    pub(crate) dtb_gpa: usize,
+    pub(crate) dtb_data: &'static [u8],
+    pub(crate) initrd_gpa: usize,
+    pub(crate) initrd_data: &'static [u8],
+    pub(crate) next_free_phys: usize,
+    pub(crate) phys_limit: usize,
+}
+
+impl LazyState {
+    pub fn new(
+        segments: alloc::vec::Vec<LazySegment>,
+        elf_data: &'static [u8],
+        dtb_gpa: usize,
+        dtb_data: &'static [u8],
+        initrd_gpa: usize,
+        initrd_data: &'static [u8],
+        next_free_phys: usize,
+        phys_limit: usize,
+    ) -> Self {
+        Self {
+            elf_data,
+            segments,
+            dtb_gpa,
+            dtb_data,
+            initrd_gpa,
+            initrd_data,
+            next_free_phys,
+            phys_limit,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct VcpuRef {
     pub tvmid: usize,
@@ -72,6 +126,32 @@ impl HypervisorState {
     pub fn running_tvm(&self) -> Option<&Tvm> {
         let current = self.current_vcpu()?;
         self.tvms.get(current.tvmid).and_then(|tvm| tvm.as_ref())
+    }
+
+    pub fn running_tvm_mut(&mut self) -> Option<&mut Tvm> {
+        let current = self.current_vcpu()?;
+        self.tvms
+            .get_mut(current.tvmid)
+            .and_then(|tvm| tvm.as_mut())
+    }
+
+    pub fn tvm(&self, tvmid: usize) -> Option<&Tvm> {
+        self.tvms.get(tvmid).and_then(|tvm| tvm.as_ref())
+    }
+
+    pub fn set_tvm_lazy_state(
+        &mut self,
+        tvmid: usize,
+        lazy_state: LazyState,
+    ) -> anyhow::Result<()> {
+        match self.tvms.get_mut(tvmid).and_then(|tvm| tvm.as_mut()) {
+            Some(tvm) if matches!(tvm.state_enum, TvmState::TvmInitializing) => {
+                tvm.lazy_state = Some(lazy_state);
+                Ok(())
+            }
+            Some(_) => Err(anyhow::anyhow!("cannot set lazy state after finalization")),
+            None => Err(anyhow::anyhow!("no tvm present")),
+        }
     }
     pub fn add_confidential_pages(
         &mut self,
@@ -646,6 +726,7 @@ pub struct Tvm {
     hasher: sha2::Sha384,
     measure: alloc::vec::Vec<u8>,
     attestation_context: TvmAttestationContext,
+    lazy_state: Option<LazyState>,
 }
 
 impl Tvm {
@@ -670,11 +751,27 @@ impl Tvm {
             hasher: Sha384::new(),
             measure: alloc::vec::Vec::new(),
             attestation_context,
+            lazy_state: None,
         }
     }
     pub fn get_evidence(&self, challenge: &[u8]) -> Evidence {
         self.attestation_context
             .get_evidence(&self.measure, challenge)
+    }
+
+    pub(crate) fn contains_gpa_range(&self, start: usize, end: usize) -> bool {
+        self.memory_regions.iter().any(|region| {
+            let region_end = region.guest_gpa_base + region.num_pages * PAGE_SIZE;
+            start >= region.guest_gpa_base && end <= region_end
+        })
+    }
+
+    pub(crate) fn page_table(&self) -> (usize, usize) {
+        (self.page_table_addr, self.page_table_size)
+    }
+
+    pub(crate) fn lazy_state_mut(&mut self) -> Option<&mut LazyState> {
+        self.lazy_state.as_mut()
     }
 
     fn finalize(

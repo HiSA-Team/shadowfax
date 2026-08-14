@@ -4,12 +4,17 @@ use common::{attestation::DiceLayer, sbi::PAGE_SIZE};
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
 use crate::{
-    constants::{GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE, UART_GPA, UART_HPA},
-    hyper::HypervisorState,
-    println,
-    trap::{LazySegment, LazyState, LAZY_STATE},
-    TsmState, _secure_init, STATE,
+    hyper::{HypervisorState, LazySegment, LazyState},
+    println, TsmState, _secure_init, STATE,
 };
+
+/* Guest */
+const GUEST_DRAM_SIZE: usize = 256 * 1024 * 1024;
+const GUEST_DRAM_GPA_START: usize = 0x20_0000;
+const GUEST_DRAM_GPA_END: usize = 0x20_0000 + GUEST_DRAM_SIZE;
+
+const UART_GPA: usize = 0x1800_0000;
+const UART_HPA: usize = 0x1000_0000;
 
 #[link_section = ".rodata"]
 static GUEST_ELF: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.elf")).len()] =
@@ -56,13 +61,31 @@ pub fn test_tvm_bootstrap() -> ! {
 
     // 4. Use the ELF loading procedure
     // This helper parses GUEST_ELF and maps it into the TVM
-    let tvm_id = bootstrap_load_elf_lazy(
-        state,
-        tvm_page_table_addr,
-        tvm_state_addr,
-        tvm_confidential_pool,
-    )
-    .expect("Failed to load ELF");
+    let tvm_id = {
+        #[cfg(feature = "lazy")]
+        {
+            println!("[OLORIN] lazy mode -> there will be page faults");
+            bootstrap_load_elf_lazy(
+                state,
+                tvm_page_table_addr,
+                tvm_state_addr,
+                tvm_confidential_pool,
+            )
+            .expect("Failed to load ELF")
+        }
+
+        #[cfg(not(feature = "lazy"))]
+        {
+            println!("[OLORIN] no lazy mode -> no page faults");
+            bootstrap_load_elf(
+                state,
+                tvm_page_table_addr,
+                tvm_state_addr,
+                tvm_confidential_pool,
+            )
+            .expect("Failed to load ELF")
+        }
+    };
 
     // 5. Create VCPU (ID 0)
     state
@@ -135,9 +158,15 @@ fn bootstrap_load_elf_lazy(
     let dtb_offset = (GUEST_DRAM_SIZE - GUEST_DTB.len() - 1) & !(PAGE_SIZE - 1);
     let dtb_addr = GUEST_DRAM_GPA_START + dtb_offset;
 
-    {
-        let mut lock = LAZY_STATE.lock();
-        *lock = Some(LazyState::new(
+    // Standard TVM Creation (Metadata only, NO MAPPING)
+    let attestation = state.attestation_context.compute_next(&[0; 32]);
+    let tvm_id = state
+        .hypervisor
+        .create_tvm(0, attestation, pt_addr, state_addr)?;
+
+    state.hypervisor.set_tvm_lazy_state(
+        tvm_id,
+        LazyState::new(
             segments,
             GUEST_ELF.as_slice(),
             dtb_addr,
@@ -146,20 +175,13 @@ fn bootstrap_load_elf_lazy(
             GUEST_INITRD.as_slice(),
             conf_pool_base,
             conf_pool_base + GUEST_DRAM_SIZE,
-            state_addr - pt_addr,
-        ));
-        println!(
-            "[OLORIN] initialized page fault state: 0x{:x} - 0x{:x}",
-            conf_pool_base,
-            conf_pool_base + GUEST_DRAM_SIZE,
-        );
-    }
-
-    // Standard TVM Creation (Metadata only, NO MAPPING)
-    let attestation = state.attestation_context.compute_next(&[0; 32]);
-    let tvm_id = state
-        .hypervisor
-        .create_tvm(0, attestation, pt_addr, state_addr)?;
+        ),
+    )?;
+    println!(
+        "[OLORIN] initialized page fault state: 0x{:x} - 0x{:x}",
+        conf_pool_base,
+        conf_pool_base + GUEST_DRAM_SIZE,
+    );
 
     state
         .hypervisor

@@ -1,19 +1,12 @@
-use alloc::vec::Vec;
 use common::sbi::{
     sbi_call, SbiRet, COVG_EXTENSION, COVG_GET_EVIDENCE, PAGE_SIZE, SBI_COVH_EXT_ID,
     SBI_COVH_RUN_TVM_VCPU, SBI_SYSTEM_RESET_EXT_ID, SBI_SYSTEM_RESET_TYPE_SHUTDOWN,
 };
 use riscv::interrupt::Trap;
-use spin::Mutex;
 
 use crate::{
-    constants::{GUEST_DRAM_GPA_END, GUEST_DRAM_GPA_START},
     gpt::{map_4k_leaf, read_guest_memory, write_guest_memory, PTE_A, PTE_D, PTE_R, PTE_W, PTE_X},
-    h_extension::{
-        csrs::{hgatp, htval},
-        instruction::hfence_gvma_all,
-        HvException,
-    },
+    h_extension::{csrs::htval, instruction::hfence_gvma_all, HvException},
     println,
 };
 
@@ -29,74 +22,6 @@ pub struct VmTrapContext {
     pub sepc: usize,
     pub sstatus: usize,
 }
-
-// Track ELF segments to know what to copy where
-pub struct LazySegment {
-    gpa: usize,
-    memsz: usize,
-    filesz: usize,
-    offset: usize,
-}
-
-impl LazySegment {
-    pub fn new(gpa: usize, memsz: usize, filesz: usize, offset: usize) -> Self {
-        Self {
-            gpa,
-            memsz,
-            filesz,
-            offset,
-        }
-    }
-}
-
-// Global state accessible by the trap handler
-pub struct LazyState {
-    // elf
-    segments: Vec<LazySegment>,
-    elf_data: &'static [u8],
-
-    // dtb
-    dtb_gpa: usize,
-    dtb_data: &'static [u8],
-
-    // initrd
-    initrd_gpa: usize,
-    initrd_data: &'static [u8],
-
-    // allocator
-    next_free_phys: usize, // Simple bump allocator for physical pages
-    phys_limit: usize,
-    page_table_size: usize,
-}
-
-impl LazyState {
-    pub fn new(
-        segments: Vec<LazySegment>,
-        elf_data: &'static [u8],
-        dtb_gpa: usize,
-        dtb_data: &'static [u8],
-        initrd_gpa: usize,
-        initrd_data: &'static [u8],
-        next_free_phys: usize,
-        phys_limit: usize,
-        page_table_size: usize,
-    ) -> Self {
-        Self {
-            segments,
-            elf_data,
-            dtb_gpa,
-            dtb_data,
-            initrd_gpa,
-            initrd_data,
-            next_free_phys,
-            phys_limit,
-            page_table_size,
-        }
-    }
-}
-
-// Mutex to safely access this from the trap handler
-pub static LAZY_STATE: Mutex<Option<LazyState>> = Mutex::new(None);
 
 #[no_mangle]
 #[unsafe(naked)]
@@ -268,13 +193,22 @@ fn handle_guest_system_reset(ctx: *mut VmTrapContext) -> SbiRet {
 }
 
 fn guest_shutdown_to_host() -> ! {
-    let return_fid = {
-        let mut state = crate::STATE.lock();
-        let hyp = &mut state.as_mut().unwrap().hypervisor;
-        let tvmid = hyp.current_vcpu().expect("trap with no running TVM").tvmid;
-        let owner = hyp.tvm_shutdown(tvmid).unwrap();
-        ((owner & 0x3F) << 26) | SBI_COVH_RUN_TVM_VCPU
-    };
+    let mut state = crate::STATE.lock();
+    let state = state.as_mut().expect("TSM state not initialized");
+    let tvmid = state
+        .hypervisor
+        .current_vcpu()
+        .expect("trap with no running TVM")
+        .tvmid;
+    hyper_exit_to_host(state, tvmid)
+}
+
+fn hyper_exit_to_host(state: &mut crate::TsmState, tvmid: usize) -> ! {
+    let owner = state
+        .hypervisor
+        .tvm_shutdown(tvmid)
+        .expect("TVM is not running");
+    let return_fid = ((owner & 0x3F) << 26) | SBI_COVH_RUN_TVM_VCPU;
 
     unsafe {
         core::arch::asm!(
@@ -289,139 +223,164 @@ fn guest_shutdown_to_host() -> ! {
 }
 
 fn handle_page_fault(htval: usize, stval: usize) {
-    // let cycle_start = read_cycle();
-    let mut lock = LAZY_STATE.lock();
     let gpa = (htval << 2) | (stval & 0x3);
     let gpa_page = gpa & !(PAGE_SIZE - 1);
     let gpa_page_end = gpa_page + PAGE_SIZE;
 
-    if gpa_page < GUEST_DRAM_GPA_START || gpa_page_end > GUEST_DRAM_GPA_END {
-        panic!("GPA 0x{:x} is outside guest RAM", gpa);
+    let mut state_lock = crate::STATE.lock();
+    let state = state_lock.as_mut().expect("TSM state not initialized");
+    let tvmid = state
+        .hypervisor
+        .current_vcpu()
+        .expect("page fault with no running TVM")
+        .tvmid;
+
+    let in_tvm_region = state
+        .hypervisor
+        .tvm(tvmid)
+        .is_some_and(|tvm| tvm.contains_gpa_range(gpa_page, gpa_page_end));
+    if !in_tvm_region {
+        println!(
+            "[OLORIN] Guest page fault outside TVM memory regions: GPA=0x{:x}",
+            gpa
+        );
+        hyper_exit_to_host(state, tvmid);
     }
 
-    if let Some(lazy) = lock.as_mut() {
-        // Allocate a physical page (simple bump allocation)
-        if lazy.next_free_phys >= lazy.phys_limit {
-            panic!(
-                "OOM: run out of confidential memory for lazy loading (gpa=0x{:x})",
-                gpa,
+    let (page_table_addr, page_table_size) = state
+        .hypervisor
+        .tvm(tvmid)
+        .map(|tvm| tvm.page_table())
+        .expect("running TVM disappeared");
+
+    let lazy = match state.hypervisor.running_tvm_mut() {
+        Some(tvm) => match tvm.lazy_state_mut() {
+            Some(lazy) => lazy,
+            None => {
+                println!(
+                    "[OLORIN] Guest page fault with no lazy state: GPA=0x{:x}",
+                    gpa
+                );
+                hyper_exit_to_host(state, tvmid);
+            }
+        },
+        None => {
+            println!("[OLORIN] Page fault with no running TVM: GPA=0x{:x}", gpa);
+            hyper_exit_to_host(state, tvmid);
+        }
+    };
+    // Allocate a physical page (simple bump allocation)
+    if lazy.next_free_phys >= lazy.phys_limit {
+        panic!(
+            "OOM: run out of confidential memory for lazy loading (gpa=0x{:x})",
+            gpa,
+        );
+    }
+
+    let pa = lazy.next_free_phys;
+    lazy.next_free_phys += PAGE_SIZE;
+
+    // println!(
+    //     "[OLORIN] page_fault_handler: htval 0x{:x}; stval 0x{:x}; gpa 0x{:x}; gpa_page 0x{:x}; next_free_phys 0x{:x}; phys_limit 0x{:x}",
+    //     htval, stval, gpa, gpa_page, lazy.next_free_phys, lazy.phys_limit
+    // );
+
+    // Initialize page with zeros (important for BSS or partial pages)
+    unsafe { core::ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE) };
+
+    let dtb_start = lazy.dtb_gpa;
+    let dtb_end = lazy.dtb_gpa + lazy.dtb_data.len();
+    if gpa_page < dtb_end && dtb_start < gpa_page_end {
+        let copy_gpa_start = core::cmp::max(gpa_page, dtb_start);
+        let copy_gpa_end = core::cmp::min(gpa_page_end, dtb_end);
+
+        let source_offset = copy_gpa_start - dtb_start;
+        let destination_offset = copy_gpa_start - gpa_page;
+        let copy_length = copy_gpa_end - copy_gpa_start;
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                lazy.dtb_data.as_ptr().add(source_offset),
+                (pa as *mut u8).add(destination_offset),
+                copy_length,
             );
         }
+    }
 
-        let pa = lazy.next_free_phys;
-        lazy.next_free_phys += PAGE_SIZE;
+    let initrd_start = lazy.initrd_gpa;
+    let initrd_end = lazy.initrd_gpa + lazy.initrd_data.len();
+    if gpa_page < initrd_end && initrd_start < gpa_page_end {
+        let copy_gpa_start = core::cmp::max(gpa_page, initrd_start);
+        let copy_gpa_end = core::cmp::min(gpa_page_end, initrd_end);
+
+        let source_offset = copy_gpa_start - initrd_start;
+        let destination_offset = copy_gpa_start - gpa_page;
+        let copy_length = copy_gpa_end - copy_gpa_start;
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                lazy.initrd_data.as_ptr().add(source_offset),
+                (pa as *mut u8).add(destination_offset),
+                copy_length,
+            );
+        }
+    }
+
+    // Fill with ELF data if the page overlaps a segment
+    for segment in &lazy.segments {
+        let seg_start = segment.gpa;
+        let seg_end = segment.gpa + segment.memsz;
+
+        if gpa_page_end <= seg_start || gpa_page >= seg_end {
+            continue;
+        }
+
+        let segment_file_start = segment.gpa;
+        let segment_file_end = segment.gpa + segment.filesz;
+
+        // Intersection of this page and the file-backed portion.
+        let copy_gpa_start = core::cmp::max(gpa_page, segment_file_start);
+        let copy_gpa_end = core::cmp::min(gpa_page_end, segment_file_end);
+
+        if copy_gpa_start >= copy_gpa_end {
+            // This is BSS: page was already zeroed.
+            continue;
+        }
+
+        let source_offset = segment.offset + (copy_gpa_start - segment.gpa);
+        let destination_offset = copy_gpa_start - gpa_page;
+        let copy_length = copy_gpa_end - copy_gpa_start;
 
         // println!(
-        //     "[OLORIN] page_fault_handler: htval 0x{:x}; stval 0x{:x}; gpa 0x{:x}; gpa_page 0x{:x}; next_free_phys 0x{:x}; phys_limit 0x{:x}",
-        //     htval, stval, gpa, gpa_page, lazy.next_free_phys, lazy.phys_limit
+        //     "[OLORIN] page_fault_handler: copy ELF offset 0x{:x}, len {} -> GPA 0x{:x}, HPA 0x{:x}",
+        //     source_offset,
+        //     copy_length,
+        //     copy_gpa_start,
+        //     pa + destination_offset,
         // );
 
-        // Initialize page with zeros (important for BSS or partial pages)
-        unsafe { core::ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE) };
-
-        let dtb_start = lazy.dtb_gpa;
-        let dtb_end = lazy.dtb_gpa + lazy.dtb_data.len();
-        if gpa_page < dtb_end && dtb_start < gpa_page_end {
-            let copy_gpa_start = core::cmp::max(gpa_page, dtb_start);
-            let copy_gpa_end = core::cmp::min(gpa_page_end, dtb_end);
-
-            let source_offset = copy_gpa_start - dtb_start;
-            let destination_offset = copy_gpa_start - gpa_page;
-            let copy_length = copy_gpa_end - copy_gpa_start;
-
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    lazy.dtb_data.as_ptr().add(source_offset),
-                    (pa as *mut u8).add(destination_offset),
-                    copy_length,
-                );
-            }
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                lazy.elf_data.as_ptr().add(source_offset),
+                (pa as *mut u8).add(destination_offset),
+                copy_length,
+            );
         }
-
-        let initrd_start = lazy.initrd_gpa;
-        let initrd_end = lazy.initrd_gpa + lazy.initrd_data.len();
-        if gpa_page < initrd_end && initrd_start < gpa_page_end {
-            let copy_gpa_start = core::cmp::max(gpa_page, initrd_start);
-            let copy_gpa_end = core::cmp::min(gpa_page_end, initrd_end);
-
-            let source_offset = copy_gpa_start - initrd_start;
-            let destination_offset = copy_gpa_start - gpa_page;
-            let copy_length = copy_gpa_end - copy_gpa_start;
-
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    lazy.initrd_data.as_ptr().add(source_offset),
-                    (pa as *mut u8).add(destination_offset),
-                    copy_length,
-                );
-            }
-        }
-
-        // Fill with ELF data if the page overlaps a segment
-        for segment in &lazy.segments {
-            let seg_start = segment.gpa;
-            let seg_end = segment.gpa + segment.memsz;
-
-            if gpa_page_end <= seg_start || gpa_page >= seg_end {
-                continue;
-            }
-
-            let segment_file_start = segment.gpa;
-            let segment_file_end = segment.gpa + segment.filesz;
-
-            // Intersection of this page and the file-backed portion.
-            let copy_gpa_start = core::cmp::max(gpa_page, segment_file_start);
-            let copy_gpa_end = core::cmp::min(gpa_page_end, segment_file_end);
-
-            if copy_gpa_start >= copy_gpa_end {
-                // This is BSS: page was already zeroed.
-                continue;
-            }
-
-            let source_offset = segment.offset + (copy_gpa_start - segment.gpa);
-            let destination_offset = copy_gpa_start - gpa_page;
-            let copy_length = copy_gpa_end - copy_gpa_start;
-
-            // println!(
-            //     "[OLORIN] page_fault_handler: copy ELF offset 0x{:x}, len {} -> GPA 0x{:x}, HPA 0x{:x}",
-            //     source_offset,
-            //     copy_length,
-            //     copy_gpa_start,
-            //     pa + destination_offset,
-            // );
-
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    lazy.elf_data.as_ptr().add(source_offset),
-                    (pa as *mut u8).add(destination_offset),
-                    copy_length,
-                );
-            }
-        }
-
-        // Map the page into the Guest Page Table
-        // Retrieve the root PPN from HGATP to find the page table location
-        let hgatp_val = hgatp::read().bits();
-        let root_ppn = hgatp_val & 0xFF_FFFF_FFFF_F;
-        let root_pt = (root_ppn << 12) as usize;
-
-        // Map with full permissions for now (R/W/X/U)
-        map_4k_leaf(
-            root_pt,
-            lazy.page_table_size,
-            gpa_page,
-            pa,
-            PTE_R | PTE_W | PTE_X | PTE_A | PTE_D,
-        );
-
-        // 6. Flush TLB so the CPU sees the new mapping immediately
-        hfence_gvma_all();
-    } else {
-        panic!(
-            "Guest Page Fault occurred but Lazy Loading state is not initialized! (GPA={:x}; gpa_page={:x})",
-            gpa,gpa_page
-        );
     }
+
+    // Map the page into the Guest Page Table
+    // Retrieve the root PPN from HGATP to find the page table location
+    // Map with full permissions for now (R/W/X/U)
+    map_4k_leaf(
+        page_table_addr,
+        page_table_size,
+        gpa_page,
+        pa,
+        PTE_R | PTE_W | PTE_X | PTE_A | PTE_D,
+    );
+
+    // 6. Flush TLB so the CPU sees the new mapping immediately
+    hfence_gvma_all();
 }
 
 fn handle_covg(fid: usize, args: &[usize; 6]) -> SbiRet {

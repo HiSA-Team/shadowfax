@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 standalone = []
+lazy = []
 
 [dependencies]
 anyhow = { version = "1.0.98", default-features = false }
