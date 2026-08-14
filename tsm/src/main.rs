@@ -29,7 +29,6 @@ mod h_extension;
 mod hyper;
 mod log;
 mod perf;
-mod sbi;
 mod state;
 mod trap;
 

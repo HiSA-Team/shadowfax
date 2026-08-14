@@ -2,7 +2,10 @@
 #![no_main]
 
 pub mod sbi {
+    // Standrd SBI constants
     pub const SBI_SYSTEM_RESET_EXT_ID: usize = 0x53525354;
+    pub const SBI_SYSTEM_RESET_TYPE_SHUTDOWN: usize = 0;
+    pub const SBI_SYSTEM_RESET_REASON_NO_REASON: usize = 0;
 
     pub const COVH_DEFAULT_PAGE_SIZE: usize = 4096;
     // CoVH constants

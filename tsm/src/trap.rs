@@ -1,5 +1,11 @@
 use alloc::vec::Vec;
-use common::sbi::{sbi_call, COVG_EXTENSION, PAGE_SIZE, SBI_COVH_EXT_ID, SBI_SYSTEM_RESET_EXT_ID};
+use common::{
+    attestation::DiceLayer,
+    sbi::{
+        sbi_call, SbiRet, COVG_EXTENSION, COVG_GET_EVIDENCE, PAGE_SIZE, SBI_COVH_EXT_ID,
+        SBI_SYSTEM_RESET_EXT_ID, SBI_SYSTEM_RESET_TYPE_SHUTDOWN,
+    },
+};
 use riscv::interrupt::Trap;
 use spin::Mutex;
 
@@ -12,8 +18,8 @@ use crate::{
         instruction::hfence_gvma_all,
         HvException,
     },
-    hyper::map_4k_leaf,
-    sbi::handle_covg,
+    hyper::{map_4k_leaf, read_guest_memory, write_guest_memory},
+    println, ATTESTATION_CONTEXT, MEASUREMENT,
 };
 
 #[repr(C)]
@@ -198,22 +204,23 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                 HvException::EcallFromVsMode => {
                     let regs = unsafe { &mut (*ctx).regs };
 
-                    // 1.Check if the call was a CoVE-G
-                    let sbi_ret = if regs[17] == COVG_EXTENSION {
-                        handle_covg(
+                    let eid = regs[17];
+
+                    let sbi_ret = match eid {
+                        COVG_EXTENSION => handle_covg(
+                            regs[16],
+                            &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
+                        ),
+                        SBI_SYSTEM_RESET_EXT_ID => handle_guest_system_reset(ctx),
+                        /* fall back to opensbi */
+                        _ => sbi_call(
                             regs[17],
                             regs[16],
                             &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
-                        )
-                    } else if regs[17] == SBI_SYSTEM_RESET_EXT_ID && regs[16] == 0 {
-                        guest_shutdown_to_host();
-                    } else {
-                        sbi_call(
-                            regs[17],
-                            regs[16],
-                            &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
-                        )
+                        ),
                     };
+
+                    // 1.Check if the call was a CoVE-G
                     // 3. Write return values back to Guest a0, a1
                     regs[10] = sbi_ret.a0 as usize;
                     regs[11] = sbi_ret.a1 as usize;
@@ -247,6 +254,15 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
     ctx
 }
 
+fn handle_guest_system_reset(ctx: *mut VmTrapContext) -> SbiRet {
+    let regs = unsafe { &mut (*ctx).regs };
+    let reset_type = regs[10];
+    match reset_type {
+        SBI_SYSTEM_RESET_TYPE_SHUTDOWN => guest_shutdown_to_host(),
+        _ => SbiRet { a0: -1, a1: 0 },
+    }
+}
+
 fn guest_shutdown_to_host() -> ! {
     let return_fid = {
         let mut state = crate::STATE.lock();
@@ -265,7 +281,6 @@ fn guest_shutdown_to_host() -> ! {
     }
 }
 
-// static mut PAGE_FAULT_COUNTER: usize = 0;
 fn handle_page_fault(htval: usize, stval: usize) {
     // let cycle_start = read_cycle();
     let mut lock = LAZY_STATE.lock();
@@ -335,11 +350,6 @@ fn handle_page_fault(htval: usize, stval: usize) {
             }
         }
 
-        // unsafe {
-        //     PAGE_FAULT_COUNTER += 1;
-        //     let a = PAGE_FAULT_COUNTER;
-        //     println!("PAGE_FAULT_COUNTER = {}", a);
-        // }
         // Fill with ELF data if the page overlaps a segment
         for segment in &lazy.segments {
             let seg_start = segment.gpa;
@@ -405,6 +415,73 @@ fn handle_page_fault(htval: usize, stval: usize) {
             gpa,gpa_page
         );
     }
-    // let cycle_end = read_cycle();
-    // println!("pfaultcycle = {}", cycle_end - cycle_start);
+}
+
+fn handle_covg(fid: usize, args: &[usize; 6]) -> SbiRet {
+    match fid {
+        COVG_GET_EVIDENCE => {
+            println!("[OLORIN] Requested attestation certificate");
+            handle_covg_get_evidence(args[0], args[1], args[2], args[3], args[4], args[5])
+        }
+        _ => SbiRet { a0: -1, a1: 0 },
+    }
+}
+
+fn handle_covg_get_evidence(
+    _pub_key_addr: usize,
+    _pub_key_size: usize,
+    challenge_addr: usize,
+    _cert_format: usize,
+    cert_addr_out: usize,
+    cert_size: usize,
+) -> SbiRet {
+    // A. SETUP: Get Page Table
+    let hgatp_val = crate::h_extension::csrs::hgatp::read().bits();
+    let root_pt = ((hgatp_val & 0xFF_FFFF_FFFF_F) << 12) as usize;
+
+    // B. INPUT: Read Challenge from Guest
+    let mut challenge = [0u8; 64];
+    if read_guest_memory(root_pt, challenge_addr, &mut challenge).is_err() {
+        return SbiRet { a0: -1, a1: 0 }; // Fault or Boundary Error
+    }
+
+    // C. LOGIC: Generate Evidence (Holds Locks)
+    let encoded_evidence = {
+        // We assume Measurement is also available here or passed in
+        // For this example, let's say it's in TSM or separate lock
+        let measure_lock = MEASUREMENT.lock();
+        let measurement = match measure_lock.as_ref() {
+            Some(m) => m,
+            None => return SbiRet { a0: -1, a1: 0 },
+        };
+
+        let attetstation_lock = ATTESTATION_CONTEXT.lock();
+        let tvm_attestation_ctx = match attetstation_lock.as_ref() {
+            Some(att) => att,
+            None => return SbiRet { a0: -1, a1: 0 },
+        }
+        .compute_next(measurement);
+        let evidence = tvm_attestation_ctx.get_evidence(&measurement, &challenge);
+        match evidence.to_bytes() {
+            Ok(e) => e,
+            Err(e) => {
+                println!("[OLORIN] Error during evidence encoding {}", e);
+                return SbiRet { a0: -1, a1: 0 };
+            }
+        }
+    };
+    // D. VALIDATION: Check Size
+    if encoded_evidence.len() > cert_size {
+        return SbiRet { a0: -1, a1: 0 }; // Buffer too small
+    }
+
+    if write_guest_memory(root_pt, cert_addr_out, &encoded_evidence).is_err() {
+        return SbiRet { a0: -1, a1: 0 };
+    }
+
+    // Success
+    SbiRet {
+        a0: 0,
+        a1: encoded_evidence.len() as isize,
+    }
 }
