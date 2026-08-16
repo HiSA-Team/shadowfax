@@ -34,21 +34,10 @@ struct PhysicalMemory {
 
 // Track ELF segments to know what to copy where during lazy loading.
 pub struct LazySegment {
-    pub(crate) gpa: usize,
-    pub(crate) memsz: usize,
-    pub(crate) filesz: usize,
-    pub(crate) offset: usize,
-}
-
-impl LazySegment {
-    pub fn new(gpa: usize, memsz: usize, filesz: usize, offset: usize) -> Self {
-        Self {
-            gpa,
-            memsz,
-            filesz,
-            offset,
-        }
-    }
+    pub gpa: usize,
+    pub memsz: usize,
+    pub filesz: usize,
+    pub offset: usize,
 }
 
 pub struct LazyState {
@@ -310,6 +299,7 @@ impl HypervisorState {
                         num_pages,
                     })
                     .map_err(|_| anyhow::anyhow!("cannot push confidential memory regions"))?;
+
                 Ok(())
             }
             None => Err(anyhow::anyhow!("no tvm present")),
@@ -375,6 +365,9 @@ impl HypervisorState {
         num_pages: usize,
         tvm_guest_gpa: usize,
     ) -> anyhow::Result<()> {
+        if num_pages == 0 {
+            return Ok(());
+        }
         assert_eq!(tsm_page_type, 0, "accepting 4k pages for now");
 
         if dest_addr % PAGE_SIZE != 0 || tvm_guest_gpa % PAGE_SIZE != 0 || num_pages == 0 {
