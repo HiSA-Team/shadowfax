@@ -108,6 +108,7 @@ pub fn test_tvm_bootstrap() -> ! {
     unsafe { HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg) }
 }
 
+#[cfg(feature = "lazy")]
 fn bootstrap_load_elf_lazy(
     state: &mut TsmState,
     pt_addr: usize,
