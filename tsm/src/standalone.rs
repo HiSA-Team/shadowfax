@@ -1,20 +1,25 @@
-use core::alloc::Layout;
-
 use common::{attestation::DiceLayer, sbi::PAGE_SIZE};
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
 use crate::{
     hyper::{HypervisorState, LazySegment, LazyState},
-    println, TsmState, _secure_init, STATE,
+    println, TsmState, _secure_init,
+    gpt::{map_4k_leaf, PTE_A, PTE_D, PTE_R, PTE_W, PTE_X},
+    STATE,
 };
 
 /* Guest */
-const GUEST_DRAM_SIZE: usize = 256 * 1024 * 1024;
 const GUEST_DRAM_GPA_START: usize = 0x20_0000;
-const GUEST_DRAM_GPA_END: usize = 0x20_0000 + GUEST_DRAM_SIZE;
+const GUEST_DRAM_SIZE: usize = 256 * 1024 * 1024;
+
+const GUEST_INITRD_GPA: usize = 0x0100_0000;
+
+const CONFIDENTIAL_MEMORY_START: usize = 0x94000000;
 
 const UART_GPA: usize = 0x1800_0000;
 const UART_HPA: usize = 0x1000_0000;
+
+const GPT_SIZE: usize = 16 * 1024 * 1024;
 
 #[link_section = ".rodata"]
 static GUEST_ELF: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.elf")).len()] =
@@ -38,17 +43,15 @@ pub fn test_tvm_bootstrap() -> ! {
     let state = lock.as_mut().expect("State not initialized");
 
     // Assuming TSM is at 0x90000000-0x93FFFFFFFF, put TVM structures higher up.
-    //
-    let confidential_memory = 0x94000000;
-    let guest_ram_size = 256 * 1024 * 1024;
-    let tvm_page_table_addr = confidential_memory;
-    let tvm_state_addr = tvm_page_table_addr + 1024 * 1024;
-    let tvm_confidential_pool = tvm_state_addr + 4096;
-    let pool_size_pages = guest_ram_size / PAGE_SIZE;
+    let tvm_page_table_addr = CONFIDENTIAL_MEMORY_START;
+    let tvm_gpt_pages = GPT_SIZE / PAGE_SIZE;
+    let tvm_state_addr = CONFIDENTIAL_MEMORY_START + GPT_SIZE;
+    let tvm_confidential_pool = tvm_state_addr + PAGE_SIZE;
+    let pool_size_pages = GUEST_DRAM_SIZE / PAGE_SIZE;
 
     state
         .hypervisor
-        .add_confidential_pages(tvm_page_table_addr, 256)
+        .add_confidential_pages(tvm_page_table_addr, tvm_gpt_pages)
         .unwrap(); // 1 MiB
     state
         .hypervisor
@@ -119,6 +122,34 @@ fn bootstrap_load_elf_lazy(
     }
     .map_err(|e| anyhow::anyhow!("ELF parse error: {:?}", e))?;
 
+    let dtb_offset = (GUEST_DRAM_SIZE - GUEST_DTB.len() - 1) & !(PAGE_SIZE - 1);
+    let dtb_addr = GUEST_DRAM_GPA_START + dtb_offset;
+
+    // Standard TVM Creation (Metadata only, NO MAPPING)
+    let attestation = state.attestation_context.compute_next(&[0; 32]);
+    let tvmid = state
+        .hypervisor
+        .create_tvm(0, attestation, pt_addr, state_addr)?;
+    state
+        .hypervisor
+        .add_tvm_memory_region(tvmid, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
+
+    state
+        .hypervisor
+        .add_tvm_mmio_region(tvmid, UART_GPA, UART_HPA, PAGE_SIZE)?;
+
+    println!(
+        "[OLORIN] created TVM memory region: 0x{:x} - 0x{:x}",
+        GUEST_DRAM_GPA_START,
+        GUEST_DRAM_GPA_START + GUEST_DRAM_SIZE
+    );
+
+    println!(
+        "[OLORIN] created TVM MMIO memory region: 0x{:x} - 0x{:x}",
+        UART_GPA,
+        UART_GPA + PAGE_SIZE
+    );
+
     let elf_paddr_base: usize =
         elf.segments()
             .and_then(|segments| {
@@ -143,35 +174,25 @@ fn bootstrap_load_elf_lazy(
                 .checked_add(relative)
                 .ok_or_else(|| anyhow::anyhow!("GPA overflow"))?;
 
-            segments.push(LazySegment::new(
+            segments.push(LazySegment {
                 gpa,
-                ph.p_memsz as usize,
-                ph.p_filesz as usize,
-                ph.p_offset as usize,
-            ));
+                memsz: ph.p_memsz as usize,
+                filesz: ph.p_filesz as usize,
+                offset: ph.p_offset as usize,
+            });
 
             println!("ELF paddr 0x{:x} -> guest GPA 0x{:x}", elf_paddr, gpa);
         }
     }
 
-    /* Copy DTB into guest space */
-    let dtb_offset = (GUEST_DRAM_SIZE - GUEST_DTB.len() - 1) & !(PAGE_SIZE - 1);
-    let dtb_addr = GUEST_DRAM_GPA_START + dtb_offset;
-
-    // Standard TVM Creation (Metadata only, NO MAPPING)
-    let attestation = state.attestation_context.compute_next(&[0; 32]);
-    let tvm_id = state
-        .hypervisor
-        .create_tvm(0, attestation, pt_addr, state_addr)?;
-
     state.hypervisor.set_tvm_lazy_state(
-        tvm_id,
+        tvmid,
         LazyState::new(
             segments,
             GUEST_ELF.as_slice(),
             dtb_addr,
             GUEST_DTB.as_slice(),
-            0x01000000,
+            GUEST_INITRD_GPA,
             GUEST_INITRD.as_slice(),
             conf_pool_base,
             conf_pool_base + GUEST_DRAM_SIZE,
@@ -182,14 +203,6 @@ fn bootstrap_load_elf_lazy(
         conf_pool_base,
         conf_pool_base + GUEST_DRAM_SIZE,
     );
-
-    state
-        .hypervisor
-        .add_tvm_memory_region(tvm_id, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
-
-    state
-        .hypervisor
-        .add_tvm_mmio_region(tvm_id, UART_GPA, UART_HPA, PAGE_SIZE)?;
 
     // Finalize
     let entry_virtual = elf.ehdr.e_entry as usize;
@@ -218,9 +231,9 @@ fn bootstrap_load_elf_lazy(
     println!("[OLORIN] Guest dtb at : 0x{:x}", dtb_addr);
     state
         .hypervisor
-        .finalize_tvm(tvm_id, entry_gpa, dtb_addr, 0, &state.attestation_context)?;
+        .finalize_tvm(tvmid, entry_gpa, dtb_addr, 0, &state.attestation_context)?;
 
-    Ok(tvm_id)
+    Ok(tvmid)
 }
 
 fn bootstrap_load_elf(
@@ -237,128 +250,208 @@ fn bootstrap_load_elf(
     }
     .map_err(|e| anyhow::anyhow!("ELF parse error: {:?}", e))?;
 
-    // 1. Create TVM
+    // Standard TVM Creation (Metadata only, NO MAPPING)
     let attestation = state.attestation_context.compute_next(&[0; 32]);
-    let tvm_id = state
+    let tvmid = state
         .hypervisor
         .create_tvm(0, attestation, pt_addr, state_addr)?;
-
-    // 2. Define Guest RAM - MATCH LINKER SCRIPT (ORIGIN = 0x1000)
-    let gpa_base = 0x0;
-    let ram_size = 64 * 1024 * 1024;
     state
         .hypervisor
-        .add_tvm_memory_region(tvm_id, gpa_base, ram_size)?;
+        .add_tvm_memory_region(tvmid, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
 
-    let segments = elf
-        .segments()
-        .ok_or_else(|| anyhow::anyhow!("No program headers"))?;
-    let mut current_conf_ptr = conf_pool_base;
-    let mut highest_gpa_mapped = gpa_base;
+    state
+        .hypervisor
+        .add_tvm_mmio_region(tvmid, UART_GPA, UART_HPA, PAGE_SIZE)?;
 
-    // 3. Load PT_LOAD segments
-    for ph in segments.iter().filter(|ph| ph.p_type == PT_LOAD) {
-        let p_paddr = ph.p_paddr as usize;
-        let p_filesz = ph.p_filesz as usize;
-        let p_memsz = ph.p_memsz as usize;
-        let p_offset = ph.p_offset as usize;
+    println!("[OLORIN] created TVM with id {}", tvmid);
+    println!(
+        "[OLORIN] created TVM memory region: 0x{:x} - 0x{:x}",
+        GUEST_DRAM_GPA_START,
+        GUEST_DRAM_GPA_START + GUEST_DRAM_SIZE
+    );
 
-        // Alignment Math
-        let gpa_page_start = p_paddr & !(PAGE_SIZE - 1);
-        let offset_in_page = p_paddr - gpa_page_start;
-        let num_measured_pages = (offset_in_page + p_filesz + PAGE_SIZE - 1) / PAGE_SIZE;
+    println!(
+        "[OLORIN] created TVM MMIO memory region: 0x{:x} - 0x{:x}",
+        UART_GPA,
+        UART_GPA + PAGE_SIZE
+    );
 
-        let data = GUEST_ELF.as_slice();
-        if p_filesz > 0 {
-            // FIX: Use an aligned scratchpad to avoid "src addr must be page-aligned" panic
-            let layout =
-                Layout::from_size_align(num_measured_pages * PAGE_SIZE, PAGE_SIZE).unwrap();
-            unsafe {
-                let scratchpad = alloc::alloc::alloc_zeroed(layout);
-                if scratchpad.is_null() {
-                    return Err(anyhow::anyhow!("TSM Out of Memory"));
-                }
+    let (page_table_addr, page_table_size) = state
+        .hypervisor
+        .tvm(tvmid)
+        .map(|tvm| tvm.page_table())
+        .expect("running TVM disappeared");
 
-                // Copy ELF data into scratchpad at the correct sub-page offset
-                let src_data = &data[p_offset..p_offset + p_filesz];
-                core::ptr::copy_nonoverlapping(
-                    src_data.as_ptr(),
-                    scratchpad.add(offset_in_page),
-                    p_filesz,
-                );
+    let elf_paddr_base: usize =
+        elf.segments()
+            .and_then(|segments| {
+                segments
+                    .iter()
+                    .filter(|ph| ph.p_type == PT_LOAD)
+                    .map(|ph| ph.p_paddr)
+                    .min()
+            })
+            .ok_or_else(|| anyhow::anyhow!("ELF has no PT_LOAD segments"))? as usize;
 
-                // Map and measure the aligned scratchpad
-                state.hypervisor.add_tvm_measured_pages(
-                    tvm_id,
-                    scratchpad as usize,
-                    current_conf_ptr,
-                    0, // 4K
-                    num_measured_pages,
-                    gpa_page_start,
-                )?;
+    let mut segments = alloc::vec::Vec::new();
+    if let Some(hdrs) = elf.segments() {
+        for ph in hdrs.iter().filter(|ph| ph.p_type == PT_LOAD) {
+            let elf_paddr = ph.p_paddr as usize;
 
-                alloc::alloc::dealloc(scratchpad, layout);
+            let relative = elf_paddr
+                .checked_sub(elf_paddr_base)
+                .ok_or_else(|| anyhow::anyhow!("ELF has no PT_LOAD segments"))?;
+
+            let gpa = GUEST_DRAM_GPA_START
+                .checked_add(relative)
+                .ok_or_else(|| anyhow::anyhow!("GPA overflow"))?;
+
+            segments.push(LazySegment {
+                gpa,
+                memsz: ph.p_memsz as usize,
+                filesz: ph.p_filesz as usize,
+                offset: ph.p_offset as usize,
+            });
+        }
+    }
+
+    let mut pa = conf_pool_base;
+
+    let dtb_offset = (GUEST_DRAM_SIZE - GUEST_DTB.len() - 1) & !(PAGE_SIZE - 1);
+    let dtb_gpa_base = GUEST_DRAM_GPA_START + dtb_offset;
+    let dtb_gpa_end = dtb_gpa_base + GUEST_DTB.len();
+    let initrd_gpa_base = GUEST_INITRD_GPA;
+    let initrd_gpa_end = initrd_gpa_base + GUEST_INITRD.len();
+    for gpa_page in
+        (GUEST_DRAM_GPA_START..GUEST_DRAM_GPA_START + GUEST_DRAM_SIZE).step_by(PAGE_SIZE)
+    {
+        let gpa_page_end = gpa_page + PAGE_SIZE;
+        /* Map ELF */
+        for segment in &segments {
+            let seg_start = segment.gpa;
+            let seg_end = segment.gpa + segment.memsz;
+
+            if gpa_page_end <= seg_start || gpa_page >= seg_end {
+                continue;
             }
 
+            let segment_file_start = segment.gpa;
+            let segment_file_end = segment.gpa + segment.filesz;
+
+            // Intersection of this page and the file-backed portion.
+            let copy_gpa_start = core::cmp::max(gpa_page, segment_file_start);
+            let copy_gpa_end = core::cmp::min(gpa_page_end, segment_file_end);
+
+            if copy_gpa_start >= copy_gpa_end {
+                // This is BSS: page was already zeroed.
+                continue;
+            }
+
+            let source_offset = segment.offset + (copy_gpa_start - segment.gpa);
+            let destination_offset = copy_gpa_start - gpa_page;
+            let src_addr = unsafe { GUEST_ELF.as_ptr().add(source_offset) } as usize;
+            state.hypervisor.add_tvm_measured_pages(
+                tvmid,
+                src_addr,
+                pa + destination_offset,
+                0,
+                1,
+                gpa_page,
+            )?;
             // println!(
-            //     "[OLORIN] mapping 0x{:x} - 0x{:x} -> 0x{:x} - 0x{:x}; 0x{:x} - 0x{:x}",
-            //     p_paddr,
-            //     p_paddr + p_filesz,
-            //     gpa_page_start,
-            //     gpa_page_start + num_measured_pages * PAGE_SIZE,
-            //     current_conf_ptr,
-            //     current_conf_ptr + num_measured_pages * PAGE_SIZE
+            //     "[OLORIN] created ELF mapping: [0x{:x} -> 0x{:x}]",
+            //     gpa_page, pa
             // );
-            current_conf_ptr += num_measured_pages * PAGE_SIZE;
+        }
+        if gpa_page < dtb_gpa_end && dtb_gpa_base < gpa_page_end {
+            let copy_gpa_start = core::cmp::max(gpa_page, dtb_gpa_base);
+
+            let source_offset = copy_gpa_start - dtb_gpa_base;
+            let destination_offset = copy_gpa_start - gpa_page;
+
+            let src_addr = unsafe { GUEST_DTB.as_ptr().add(source_offset) } as usize;
+            state.hypervisor.add_tvm_measured_pages(
+                tvmid,
+                src_addr,
+                pa + destination_offset,
+                0,
+                1,
+                gpa_page,
+            )?;
+            // println!(
+            //     "[OLORIN] created DTB mapping: [0x{:x} -> 0x{:x}]",
+            //     gpa_page, pa
+            // );
         }
 
-        // Handle .bss suffix within the same segment
-        if p_memsz > p_filesz {
-            let total_pages = (offset_in_page + p_memsz + PAGE_SIZE - 1) / PAGE_SIZE;
-            let zero_pages = total_pages - num_measured_pages;
+        if gpa_page < initrd_gpa_end && initrd_gpa_base < gpa_page_end {
+            let copy_gpa_start = core::cmp::max(gpa_page, initrd_gpa_base);
 
-            if zero_pages > 0 {
-                let zero_gpa_start = gpa_page_start + (num_measured_pages * PAGE_SIZE);
-                state.hypervisor.add_tvm_zero_pages(
-                    tvm_id,
-                    current_conf_ptr,
-                    0,
-                    zero_pages,
-                    zero_gpa_start,
-                )?;
-                current_conf_ptr += zero_pages * PAGE_SIZE;
-            }
+            let source_offset = copy_gpa_start - initrd_gpa_base;
+            let destination_offset = copy_gpa_start - gpa_page;
+            let src_addr = unsafe { GUEST_INITRD.as_ptr().add(source_offset) } as usize;
+            state.hypervisor.add_tvm_measured_pages(
+                tvmid,
+                src_addr,
+                pa + destination_offset,
+                0,
+                1,
+                gpa_page,
+            )?;
+            // println!(
+            //     "[OLORIN] created INITRD mapping: [0x{:x} -> 0x{:x}]",
+            //     gpa_page, pa
+            // );
         }
 
-        // Track the end of mapped memory
-        let segment_end =
-            gpa_page_start + ((offset_in_page + p_memsz + PAGE_SIZE - 1) & !(PAGE_SIZE - 1));
-        highest_gpa_mapped = highest_gpa_mapped.max(segment_end);
+        map_4k_leaf(
+            page_table_addr,
+            page_table_size,
+            gpa_page,
+            pa,
+            PTE_R | PTE_W | PTE_X | PTE_A | PTE_D,
+        );
+
+        pa += PAGE_SIZE;
     }
 
-    // 4. Map the rest of the 2MB RAM (the stack and heap).
-    // Freestanding guests may use memory beyond their PT_LOAD segments.
-    let ram_end_gpa = gpa_base + ram_size;
-    if highest_gpa_mapped < ram_end_gpa {
-        let remaining_pages = (ram_end_gpa - highest_gpa_mapped) / PAGE_SIZE;
-        state.hypervisor.add_tvm_zero_pages(
-            tvm_id,
-            current_conf_ptr,
-            0,
-            remaining_pages,
-            highest_gpa_mapped,
-        )?;
-    }
+    // Finalize
+    let entry_virtual = elf.ehdr.e_entry as usize;
+    let entry_segment = elf
+        .segments()
+        .and_then(|segments| {
+            segments.iter().filter(|p| p.p_type == PT_LOAD).find(|p| {
+                let start = p.p_vaddr as usize;
+                let end = start + p.p_memsz as usize;
+                entry_virtual >= start && entry_virtual < end
+            })
+        })
+        .expect("cannot find entrypoint");
 
-    // 5. Finalize TVM
-    let entry_point = elf.ehdr.e_entry as usize;
-    state
-        .hypervisor
-        .finalize_tvm(tvm_id, entry_point, 0, 0, &state.attestation_context)?;
+    // Offset of entry within its PT_LOAD segment.
+    let entry_offset = entry_virtual - entry_segment.p_vaddr as usize;
 
-    Ok(tvm_id)
+    // Offset of the entry segment relative to the ELF physical base.
+    let entry_segment_offset = entry_segment.p_paddr as usize - elf_paddr_base;
+
+    let entry_gpa = GUEST_DRAM_GPA_START
+        .checked_add(entry_segment_offset)
+        .and_then(|address| address.checked_add(entry_offset))
+        .ok_or_else(|| anyhow::anyhow!("Entry GPA overflow"))?;
+    println!("[OLORIN] Guest entrypoint: 0x{:x}", entry_gpa);
+    println!("[OLORIN] Guest dtb at : 0x{:x}", dtb_gpa_base);
+    state.hypervisor.finalize_tvm(
+        tvmid,
+        entry_gpa,
+        dtb_gpa_base,
+        0,
+        &state.attestation_context,
+    )?;
+
+    Ok(tvmid)
 }
 
+#[allow(unused)]
 #[inline(always)]
 fn read_cycle() -> u64 {
     let value: u64;
