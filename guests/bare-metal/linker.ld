@@ -4,7 +4,7 @@ ENTRY(_start)
 MEMORY
 {
     /* GPA default payload address */
-    RAM (rwx) : ORIGIN = 0x1000, LENGTH = 0x20000
+    RAM (rwx) : ORIGIN = 0x200000, LENGTH = 0x20000
 }
 
 __stack_top = ORIGIN(RAM) + LENGTH(RAM);
