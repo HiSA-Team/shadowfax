@@ -4,7 +4,6 @@ use common::{
 };
 use heapless::Vec;
 use riscv::register::{
-    sepc,
     sstatus::{self, FS, SPP},
     stvec::{self, Stvec},
 };
@@ -187,28 +186,18 @@ impl HypervisorState {
             state_addr,
         ));
 
-        let pd_block_idx = self
-            .find_confidential_block_idx_covering(page_table_addr, page_table_size)
-            .ok_or_else(|| anyhow::anyhow!("page directory addr not in confidential memory"))?;
-
-        let state_block_idx = self
-            .find_confidential_block_idx_covering(state_addr, PAGE_SIZE)
-            .ok_or_else(|| anyhow::anyhow!("state addr not in confidential memory"))?;
-
-        {
-            let PhysicalMemory { guest_id, .. } = self
-                .confidential_memory
-                .get_mut(pd_block_idx)
-                .ok_or_else(|| anyhow::anyhow!("invalid pd block idx"))?;
-            *guest_id = Some(tvmid);
-        }
-        {
-            let PhysicalMemory { guest_id, .. } = self
-                .confidential_memory
-                .get_mut(state_block_idx)
-                .ok_or_else(|| anyhow::anyhow!("invalid state block idx"))?;
-            *guest_id = Some(tvmid);
-        }
+        Self::claim_confidential_range(
+            &mut self.confidential_memory,
+            page_table_addr,
+            page_table_size,
+            tvmid,
+        )?;
+        Self::claim_confidential_range(
+            &mut self.confidential_memory,
+            state_addr,
+            PAGE_SIZE,
+            tvmid,
+        )?;
 
         unsafe {
             let ptr = page_table_addr as *mut u8;
@@ -247,6 +236,7 @@ impl HypervisorState {
                             }
                         }
                     }
+                    self.coalesce_confidential_blocks();
                     Ok(())
                 }
                 _ => Err(anyhow::anyhow!("tvm is not stopped")),
@@ -414,7 +404,7 @@ impl HypervisorState {
         }
 
         // Claim the physical confidential memory for this TVM.
-        Self::claim_confidential_block(&mut self.confidential_memory, dest_addr, bytes, tvmid)?;
+        Self::claim_confidential_block(&mut self.confidential_memory, dest_addr, tvmid)?;
 
         // Reborrow the TVM after the previous immutable borrow ended.
         let tvm = self
@@ -458,32 +448,15 @@ impl HypervisorState {
         if (base_page_address % PAGE_SIZE) != 0 || (tvm_base_page_address % PAGE_SIZE) != 0 {
             return Err(anyhow::anyhow!("all addresses must be page-aligned"));
         }
-        let mut in_confidential = false;
-
-        let dest_end = base_page_address + num_pages * PAGE_SIZE;
-        for PhysicalMemory {
-            base_address,
-            size,
-            guest_id,
-        } in self.confidential_memory.iter()
-        {
-            let conf_start = *base_address;
-            let conf_end = base_address + size;
-
-            if base_page_address >= conf_start && dest_end <= conf_end {
-                // Check if already owned by this TVM
-                if guest_id.is_some() && *guest_id != Some(tvmid) {
-                    return Err(anyhow::anyhow!(
-                        "confidential memory already owned by another TVM"
-                    ));
-                }
-                in_confidential = true;
-                break;
-            }
-        }
-        if !in_confidential {
-            return Err(anyhow::anyhow!("dest_addr not in confidential memory"));
-        }
+        let bytes = num_pages
+            .checked_mul(PAGE_SIZE)
+            .ok_or_else(|| anyhow::anyhow!("page range overflow"))?;
+        Self::claim_confidential_range(
+            &mut self.confidential_memory,
+            base_page_address,
+            bytes,
+            tvmid,
+        )?;
 
         match &mut self.tvms[tvmid] {
             Some(tvm) => {
@@ -548,34 +521,52 @@ impl HypervisorState {
         &mut self,
         tvmid: usize,
         vcpuid: usize,
-    ) -> anyhow::Result<(usize, usize, usize)> {
+    ) -> anyhow::Result<(usize, usize, usize, bool)> {
         if vcpuid > TVM_MAX_VCPUS - 1 {
             return Err(anyhow::anyhow!("invalid vCPU id"));
         }
-        let mut tvm = &self
+        if self.current_vcpu().is_some() {
+            return Err(anyhow::anyhow!("a vCPU is already running"));
+        }
+
+        let tvm = &self
             .tvms
             .get(tvmid)
             .and_then(|tvm| tvm.as_ref())
             .ok_or_else(|| anyhow::anyhow!("invalid TVMID"))?;
 
-        if !matches!(tvm.state_enum, TvmState::TvmRunnable) {
-            return Err(anyhow::anyhow!("TVM must be in runnable state"));
+        if !matches!(
+            tvm.state_enum,
+            TvmState::TvmRunnable | TvmState::TvmSuspended
+        ) {
+            return Err(anyhow::anyhow!("TVM must be runnable or suspended"));
         }
 
         let vcpu = tvm.vcpus[vcpuid]
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no vcpu present"))?;
+        let resume = vcpu.started;
+        let vcpu_addr = vcpu as *const TvmVcpuState as usize;
+        let entry_sepc = tvm.entry_sepc;
+        let entry_arg = tvm.entry_arg;
 
         // Setup H-extension for guest execution.
-        self.setup_h_extension(&mut tvm)?;
+        self.setup_h_extension(tvm)?;
+
+        let tvm = self
+            .tvms
+            .get_mut(tvmid)
+            .and_then(|tvm| tvm.as_mut())
+            .ok_or_else(|| anyhow::anyhow!("invalid TVMID"))?;
+        tvm.state_enum = TvmState::TvmRunnable;
+        tvm.vcpus[vcpuid]
+            .as_mut()
+            .expect("vCPU disappeared while preparing")
+            .started = true;
 
         self.harts[current_hartid()].current = Some(VcpuRef { tvmid, vcpuid });
 
-        Ok((
-            vcpu as *const TvmVcpuState as usize,
-            tvm.entry_sepc,
-            tvm.entry_arg,
-        ))
+        Ok((vcpu_addr, entry_sepc, entry_arg, resume))
     }
 
     pub fn current_vcpu(&self) -> Option<VcpuRef> {
@@ -586,8 +577,32 @@ impl HypervisorState {
         vcpu_addr: usize,
         entry_sepc: usize,
         entry_arg: usize,
+        resume: bool,
     ) -> ! {
-        (*(vcpu_addr as *const TvmVcpuState)).enter(entry_sepc, entry_arg)
+        (*(vcpu_addr as *const TvmVcpuState)).enter(entry_sepc, entry_arg, resume)
+    }
+
+    pub fn suspend_tvm(&mut self, tvmid: usize) -> anyhow::Result<usize> {
+        let current = self
+            .current_vcpu()
+            .ok_or_else(|| anyhow::anyhow!("no running vCPU"))?;
+        if current.tvmid != tvmid {
+            return Err(anyhow::anyhow!("TVM is not running on this hart"));
+        }
+
+        let tvm = self
+            .tvms
+            .get_mut(tvmid)
+            .and_then(|tvm| tvm.as_mut())
+            .ok_or_else(|| anyhow::anyhow!("invalid TVMID"))?;
+        if !matches!(tvm.state_enum, TvmState::TvmRunnable) {
+            return Err(anyhow::anyhow!("TVM is not runnable"));
+        }
+        tvm.state_enum = TvmState::TvmSuspended;
+        let owner = tvm.owner;
+        self.harts[current_hartid()].current = None;
+
+        Ok(owner)
     }
 
     pub fn tvm_shutdown(&mut self, tvmid: usize) -> anyhow::Result<usize> {
@@ -651,42 +666,16 @@ impl HypervisorState {
         Ok(())
     }
 
-    /// Helper to find which confidential memory block contains an address range
-    fn find_confidential_block_idx_covering(&self, addr: usize, size: usize) -> Option<usize> {
-        let addr_end = addr + size;
-
-        for (
-            idx,
-            PhysicalMemory {
-                base_address, size, ..
-            },
-        ) in self.confidential_memory.iter().enumerate()
-        {
-            let block_start = *base_address;
-            let block_end = base_address + size;
-
-            if addr >= block_start && addr_end <= block_end {
-                return Some(idx);
-            }
-        }
-        None
-    }
-
     fn claim_confidential_block(
         blocks: &mut Vec<PhysicalMemory, MAX_TVM_MEMORY_REGIONS>,
         address: usize,
-        size: usize,
         tvmid: usize,
     ) -> anyhow::Result<()> {
-        let end = address
-            .checked_add(size)
-            .ok_or_else(|| anyhow::anyhow!("confidential range overflow"))?;
-
         let block = blocks
             .iter_mut()
             .find(|block| {
                 address >= block.base_address
-                    && end <= block.base_address.saturating_add(block.size)
+                    && address < block.base_address.saturating_add(block.size)
             })
             .ok_or_else(|| anyhow::anyhow!("range not in confidential memory"))?;
 
@@ -701,6 +690,112 @@ impl HypervisorState {
         }
 
         Ok(())
+    }
+
+    fn claim_confidential_range(
+        blocks: &mut Vec<PhysicalMemory, MAX_TVM_MEMORY_REGIONS>,
+        address: usize,
+        size: usize,
+        tvmid: usize,
+    ) -> anyhow::Result<()> {
+        let end = address
+            .checked_add(size)
+            .ok_or_else(|| anyhow::anyhow!("confidential range overflow"))?;
+
+        let mut updated = Vec::new();
+        let mut claimed = false;
+
+        for block in blocks.iter() {
+            let block_end = block.base_address.saturating_add(block.size);
+            if address < block.base_address || end > block_end {
+                updated
+                    .push(PhysicalMemory {
+                        base_address: block.base_address,
+                        size: block.size,
+                        guest_id: block.guest_id,
+                    })
+                    .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
+                continue;
+            }
+
+            claimed = true;
+            if let Some(owner) = block.guest_id {
+                if owner != tvmid {
+                    return Err(anyhow::anyhow!(
+                        "confidential memory already owned by another TVM"
+                    ));
+                }
+
+                updated
+                    .push(PhysicalMemory {
+                        base_address: block.base_address,
+                        size: block.size,
+                        guest_id: block.guest_id,
+                    })
+                    .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
+                continue;
+            }
+
+            if block.base_address < address {
+                updated
+                    .push(PhysicalMemory {
+                        base_address: block.base_address,
+                        size: address - block.base_address,
+                        guest_id: None,
+                    })
+                    .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
+            }
+            updated
+                .push(PhysicalMemory {
+                    base_address: address,
+                    size,
+                    guest_id: Some(tvmid),
+                })
+                .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
+            if end < block_end {
+                updated
+                    .push(PhysicalMemory {
+                        base_address: end,
+                        size: block_end - end,
+                        guest_id: None,
+                    })
+                    .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
+            }
+        }
+
+        if !claimed {
+            return Err(anyhow::anyhow!("range not in confidential memory"));
+        }
+
+        *blocks = updated;
+        Ok(())
+    }
+
+    fn coalesce_confidential_blocks(&mut self) {
+        let mut merged: Vec<PhysicalMemory, MAX_TVM_MEMORY_REGIONS> = Vec::new();
+
+        for block in self.confidential_memory.iter() {
+            if let Some(previous) = merged.last_mut() {
+                let previous_end = previous.base_address + previous.size;
+                if previous_end == block.base_address && previous.guest_id == block.guest_id {
+                    previous.size += block.size;
+                    continue;
+                }
+            }
+
+            if merged
+                .push(PhysicalMemory {
+                    base_address: block.base_address,
+                    size: block.size,
+                    guest_id: block.guest_id,
+                })
+                .is_err()
+            {
+                panic!("too many coalesced confidential memory regions");
+            }
+        }
+
+        self.confidential_memory = merged;
     }
 }
 
@@ -796,11 +891,13 @@ enum TvmState {
     TvmInitializing = 0,
     TvmRunnable = 1,
     TvmStopped = 2,
+    TvmSuspended = 3,
 }
 
 #[repr(C, align(4))]
 struct TvmVcpuState {
     id: usize,
+    started: bool,
     trap_ctx: VmTrapContext,
     // Hypervisor scratch stack (grows downward from end)
     hs_scratch_stack: [u8; 1024 * 128],
@@ -810,6 +907,7 @@ impl TvmVcpuState {
     fn new(id: usize) -> Self {
         let vcpu = Self {
             id,
+            started: false,
             trap_ctx: VmTrapContext {
                 regs: [0; 32],
                 hs_sp: 0,
@@ -821,7 +919,7 @@ impl TvmVcpuState {
         vcpu
     }
 
-    unsafe fn enter(&self, entry_sepc: usize, entry_arg: usize) -> ! {
+    unsafe fn enter(&self, entry_sepc: usize, entry_arg: usize, resume: bool) -> ! {
         let ctx = &self.trap_ctx as *const VmTrapContext as usize;
 
         // Calculate HS stack top (grows downward, so point to end of array)
@@ -852,18 +950,54 @@ impl TvmVcpuState {
         // Enable virtualization (SPV=1 means we enter VS-mode on sret)
         hstatus::set_spv();
 
-        // Set guest PC
-        sepc::write(entry_sepc);
+        if !resume {
+            (*trap_ctx_mut).regs = [0; 32];
+            (*trap_ctx_mut).regs[10] = self.id;
+            (*trap_ctx_mut).regs[11] = entry_arg;
+            (*trap_ctx_mut).sepc = entry_sepc;
+            (*trap_ctx_mut).sstatus = sstatus::read().bits();
+        }
 
-        // TODO: restore vCPU context
         core::arch::asm!(
-            r#"
-                fence.i
-                sret
-            "#,
-            in("a0") self.id,
-            in("a1") entry_arg,
-            options(readonly, noreturn, nostack)
+            "ld x1,   8(t6)
+             ld x2,  16(t6)
+             ld x3,  24(t6)
+             ld x4,  32(t6)
+             ld x6,  48(t6)
+             ld x7,  56(t6)
+             ld x8,  64(t6)
+             ld x9,  72(t6)
+             ld x10, 80(t6)
+             ld x11, 88(t6)
+             ld x12, 96(t6)
+             ld x13, 104(t6)
+             ld x14, 112(t6)
+             ld x15, 120(t6)
+             ld x16, 128(t6)
+             ld x17, 136(t6)
+             ld x18, 144(t6)
+             ld x19, 152(t6)
+             ld x20, 160(t6)
+             ld x21, 168(t6)
+             ld x22, 176(t6)
+             ld x23, 184(t6)
+             ld x24, 192(t6)
+             ld x25, 200(t6)
+             ld x26, 208(t6)
+             ld x27, 216(t6)
+             ld x28, 224(t6)
+             ld x29, 232(t6)
+             ld x30, 240(t6)
+             ld t0, 264(t6)
+             csrw sepc, t0
+             ld t0, 272(t6)
+             csrw sstatus, t0
+             ld x5, 40(t6)
+             ld t6, 248(t6)
+             fence.i
+             sret",
+            in("t6") ctx,
+            options(noreturn, nostack),
         )
     }
 }

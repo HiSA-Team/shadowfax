@@ -97,13 +97,13 @@ pub fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Bootstrap complete. Entering Guest...");
 
     // 6. Run it!
-    let (vcpu_addr, entry_sepc, entry_arg) = state
+    let (vcpu_addr, entry_sepc, entry_arg, resume) = state
         .hypervisor
         .prepare_tvm_vcpu(tvm_id, 0)
         .expect("Failed to prepare VCPU");
     drop(lock);
 
-    unsafe { HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg) }
+    unsafe { HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg, resume) }
 }
 
 #[cfg(feature = "lazy")]
@@ -235,6 +235,16 @@ fn bootstrap_load_elf_lazy(
     Ok(tvmid)
 }
 
+fn page_overlaps_source(
+    gpa_page: usize,
+    gpa_page_end: usize,
+    source_gpa: usize,
+    source_len: usize,
+) -> bool {
+    let source_end = source_gpa + source_len;
+    gpa_page < source_end && source_gpa < gpa_page_end
+}
+
 fn map_page_source(
     state: &mut TsmState,
     tvmid: usize,
@@ -246,8 +256,7 @@ fn map_page_source(
     source_addr: usize,
     source_offset: usize,
 ) -> anyhow::Result<bool> {
-    let source_end = source_gpa + source_len;
-    if gpa_page >= source_end || source_gpa >= gpa_page_end {
+    if !page_overlaps_source(gpa_page, gpa_page_end, source_gpa, source_len) {
         return Ok(false);
     }
 
@@ -347,63 +356,95 @@ fn bootstrap_load_elf(
     let dtb_offset = (GUEST_DRAM_SIZE - GUEST_DTB.len() - 1) & !(PAGE_SIZE - 1);
     let dtb_gpa_base = GUEST_DRAM_GPA_START + dtb_offset;
     let initrd_gpa_base = GUEST_INITRD_GPA;
-    for gpa_page in
-        (GUEST_DRAM_GPA_START..GUEST_DRAM_GPA_START + GUEST_DRAM_SIZE).step_by(PAGE_SIZE)
-    {
+    let guest_end = GUEST_DRAM_GPA_START + GUEST_DRAM_SIZE;
+    let mut gpa_page = GUEST_DRAM_GPA_START;
+    while gpa_page < guest_end {
         let gpa_page_end = gpa_page + PAGE_SIZE;
-        let mut page_has_source = false;
-        /* Map ELF */
-        for segment in &segments {
-            let seg_start = segment.gpa;
-            let seg_end = segment.gpa + segment.memsz;
+        let page_has_source =
+            segments.iter().any(|segment| {
+                page_overlaps_source(gpa_page, gpa_page_end, segment.gpa, segment.filesz)
+            }) || page_overlaps_source(gpa_page, gpa_page_end, dtb_gpa_base, GUEST_DTB.len())
+                || page_overlaps_source(
+                    gpa_page,
+                    gpa_page_end,
+                    initrd_gpa_base,
+                    GUEST_INITRD.len(),
+                );
 
-            if gpa_page_end <= seg_start || gpa_page >= seg_end {
-                continue;
+        if page_has_source {
+            for segment in &segments {
+                let seg_start = segment.gpa;
+                let seg_end = segment.gpa + segment.memsz;
+
+                if gpa_page_end <= seg_start || gpa_page >= seg_end {
+                    continue;
+                }
+
+                map_page_source(
+                    state,
+                    tvmid,
+                    pa,
+                    gpa_page,
+                    gpa_page_end,
+                    segment.gpa,
+                    segment.filesz,
+                    GUEST_ELF.as_ptr() as usize,
+                    segment.offset,
+                )?;
             }
-
-            page_has_source |= map_page_source(
+            map_page_source(
                 state,
                 tvmid,
                 pa,
                 gpa_page,
                 gpa_page_end,
-                segment.gpa,
-                segment.filesz,
-                GUEST_ELF.as_ptr() as usize,
-                segment.offset,
+                dtb_gpa_base,
+                GUEST_DTB.len(),
+                GUEST_DTB.as_ptr() as usize,
+                0,
             )?;
-        }
-        page_has_source |= map_page_source(
-            state,
-            tvmid,
-            pa,
-            gpa_page,
-            gpa_page_end,
-            dtb_gpa_base,
-            GUEST_DTB.len(),
-            GUEST_DTB.as_ptr() as usize,
-            0,
-        )?;
+            map_page_source(
+                state,
+                tvmid,
+                pa,
+                gpa_page,
+                gpa_page_end,
+                initrd_gpa_base,
+                GUEST_INITRD.len(),
+                GUEST_INITRD.as_ptr() as usize,
+                0,
+            )?;
 
-        page_has_source |= map_page_source(
-            state,
-            tvmid,
-            pa,
-            gpa_page,
-            gpa_page_end,
-            initrd_gpa_base,
-            GUEST_INITRD.len(),
-            GUEST_INITRD.as_ptr() as usize,
-            0,
-        )?;
-
-        if !page_has_source {
-            state
-                .hypervisor
-                .add_tvm_zero_pages(tvmid, pa, 0, 1, gpa_page)?;
+            pa += PAGE_SIZE;
+            gpa_page += PAGE_SIZE;
+            continue;
         }
 
-        pa += PAGE_SIZE;
+        let zero_gpa_start = gpa_page;
+        let mut zero_pages = 0;
+        while gpa_page < guest_end {
+            let page_end = gpa_page + PAGE_SIZE;
+            let has_source =
+                segments.iter().any(|segment| {
+                    page_overlaps_source(gpa_page, page_end, segment.gpa, segment.filesz)
+                }) || page_overlaps_source(gpa_page, page_end, dtb_gpa_base, GUEST_DTB.len())
+                    || page_overlaps_source(
+                        gpa_page,
+                        page_end,
+                        initrd_gpa_base,
+                        GUEST_INITRD.len(),
+                    );
+            if has_source {
+                break;
+            }
+            zero_pages += 1;
+            gpa_page += PAGE_SIZE;
+        }
+
+        state
+            .hypervisor
+            .add_tvm_zero_pages(tvmid, pa, 0, zero_pages, zero_gpa_start)?;
+        pa += zero_pages * PAGE_SIZE;
     }
 
     // Finalize

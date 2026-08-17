@@ -23,6 +23,10 @@ pub mod sbi {
     pub const SBI_COVH_CREATE_TVM_VCPU: usize = 14;
     pub const SBI_COVH_RUN_TVM_VCPU: usize = 15;
 
+    // SBI Hart State Management extension
+    pub const SBI_EXT_HSM: usize = 0x48534D;
+    pub const SBI_HSM_HART_SUSPEND: usize = 3;
+
     // SUPD constants
     pub const SBI_SUPD_EXT_ID: usize = 0x53555044;
     pub const SBI_EXT_SUPD_GET_ACTIVE_DOMAINS: usize = 0;

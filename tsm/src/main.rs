@@ -245,8 +245,8 @@ fn handle_covh(
         drop(lock);
 
         match prepared {
-            Ok((vcpu_addr, entry_sepc, entry_arg)) => unsafe {
-                HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg)
+            Ok((vcpu_addr, entry_sepc, entry_arg, resume)) => unsafe {
+                HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg, resume)
             },
             Err(_) => return SbiRet { a0: -1, a1: 0 },
         }

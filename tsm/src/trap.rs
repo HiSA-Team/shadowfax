@@ -1,6 +1,7 @@
 use common::sbi::{
     sbi_call, SbiRet, COVG_EXTENSION, COVG_GET_EVIDENCE, PAGE_SIZE, SBI_COVH_EXT_ID,
-    SBI_COVH_RUN_TVM_VCPU, SBI_SYSTEM_RESET_EXT_ID, SBI_SYSTEM_RESET_TYPE_SHUTDOWN,
+    SBI_COVH_RUN_TVM_VCPU, SBI_EXT_HSM, SBI_HSM_HART_SUSPEND, SBI_SYSTEM_RESET_EXT_ID,
+    SBI_SYSTEM_RESET_TYPE_SHUTDOWN,
 };
 use riscv::interrupt::Trap;
 
@@ -138,19 +139,15 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                     let regs = unsafe { &mut (*ctx).regs };
 
                     let eid = regs[17];
+                    let fid = regs[16];
+                    let args = [regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]];
 
                     let sbi_ret = match eid {
-                        COVG_EXTENSION => handle_covg(
-                            regs[16],
-                            &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
-                        ),
+                        COVG_EXTENSION => handle_covg(fid, &args),
+                        SBI_EXT_HSM => handle_guest_hsm(ctx, fid, &args),
                         SBI_SYSTEM_RESET_EXT_ID => handle_guest_system_reset(ctx),
                         /* fall back to opensbi */
-                        _ => sbi_call(
-                            regs[17],
-                            regs[16],
-                            &[regs[10], regs[11], regs[12], regs[13], regs[14], regs[15]],
-                        ),
+                        _ => sbi_call(eid, fid, &args),
                     };
 
                     /* Return value and increment sepc */
@@ -158,7 +155,6 @@ extern "C" fn hyper_trap_handler_rust(ctx: *mut VmTrapContext) -> *mut VmTrapCon
                         (*ctx).regs[10] = sbi_ret.a0 as usize;
                         (*ctx).regs[11] = sbi_ret.a1 as usize;
                         (*ctx).sepc += 4;
-                        riscv::register::sepc::write((*ctx).sepc);
                     }
                 }
 
@@ -192,15 +188,29 @@ fn handle_guest_system_reset(ctx: *mut VmTrapContext) -> SbiRet {
     }
 }
 
+fn handle_guest_hsm(ctx: *mut VmTrapContext, fid: usize, args: &[usize; 6]) -> SbiRet {
+    match fid {
+        SBI_HSM_HART_SUSPEND => guest_suspend(ctx),
+        _ => sbi_call(SBI_EXT_HSM, fid, args),
+    }
+}
+
 fn guest_shutdown_to_host() -> ! {
-    let mut state = crate::STATE.lock();
-    let state = state.as_mut().expect("TSM state not initialized");
-    let tvmid = state
-        .hypervisor
-        .current_vcpu()
-        .expect("trap with no running TVM")
-        .tvmid;
-    hyper_exit_to_host(state, tvmid)
+    let owner = {
+        let mut state_lock = crate::STATE.lock();
+        let state = state_lock.as_mut().expect("TSM state not initialized");
+        let tvmid = state
+            .hypervisor
+            .current_vcpu()
+            .expect("trap with no running TVM")
+            .tvmid;
+        state
+            .hypervisor
+            .tvm_shutdown(tvmid)
+            .expect("TVM is not running")
+    };
+
+    return_to_host(owner)
 }
 
 fn hyper_exit_to_host(state: &mut crate::TsmState, tvmid: usize) -> ! {
@@ -208,6 +218,31 @@ fn hyper_exit_to_host(state: &mut crate::TsmState, tvmid: usize) -> ! {
         .hypervisor
         .tvm_shutdown(tvmid)
         .expect("TVM is not running");
+    return_to_host(owner)
+}
+
+fn guest_suspend(ctx: *mut VmTrapContext) -> ! {
+    unsafe {
+        (*ctx).sepc += 4;
+    }
+
+    let mut state_lock = crate::STATE.lock();
+    let state = state_lock.as_mut().expect("TSM state not initialized");
+    let tvmid = state
+        .hypervisor
+        .current_vcpu()
+        .expect("suspend with no running TVM")
+        .tvmid;
+    let owner = state
+        .hypervisor
+        .suspend_tvm(tvmid)
+        .expect("failed to suspend TVM");
+    drop(state_lock);
+
+    return_to_host(owner)
+}
+
+fn return_to_host(owner: usize) -> ! {
     let return_fid = ((owner & 0x3F) << 26) | SBI_COVH_RUN_TVM_VCPU;
 
     unsafe {
