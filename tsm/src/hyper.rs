@@ -440,7 +440,7 @@ impl HypervisorState {
             tvm_guest_gpa,
             dest_addr,
             num_pages,
-            PTE_R | PTE_W | PTE_X,
+            PTE_R | PTE_W | PTE_X | PTE_A | PTE_D,
         );
 
         Ok(())

@@ -3,9 +3,7 @@ use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
 use crate::{
     hyper::{HypervisorState, LazySegment, LazyState},
-    println, TsmState, _secure_init,
-    gpt::{map_4k_leaf, PTE_A, PTE_D, PTE_R, PTE_W, PTE_X},
-    STATE,
+    println, TsmState, _secure_init, STATE,
 };
 
 /* Guest */
@@ -237,6 +235,40 @@ fn bootstrap_load_elf_lazy(
     Ok(tvmid)
 }
 
+fn map_page_source(
+    state: &mut TsmState,
+    tvmid: usize,
+    pa: usize,
+    gpa_page: usize,
+    gpa_page_end: usize,
+    source_gpa: usize,
+    source_len: usize,
+    source_addr: usize,
+    source_offset: usize,
+) -> anyhow::Result<bool> {
+    let source_end = source_gpa + source_len;
+    if gpa_page >= source_end || source_gpa >= gpa_page_end {
+        return Ok(false);
+    }
+
+    let copy_gpa_start = core::cmp::max(gpa_page, source_gpa);
+    let source_offset = source_offset + copy_gpa_start - source_gpa;
+    let destination_offset = copy_gpa_start - gpa_page;
+    let src_addr = unsafe { (source_addr as *const u8).add(source_offset) } as usize;
+
+    state.hypervisor.add_tvm_measured_pages(
+        tvmid,
+        src_addr,
+        pa + destination_offset,
+        0,
+        1,
+        gpa_page,
+    )?;
+    // println!("[OLORIN] created mapping: [0x{:x} -> 0x{:x}]", gpa_page, pa);
+
+    Ok(true)
+}
+
 fn bootstrap_load_elf(
     state: &mut TsmState,
     pt_addr: usize,
@@ -277,12 +309,6 @@ fn bootstrap_load_elf(
         UART_GPA + PAGE_SIZE
     );
 
-    let (page_table_addr, page_table_size) = state
-        .hypervisor
-        .tvm(tvmid)
-        .map(|tvm| tvm.page_table())
-        .expect("running TVM disappeared");
-
     let elf_paddr_base: usize =
         elf.segments()
             .and_then(|segments| {
@@ -320,13 +346,12 @@ fn bootstrap_load_elf(
 
     let dtb_offset = (GUEST_DRAM_SIZE - GUEST_DTB.len() - 1) & !(PAGE_SIZE - 1);
     let dtb_gpa_base = GUEST_DRAM_GPA_START + dtb_offset;
-    let dtb_gpa_end = dtb_gpa_base + GUEST_DTB.len();
     let initrd_gpa_base = GUEST_INITRD_GPA;
-    let initrd_gpa_end = initrd_gpa_base + GUEST_INITRD.len();
     for gpa_page in
         (GUEST_DRAM_GPA_START..GUEST_DRAM_GPA_START + GUEST_DRAM_SIZE).step_by(PAGE_SIZE)
     {
         let gpa_page_end = gpa_page + PAGE_SIZE;
+        let mut page_has_source = false;
         /* Map ELF */
         for segment in &segments {
             let seg_start = segment.gpa;
@@ -336,82 +361,47 @@ fn bootstrap_load_elf(
                 continue;
             }
 
-            let segment_file_start = segment.gpa;
-            let segment_file_end = segment.gpa + segment.filesz;
-
-            // Intersection of this page and the file-backed portion.
-            let copy_gpa_start = core::cmp::max(gpa_page, segment_file_start);
-            let copy_gpa_end = core::cmp::min(gpa_page_end, segment_file_end);
-
-            if copy_gpa_start >= copy_gpa_end {
-                // This is BSS: page was already zeroed.
-                continue;
-            }
-
-            let source_offset = segment.offset + (copy_gpa_start - segment.gpa);
-            let destination_offset = copy_gpa_start - gpa_page;
-            let src_addr = unsafe { GUEST_ELF.as_ptr().add(source_offset) } as usize;
-            state.hypervisor.add_tvm_measured_pages(
+            page_has_source |= map_page_source(
+                state,
                 tvmid,
-                src_addr,
-                pa + destination_offset,
-                0,
-                1,
+                pa,
                 gpa_page,
+                gpa_page_end,
+                segment.gpa,
+                segment.filesz,
+                GUEST_ELF.as_ptr() as usize,
+                segment.offset,
             )?;
-            // println!(
-            //     "[OLORIN] created ELF mapping: [0x{:x} -> 0x{:x}]",
-            //     gpa_page, pa
-            // );
         }
-        if gpa_page < dtb_gpa_end && dtb_gpa_base < gpa_page_end {
-            let copy_gpa_start = core::cmp::max(gpa_page, dtb_gpa_base);
-
-            let source_offset = copy_gpa_start - dtb_gpa_base;
-            let destination_offset = copy_gpa_start - gpa_page;
-
-            let src_addr = unsafe { GUEST_DTB.as_ptr().add(source_offset) } as usize;
-            state.hypervisor.add_tvm_measured_pages(
-                tvmid,
-                src_addr,
-                pa + destination_offset,
-                0,
-                1,
-                gpa_page,
-            )?;
-            // println!(
-            //     "[OLORIN] created DTB mapping: [0x{:x} -> 0x{:x}]",
-            //     gpa_page, pa
-            // );
-        }
-
-        if gpa_page < initrd_gpa_end && initrd_gpa_base < gpa_page_end {
-            let copy_gpa_start = core::cmp::max(gpa_page, initrd_gpa_base);
-
-            let source_offset = copy_gpa_start - initrd_gpa_base;
-            let destination_offset = copy_gpa_start - gpa_page;
-            let src_addr = unsafe { GUEST_INITRD.as_ptr().add(source_offset) } as usize;
-            state.hypervisor.add_tvm_measured_pages(
-                tvmid,
-                src_addr,
-                pa + destination_offset,
-                0,
-                1,
-                gpa_page,
-            )?;
-            // println!(
-            //     "[OLORIN] created INITRD mapping: [0x{:x} -> 0x{:x}]",
-            //     gpa_page, pa
-            // );
-        }
-
-        map_4k_leaf(
-            page_table_addr,
-            page_table_size,
-            gpa_page,
+        page_has_source |= map_page_source(
+            state,
+            tvmid,
             pa,
-            PTE_R | PTE_W | PTE_X | PTE_A | PTE_D,
-        );
+            gpa_page,
+            gpa_page_end,
+            dtb_gpa_base,
+            GUEST_DTB.len(),
+            GUEST_DTB.as_ptr() as usize,
+            0,
+        )?;
+
+        page_has_source |= map_page_source(
+            state,
+            tvmid,
+            pa,
+            gpa_page,
+            gpa_page_end,
+            initrd_gpa_base,
+            GUEST_INITRD.len(),
+            GUEST_INITRD.as_ptr() as usize,
+            0,
+        )?;
+
+        if !page_has_source {
+            state
+                .hypervisor
+                .add_tvm_zero_pages(tvmid, pa, 0, 1, gpa_page)?;
+        }
 
         pa += PAGE_SIZE;
     }

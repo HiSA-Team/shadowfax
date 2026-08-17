@@ -1,7 +1,7 @@
 use common::sbi::PAGE_SIZE;
 
 pub const PTE_SIZE: usize = 8;
-pub const PTE_V: u64 = 1 << 0;
+const PTE_V: u64 = 1 << 0;
 pub const PTE_R: u64 = 1 << 1;
 pub const PTE_W: u64 = 1 << 2;
 pub const PTE_X: u64 = 1 << 3;
