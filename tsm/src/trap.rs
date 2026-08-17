@@ -1,3 +1,5 @@
+#[cfg(feature = "standalone")]
+use common::sbi::SBI_SYSTEM_RESET_REASON_NO_REASON;
 use common::sbi::{
     sbi_call, SbiRet, COVG_EXTENSION, COVG_GET_EVIDENCE, PAGE_SIZE, SBI_COVH_EXT_ID,
     SBI_COVH_RUN_TVM_VCPU, SBI_EXT_HSM, SBI_HSM_HART_SUSPEND, SBI_SYSTEM_RESET_EXT_ID,
@@ -196,7 +198,7 @@ fn handle_guest_hsm(ctx: *mut VmTrapContext, fid: usize, args: &[usize; 6]) -> S
 }
 
 fn guest_shutdown_to_host() -> ! {
-    let owner = {
+    let _owner = {
         let mut state_lock = crate::STATE.lock();
         let state = state_lock.as_mut().expect("TSM state not initialized");
         let tvmid = state
@@ -210,7 +212,26 @@ fn guest_shutdown_to_host() -> ! {
             .expect("TVM is not running")
     };
 
-    return_to_host(owner)
+    #[cfg(feature = "standalone")]
+    {
+        // Standalone TSM has no CoVE host to receive the stopped-TVM return.
+        let _ = sbi_call(
+            SBI_SYSTEM_RESET_EXT_ID,
+            0,
+            &[
+                SBI_SYSTEM_RESET_TYPE_SHUTDOWN,
+                SBI_SYSTEM_RESET_REASON_NO_REASON,
+                0,
+                0,
+                0,
+                0,
+            ],
+        );
+        loop {}
+    }
+
+    #[cfg(not(feature = "standalone"))]
+    return_to_host(_owner)
 }
 
 fn hyper_exit_to_host(state: &mut crate::TsmState, tvmid: usize) -> ! {
