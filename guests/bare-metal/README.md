@@ -26,6 +26,14 @@ PAYLOAD_SRC   := guest.c
 include $(ROOT)/guests/bare-metal/launcher.mk
 ```
 
+Launchers consume staged firmware artifacts. From the repository root, prepare them before running
+a launcher:
+
+```sh
+make guests
+make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
+```
+
 The fragment also supports an externally built `GUEST_ELF`, an optional
 `GUEST_DTB`, custom metadata size, split or contiguous guest memory, and the
 existing firmware, DTB, QEMU, build-directory, and load-address overrides.

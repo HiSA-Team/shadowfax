@@ -5,10 +5,12 @@ calls step by step, inspect registers and memory, and assert the TSM's responses
 
 ## Prerequisites
 
-Build the firmware, TSM symbols, guest workloads, signatures, and DICE input before starting GDB:
+Build the guest workload, firmware, TSM symbols, signatures, DICE input, and platform DTB before
+starting GDB:
 
 ```sh
-make -B PYTHON='uv run --with cbor2'
+make guests
+make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
 ```
 
 Use a RISC-V GDB matching `RV_PREFIX`. The default GDB initialization loads symbols from:
@@ -122,7 +124,7 @@ Restart both QEMU and GDB when changing firmware addresses or rebuilding debug s
 The non-interactive integration test builds the firmware and verifies its QEMU boot output:
 
 ```sh
-make test PYTHON='uv run --with cbor2'
+make PYTHON='uv run --with cbor2' test
 ```
 
 Use this as a regression check after debugging a firmware or domain-layout change.
