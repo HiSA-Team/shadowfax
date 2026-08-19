@@ -1,0 +1,754 @@
+
+OpenSBI v1.8.1
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name               : riscv-virtio,qemu
+Platform Features           : medeleg
+Platform HART Count         : 1
+Platform HART Protection    : pmp
+Platform IPI Device         : aclint-mswi
+Platform Timer Device       : aclint-mtimer @ 10000000Hz
+Platform Console Device     : uart8250
+Platform HSM Device         : ---
+Platform PMU Device         : ---
+Platform Reboot Device      : syscon-reboot
+Platform Shutdown Device    : syscon-poweroff
+Platform Suspend Device     : ---
+Platform CPPC Device        : ---
+Firmware Base               : 0x80000000
+Firmware Size               : 321 KB
+Firmware RW Offset          : 0x40000
+Firmware RW Size            : 65 KB
+Firmware Heap Offset        : 0x47000
+Firmware Heap Size          : 37 KB (total), 0 KB (reserved), 12 KB (used), 23 KB (free)
+Firmware Scratch Size       : 4096 B (total), 1464 B (used), 2632 B (free)
+Runtime SBI Version         : 3.0
+Standard SBI Extensions     : time,rfnc,ipi,base,hsm,srst,pmu,dbcn,fwft,legacy,dbtr,sse
+Experimental SBI Extensions : none
+
+Domain0 Name                : root
+Domain0 Boot HART           : 0
+Domain0 HARTs               : 0*
+Domain0 Region00            : 0x0000000080040000-0x000000008005ffff M: (F,R,W) S/U: ()
+Domain0 Region01            : 0x0000000080000000-0x000000008003ffff M: (F,R,X) S/U: ()
+Domain0 Region02            : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region03            : 0x0000000010000000-0x0000000010000fff M: (I,R,W) S/U: (R,W)
+Domain0 Region04            : 0x0000000002000000-0x000000000200ffff M: (I,R,W) S/U: ()
+Domain0 Region05            : 0x000000000c400000-0x000000000c5fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region06            : 0x000000000c000000-0x000000000c3fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region07            : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address        : 0x0000000090000000
+Domain0 Next Arg1           : 0x00000000bfe00000
+Domain0 Next Mode           : S-mode
+Domain0 SysReset            : yes
+Domain0 SysSuspend          : yes
+
+Boot HART ID                : 0
+Boot HART Domain            : root
+Boot HART Priv Version      : v1.12
+Boot HART Base ISA          : rv64imafdch
+Boot HART ISA Extensions    : sstc,zicntr,zihpm,zicboz,zicbom,sdtrig,svadu
+Boot HART PMP Count         : 16
+Boot HART PMP Granularity   : 2 bits
+Boot HART PMP Address Bits  : 54
+Boot HART MHPM Info         : 16 (0x0007fff8)
+Boot HART Debug Triggers    : 2 triggers
+Boot HART MIDELEG           : 0x0000000000001666
+Boot HART MEDELEG           : 0x0000000000f4b509
+[OLORIN] Starting Mapping TVM from ELF
+[OLORIN] no lazy mode -> no page faults
+[OLORIN] created TVM with id 0
+[OLORIN] created TVM memory region: 0x200000 - 0x10200000
+[OLORIN] created TVM MMIO memory region: 0x18000000 - 0x18001000
+[OLORIN] Guest entrypoint: 0x200000
+[OLORIN] Guest dtb at : 0x101ff000
+[OLORIN] Bootstrap complete. Entering Guest...
+Linux version 7.1.0 (giuseppe@taurino) (riscv64-unknown-linux-gnu-gcc (g1b306039a) 15.1.0, GNU ld (GNU Binutils) 2.45) #10 PREEMPT Wed Aug 12 14:03:50 CEST 2026
+Machine model: riscv-virtio,qemu
+SBI specification v3.0 detected
+SBI implementation ID=0x1 Version=0x10008
+SBI TIME extension detected
+SBI IPI extension detected
+SBI RFENCE extension detected
+SBI SRST extension detected
+SBI DBCN extension detected
+SBI FWFT extension detected
+earlycon: uart8250 at MMIO 0x0000000018000000 (options '')
+printk: legacy bootconsole [uart8250] enabled
+efi: UEFI not found.
+OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+riscv: base ISA extensions cdfim
+riscv: ELF capabilities cdfim
+Ticket spinlock: enabled
+Zone ranges:
+  DMA32    [mem 0x0000000000200000-0x00000000101fffff]
+  Normal   empty
+Movable zone start for each node
+Early memory node ranges
+  node   0: [mem 0x0000000000200000-0x00000000101fffff]
+Initmem setup node 0 [mem 0x0000000000200000-0x00000000101fffff]
+On node 0, zone DMA32: 512 pages in unavailable ranges
+Kernel command line: earlycon=uart8250,mmio,0x18000000 console=ttyS0,115200 riscv-tests.mode=linux-tvm-static
+printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+Dentry cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+Inode-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+Built 1 zonelists, mobility grouping on.  Total pages: 65536
+mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+SLUB: HWalign=64, Order=0-1, MinObjects=0, CPUs=1, Nodes=1
+NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+riscv-intc: 64 local interrupts mapped
+clocksource: riscv_clocksource: mask: 0xffffffffffffffff max_cycles: 0x24e6a1710, max_idle_ns: 440795202120 ns
+sched_clock: 64 bits at 10MHz, resolution 100ns, wraps every 4398046511100ns
+riscv-timer: Timer interrupt in S-mode is available via sstc extension
+Console: colour dummy device 80x25
+Calibrating delay loop (skipped), value calculated using timer frequency.. 20.00 BogoMIPS (lpj=40000)
+pid_max: default: 32768 minimum: 301
+Mount-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+Mountpoint-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+VFS: Finished mounting rootfs on nullfs
+ASID allocator using 16 bits (65536 entries)
+EFI services will not be available.
+Memory: 250188K/262144K available (2119K kernel code, 615K rwdata, 366K rodata, 249K init, 248K bss, 11288K reserved, 0K cma-reserved)
+devtmpfs: initialized
+clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+posixtimers hash table entries: 512 (order: 0, 4096 bytes, linear)
+futex hash table entries: 256 (8192 bytes on 1 NUMA nodes, total 8 KiB, linear).
+NET: Registered PF_NETLINK/PF_ROUTE protocol family
+clocksource: Switched to clocksource riscv_clocksource
+NET: Registered PF_INET protocol family
+IP idents hash table entries: 4096 (order: 3, 32768 bytes, linear)
+tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes, linear)
+Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+TCP established hash table entries: 2048 (order: 2, 16384 bytes, linear)
+TCP bind hash table entries: 2048 (order: 3, 32768 bytes, linear)
+TCP: Hash tables configured (established 2048 bind 2048)
+UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+workingset: timestamp_bits=62 (anon: 58) max_order=16 bucket_order=0 (anon: 0)
+Unpacking initramfs...
+Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+of_serial 18000000.serial: error -6: IRQ index 0 not found
+printk: legacy console [ttyS0] disabled
+18000000.serial: ttyS0 at MMIO 0x18000000 (irq = 0, base_baud = 230400) is a 16550A
+printk: legacy console [ttyS0] enabled
+printk: legacy console [ttyS0] enabled
+printk: legacy bootconsole [uart8250] disabled
+printk: legacy bootconsole [uart8250] disabled
+NET: Registered PF_INET6 protocol family
+Segment Routing with IPv6
+In-situ OAM (IOAM) with IPv6
+sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+Freeing initrd memory: 3076K
+cpu0: scalar unaligned word access speed is 61.04x byte access speed (fast)
+Legacy PMU implementation is available
+clk: Disabling unused clocks
+Freeing unused kernel image (initmem) memory: 248K
+Kernel memory protection not selected by kernel config.
+Run /init as init process
+RISCV_TEST_RUN,linux-tvm-static,median,1,30
+cycle = 2373912
+instret = 533484
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,1,2373912,533484,0
+RISCV_TEST_RUN,linux-tvm-static,median,2,30
+cycle = 120204
+instret = 72018
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,2,120204,72018,0
+RISCV_TEST_RUN,linux-tvm-static,median,3,30
+cycle = 115344
+instret = 65988
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,3,115344,65988,0
+RISCV_TEST_RUN,linux-tvm-static,median,4,30
+cycle = 115398
+instret = 66078
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,4,115398,66078,0
+RISCV_TEST_RUN,linux-tvm-static,median,5,30
+cycle = 114534
+instret = 64278
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,5,114534,64278,0
+RISCV_TEST_RUN,linux-tvm-static,median,6,30
+cycle = 113022
+instret = 65142
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,6,113022,65142,0
+RISCV_TEST_RUN,linux-tvm-static,median,7,30
+cycle = 112518
+instret = 65286
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,7,112518,65286,0
+RISCV_TEST_RUN,linux-tvm-static,median,8,30
+cycle = 111672
+instret = 64224
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,8,111672,64224,0
+RISCV_TEST_RUN,linux-tvm-static,median,9,30
+cycle = 113166
+instret = 65124
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,9,113166,65124,0
+RISCV_TEST_RUN,linux-tvm-static,median,10,30
+cycle = 111474
+instret = 64872
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,10,111474,64872,0
+RISCV_TEST_RUN,linux-tvm-static,median,11,30
+cycle = 112482
+instret = 64638
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,11,112482,64638,0
+RISCV_TEST_RUN,linux-tvm-static,median,12,30
+cycle = 114174
+instret = 66384
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,12,114174,66384,0
+RISCV_TEST_RUN,linux-tvm-static,median,13,30
+cycle = 113526
+instret = 64494
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,13,113526,64494,0
+RISCV_TEST_RUN,linux-tvm-static,median,14,30
+cycle = 115956
+instret = 67050
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,14,115956,67050,0
+RISCV_TEST_RUN,linux-tvm-static,median,15,30
+cycle = 156330
+instret = 111618
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,15,156330,111618,0
+RISCV_TEST_RUN,linux-tvm-static,median,16,30
+cycle = 113616
+instret = 65322
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,16,113616,65322,0
+RISCV_TEST_RUN,linux-tvm-static,median,17,30
+cycle = 176490
+instret = 102762
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,17,176490,102762,0
+RISCV_TEST_RUN,linux-tvm-static,median,18,30
+cycle = 113022
+instret = 65016
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,18,113022,65016,0
+RISCV_TEST_RUN,linux-tvm-static,median,19,30
+cycle = 113400
+instret = 65070
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,19,113400,65070,0
+RISCV_TEST_RUN,linux-tvm-static,median,20,30
+cycle = 115236
+instret = 65754
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,20,115236,65754,0
+RISCV_TEST_RUN,linux-tvm-static,median,21,30
+cycle = 113958
+instret = 65970
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,21,113958,65970,0
+RISCV_TEST_RUN,linux-tvm-static,median,22,30
+cycle = 118530
+instret = 68670
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,22,118530,68670,0
+RISCV_TEST_RUN,linux-tvm-static,median,23,30
+cycle = 123498
+instret = 73674
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,23,123498,73674,0
+RISCV_TEST_RUN,linux-tvm-static,median,24,30
+cycle = 152262
+instret = 89964
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,24,152262,89964,0
+RISCV_TEST_RUN,linux-tvm-static,median,25,30
+cycle = 190494
+instret = 142902
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,25,190494,142902,0
+RISCV_TEST_RUN,linux-tvm-static,median,26,30
+cycle = 114534
+instret = 65610
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,26,114534,65610,0
+RISCV_TEST_RUN,linux-tvm-static,median,27,30
+cycle = 111582
+instret = 64584
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,27,111582,64584,0
+RISCV_TEST_RUN,linux-tvm-static,median,28,30
+cycle = 112806
+instret = 65286
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,28,112806,65286,0
+RISCV_TEST_RUN,linux-tvm-static,median,29,30
+cycle = 834516
+instret = 784494
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,29,834516,784494,0
+RISCV_TEST_RUN,linux-tvm-static,median,30,30
+cycle = 111366
+instret = 64224
+RISCV_TEST_RESULT,linux,linux-tvm-static,median,30,111366,64224,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,1,30
+cycle = 201402
+instret = 151110
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,1,201402,151110,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,2,30
+cycle = 144828
+instret = 93006
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,2,144828,93006,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,3,30
+cycle = 794322
+instret = 745686
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,3,794322,745686,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,4,30
+cycle = 121896
+instret = 73980
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,4,121896,73980,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,5,30
+cycle = 125298
+instret = 77454
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,5,125298,77454,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,6,30
+cycle = 970380
+instret = 924696
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,6,970380,924696,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,7,30
+cycle = 123876
+instret = 75006
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,7,123876,75006,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,8,30
+cycle = 137970
+instret = 97578
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,8,137970,97578,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,9,30
+cycle = 938700
+instret = 892260
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,9,938700,892260,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,10,30
+cycle = 121464
+instret = 73224
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,10,121464,73224,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,11,30
+cycle = 128394
+instret = 81126
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,11,128394,81126,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,12,30
+cycle = 119808
+instret = 73008
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,12,119808,73008,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,13,30
+cycle = 121680
+instret = 73062
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,13,121680,73062,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,14,30
+cycle = 120312
+instret = 72306
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,14,120312,72306,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,15,30
+cycle = 120582
+instret = 72450
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,15,120582,72450,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,16,30
+cycle = 113796
+instret = 64764
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,16,113796,64764,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,17,30
+cycle = 136458
+instret = 76932
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,17,136458,76932,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,18,30
+cycle = 122742
+instret = 75762
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,18,122742,75762,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,19,30
+cycle = 122724
+instret = 74952
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,19,122724,74952,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,20,30
+cycle = 157500
+instret = 101448
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,20,157500,101448,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,21,30
+cycle = 237942
+instret = 160578
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,21,237942,160578,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,22,30
+cycle = 151686
+instret = 95940
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,22,151686,95940,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,23,30
+cycle = 205074
+instret = 138186
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,23,205074,138186,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,24,30
+cycle = 120420
+instret = 72936
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,24,120420,72936,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,25,30
+cycle = 178056
+instret = 112014
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,25,178056,112014,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,26,30
+cycle = 189252
+instret = 118692
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,26,189252,118692,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,27,30
+cycle = 172170
+instret = 91206
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,27,172170,91206,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,28,30
+cycle = 122292
+instret = 74682
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,28,122292,74682,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,29,30
+cycle = 149508
+instret = 101340
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,29,149508,101340,0
+RISCV_TEST_RUN,linux-tvm-static,memcpy,30,30
+cycle = 123390
+instret = 74502
+RISCV_TEST_RESULT,linux,linux-tvm-static,memcpy,30,123390,74502,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,1,30
+cycle = 267498
+instret = 217170
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,1,267498,217170,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,2,30
+cycle = 140994
+instret = 92628
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,2,140994,92628,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,3,30
+cycle = 139374
+instret = 90684
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,3,139374,90684,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,4,30
+cycle = 165942
+instret = 93816
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,4,165942,93816,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,5,30
+cycle = 139662
+instret = 91062
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,5,139662,91062,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,6,30
+cycle = 141318
+instret = 91962
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,6,141318,91962,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,7,30
+cycle = 152352
+instret = 93582
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,7,152352,93582,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,8,30
+cycle = 138510
+instret = 90900
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,8,138510,90900,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,9,30
+cycle = 137808
+instret = 90918
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,9,137808,90918,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,10,30
+cycle = 151578
+instret = 96426
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,10,151578,96426,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,11,30
+cycle = 138726
+instret = 91566
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,11,138726,91566,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,12,30
+cycle = 140346
+instret = 90666
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,12,140346,90666,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,13,30
+cycle = 146070
+instret = 92628
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,13,146070,92628,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,14,30
+cycle = 140562
+instret = 91728
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,14,140562,91728,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,15,30
+cycle = 141228
+instret = 92808
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,15,141228,92808,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,16,30
+cycle = 138402
+instret = 91836
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,16,138402,91836,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,17,30
+cycle = 138852
+instret = 91116
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,17,138852,91116,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,18,30
+cycle = 139482
+instret = 91206
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,18,139482,91206,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,19,30
+cycle = 155214
+instret = 93546
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,19,155214,93546,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,20,30
+cycle = 141822
+instret = 92304
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,20,141822,92304,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,21,30
+cycle = 139806
+instret = 90954
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,21,139806,90954,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,22,30
+cycle = 140022
+instret = 91782
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,22,140022,91782,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,23,30
+cycle = 138852
+instret = 91386
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,23,138852,91386,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,24,30
+cycle = 139230
+instret = 91098
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,24,139230,91098,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,25,30
+cycle = 144180
+instret = 91548
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,25,144180,91548,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,26,30
+cycle = 143010
+instret = 90954
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,26,143010,90954,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,27,30
+cycle = 140418
+instret = 92232
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,27,140418,92232,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,28,30
+cycle = 138438
+instret = 91044
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,28,138438,91044,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,29,30
+cycle = 138942
+instret = 91746
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,29,138942,91746,0
+RISCV_TEST_RUN,linux-tvm-static,multiply,30,30
+cycle = 138816
+instret = 91026
+RISCV_TEST_RESULT,linux,linux-tvm-static,multiply,30,138816,91026,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,1,30
+cycle = 1920384
+instret = 1881126
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,1,1920384,1881126,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,2,30
+cycle = 1120590
+instret = 1079856
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,2,1120590,1079856,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,3,30
+cycle = 1094580
+instret = 1053270
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,3,1094580,1053270,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,4,30
+cycle = 1043838
+instret = 1003374
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,4,1043838,1003374,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,5,30
+cycle = 1042488
+instret = 988002
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,5,1042488,988002,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,6,30
+cycle = 1082484
+instret = 1042434
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,6,1082484,1042434,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,7,30
+cycle = 1035720
+instret = 993888
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,7,1035720,993888,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,8,30
+cycle = 1063962
+instret = 1023966
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,8,1063962,1023966,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,9,30
+cycle = 1108854
+instret = 1069362
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,9,1108854,1069362,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,10,30
+cycle = 1052046
+instret = 1006956
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,10,1052046,1006956,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,11,30
+cycle = 1082160
+instret = 1042074
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,11,1082160,1042074,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,12,30
+cycle = 1067094
+instret = 1031364
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,12,1067094,1031364,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,13,30
+cycle = 1537236
+instret = 1498626
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,13,1537236,1498626,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,14,30
+cycle = 1086048
+instret = 1041966
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,14,1086048,1041966,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,15,30
+cycle = 1069938
+instret = 1029366
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,15,1069938,1029366,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,16,30
+cycle = 1086444
+instret = 1043334
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,16,1086444,1043334,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,17,30
+cycle = 1027980
+instret = 987120
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,17,1027980,987120,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,18,30
+cycle = 1043676
+instret = 1004922
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,18,1043676,1004922,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,19,30
+cycle = 1025532
+instret = 985122
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,19,1025532,985122,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,20,30
+cycle = 1125396
+instret = 1085436
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,20,1125396,1085436,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,21,30
+cycle = 1031040
+instret = 990216
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,21,1031040,990216,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,22,30
+cycle = 1081476
+instret = 1042452
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,22,1081476,1042452,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,23,30
+cycle = 1065366
+instret = 1029096
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,23,1065366,1029096,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,24,30
+cycle = 1075302
+instret = 1036494
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,24,1075302,1036494,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,25,30
+cycle = 1029384
+instret = 986904
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,25,1029384,986904,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,26,30
+cycle = 1084860
+instret = 1027692
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,26,1084860,1027692,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,27,30
+cycle = 1073214
+instret = 1031994
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,27,1073214,1031994,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,28,30
+cycle = 1089036
+instret = 1049112
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,28,1089036,1049112,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,29,30
+cycle = 1655136
+instret = 1617156
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,29,1655136,1617156,0
+RISCV_TEST_RUN,linux-tvm-static,qsort,30,30
+cycle = 1039482
+instret = 997920
+RISCV_TEST_RESULT,linux,linux-tvm-static,qsort,30,1039482,997920,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,1,30
+cycle = 820998
+instret = 778356
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,1,820998,778356,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,2,30
+cycle = 739998
+instret = 695700
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,2,739998,695700,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,3,30
+cycle = 1505790
+instret = 1457910
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,3,1505790,1457910,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,4,30
+cycle = 801882
+instret = 757980
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,4,801882,757980,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,5,30
+cycle = 765270
+instret = 729360
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,5,765270,729360,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,6,30
+cycle = 1279404
+instret = 1240362
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,6,1279404,1240362,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,7,30
+cycle = 1550376
+instret = 1509840
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,7,1550376,1509840,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,8,30
+cycle = 740322
+instret = 699516
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,8,740322,699516,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,9,30
+cycle = 787122
+instret = 748152
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,9,787122,748152,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,10,30
+cycle = 733140
+instret = 693072
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,10,733140,693072,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,11,30
+cycle = 768942
+instret = 727506
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,11,768942,727506,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,12,30
+cycle = 775926
+instret = 736128
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,12,775926,736128,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,13,30
+cycle = 730476
+instret = 690678
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,13,730476,690678,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,14,30
+cycle = 781182
+instret = 739764
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,14,781182,739764,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,15,30
+cycle = 756360
+instret = 715626
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,15,756360,715626,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,16,30
+cycle = 1200168
+instret = 1154394
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,16,1200168,1154394,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,17,30
+cycle = 757062
+instret = 721350
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,17,757062,721350,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,18,30
+cycle = 744876
+instret = 700020
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,18,744876,700020,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,19,30
+cycle = 785880
+instret = 745578
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,19,785880,745578,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,20,30
+cycle = 732186
+instret = 690876
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,20,732186,690876,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,21,30
+cycle = 734598
+instret = 694458
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,21,734598,694458,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,22,30
+cycle = 732240
+instret = 691560
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,22,732240,691560,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,23,30
+cycle = 1581516
+instret = 1540728
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,23,1581516,1540728,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,24,30
+cycle = 825552
+instret = 784440
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,24,825552,784440,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,25,30
+cycle = 785250
+instret = 744930
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,25,785250,744930,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,26,30
+cycle = 733500
+instret = 692244
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,26,733500,692244,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,27,30
+cycle = 765558
+instret = 705726
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,27,765558,705726,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,28,30
+cycle = 781074
+instret = 741546
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,28,781074,741546,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,29,30
+cycle = 755622
+instret = 716220
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,29,755622,716220,0
+RISCV_TEST_RUN,linux-tvm-static,rsort,30,30
+cycle = 1463274
+instret = 1422990
+RISCV_TEST_RESULT,linux,linux-tvm-static,rsort,30,1463274,1422990,0
+reboot: Power down
