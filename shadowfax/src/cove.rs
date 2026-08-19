@@ -18,7 +18,7 @@ use core::mem::offset_of;
 use common::sbi::{
     COVH_DEFAULT_PAGE_SIZE, PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM,
     SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES,
-    SBI_COVH_RUN_TVM_VCPU, SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
+    SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
 use heapless::Vec;
 use zeroize::Zeroize;
@@ -331,17 +331,6 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     )
                     .unwrap();
 
-                    // /* Zero out the memory region */
-                    {
-                        let vec = unsafe {
-                            core::slice::from_raw_parts_mut(
-                                base_address as *mut u8,
-                                num_pages * PAGE_SIZE,
-                            )
-                        };
-                        vec.zeroize();
-                    }
-
                     /* Add the region to the src domain (aka the tsm)*/
                     let tsm = &mut state.domains[src_id];
                     tsm.memory_regions
@@ -352,6 +341,16 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                             permissions: 0x3f,
                         })
                         .unwrap();
+                    /* Zero out the memory region */
+                    {
+                        let vec = unsafe {
+                            core::slice::from_raw_parts_mut(
+                                base_address as *mut u8,
+                                num_pages * PAGE_SIZE,
+                            )
+                        };
+                        vec.zeroize();
+                    }
                 } else {
                     state.cancel_borrow(ticket).unwrap();
                 }
