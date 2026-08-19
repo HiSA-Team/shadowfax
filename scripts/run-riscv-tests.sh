@@ -138,27 +138,47 @@ taskset -c 0 qemu-system-riscv64 -M virt -m 256M -smp 1 -nographic \
     -append 'console=ttyS0,115200 riscv-tests.mode=linux-native' \
     2>&1 | tee "$NATIVE_LOG" | sed -u -n 's/\r$//; /^RISCV_TEST_RUN,/p; /^RISCV_TEST_RESULT,/p'
 
-TVM_DTB="$WORK/linux-tvm.dtb"
+TVM_DTB="$WORK/linux-tvm-static.dtb"
 dtc -q -I dts -O dtb -o "$TVM_DTB" "$ROOT/guests/linux/linux-tvm.dts"
 INITRD_START=$((0x01000000))
 INITRD_END=$((INITRD_START + $(stat -c %s "$INITRD")))
 fdtput -t x "$TVM_DTB" /chosen linux,initrd-start 0 "0x$(printf '%x' "$INITRD_START")"
 fdtput -t x "$TVM_DTB" /chosen linux,initrd-end 0 "0x$(printf '%x' "$INITRD_END")"
-fdtput -t s "$TVM_DTB" /chosen bootargs 'earlycon=uart8250,mmio,0x18000000 console=ttyS0,115200 riscv-tests.mode=linux-tvm'
+fdtput -t s "$TVM_DTB" /chosen bootargs 'earlycon=uart8250,mmio,0x18000000 console=ttyS0,115200 riscv-tests.mode=linux-tvm-static'
 
-echo "Embedding Linux RISC-V tests TVM"
+echo "Embedding Linux RISC-V tests TVM-STATIC"
 TSM_GUEST_ELF="$KERNEL_ELF" TSM_GUEST_DTB="$TVM_DTB" \
     TSM_GUEST_INITRD="$INITRD" RUSTFLAGS='-C target-feature=+h' \
     cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
-    -p tsm --features standalone >"$OUT/logs/linux-tsm-build.log" 2>&1
+    -p tsm --features standalone >"$OUT/logs/linux-tsm-build-static.log" 2>&1
 
-TVM_LOG="$OUT/logs/linux-tvm.log"
-echo "[linux-tvm] running all benchmarks"
+TVM_STATIC_LOG="$OUT/logs/linux-tvm-static.log"
+echo "[linux-tvm-static] running all benchmarks"
 taskset -c 0 qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
     -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/debug/tsm" \
-    2>&1 | tee "$TVM_LOG" | sed -u -n 's/\r$//; /^RISCV_TEST_RUN,/p; /^RISCV_TEST_RESULT,/p'
+    2>&1 | tee "$TVM_STATIC_LOG" | sed -u -n 's/\r$//; /^RISCV_TEST_RUN,/p; /^RISCV_TEST_RESULT,/p'
 
-for log in "$NATIVE_LOG" "$TVM_LOG"; do
+TVM_DTB="$WORK/linux-tvm-lazy.dtb"
+dtc -q -I dts -O dtb -o "$TVM_DTB" "$ROOT/guests/linux/linux-tvm.dts"
+INITRD_START=$((0x01000000))
+INITRD_END=$((INITRD_START + $(stat -c %s "$INITRD")))
+fdtput -t x "$TVM_DTB" /chosen linux,initrd-start 0 "0x$(printf '%x' "$INITRD_START")"
+fdtput -t x "$TVM_DTB" /chosen linux,initrd-end 0 "0x$(printf '%x' "$INITRD_END")"
+fdtput -t s "$TVM_DTB" /chosen bootargs 'earlycon=uart8250,mmio,0x18000000 console=ttyS0,115200 riscv-tests.mode=linux-tvm-lazy'
+
+echo "Embedding Linux RISC-V tests TVM-LAZY"
+TSM_GUEST_ELF="$KERNEL_ELF" TSM_GUEST_DTB="$TVM_DTB" \
+    TSM_GUEST_INITRD="$INITRD" RUSTFLAGS='-C target-feature=+h' \
+    cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
+    -p tsm --features standalone --features lazy >"$OUT/logs/linux-tsm-build-lazy.log" 2>&1
+
+TVM_LAZY_LOG="$OUT/logs/linux-tvm-lazy.log"
+echo "[linux-tvm-lazy] running all benchmarks"
+taskset -c 0 qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
+    -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/debug/tsm" \
+    2>&1 | tee "$TVM_LAZY_LOG" | sed -u -n 's/\r$//; /^RISCV_TEST_RUN,/p; /^RISCV_TEST_RESULT,/p'
+
+for log in "$NATIVE_LOG" "$TVM_STATIC_LOG" "$TVM_LAZY_LOG"; do
     count=$(tr -d '\r' <"$log" | grep -c '^RISCV_TEST_RESULT,' || true)
     expected=$((RUNS * ${#BENCHMARKS[@]}))
     [[ $count -eq $expected ]] || { echo "$log produced $count/$expected results"; exit 1; }
