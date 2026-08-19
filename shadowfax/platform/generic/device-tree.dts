@@ -179,6 +179,8 @@
 				regions = <&umem 0x3f>, <&umem_high 0x3f>, <&uplic 0x3f>, <&udevices 0x3f>;
 				next-addr = <0x0 0x8A000000>;
 				next-mode = <0x1>;
+				system-reset-allowed;
+				system-suspend-allowed;
 			};
 
 		};
