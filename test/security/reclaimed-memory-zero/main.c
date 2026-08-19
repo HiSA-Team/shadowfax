@@ -1,34 +1,34 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PAGE_SIZE                  4096UL
-#define PAGE_DIRECTORY_SIZE        (64UL * PAGE_SIZE)
-#define TVM_STATE_SIZE             PAGE_SIZE
-#define GUEST_RAM_SIZE             (64UL * 1024UL * 1024UL)
-#define SEGMENT_STAGING_SIZE       (2UL * 1024UL * 1024UL)
+#define PAGE_SIZE               4096UL
+#define PAGE_DIRECTORY_SIZE     (64UL *  PAGE_SIZE)
+#define TVM_STATE_SIZE          PAGE_SIZE
+#define GUEST_RAM_SIZE          (64UL *  1024UL * 1024UL)
+#define SEGMENT_STAGING_SIZE    (2UL  *  1024UL * 1024UL)
 
-#define SBI_EXT_DBCN               0x4442434EUL
-#define SBI_DBCN_WRITE_BYTE        2UL
-#define SBI_EXT_SUPD               0x53555044UL
-#define SBI_SUPD_GET_ACTIVE        0UL
-#define SBI_EXT_COVH               0x434F5648UL
-#define COVH_TARGET_TSM            (1UL << 26)
-#define COVH_CONVERT_PAGES         1UL
-#define COVH_RECLAIM_PAGES         2UL
-#define COVH_CREATE_TVM            5UL
-#define COVH_FINALIZE_TVM          6UL
-#define COVH_DESTROY_TVM           8UL
-#define COVH_ADD_MEMORY_REGION     9UL
-#define COVH_ADD_MEASURED_PAGES    11UL
-#define COVH_ADD_ZERO_PAGES        12UL
-#define COVH_CREATE_VCPU           14UL
-#define COVH_RUN_VCPU              15UL
-#define COVH_REMOVE_PAGES          19UL
+#define SBI_EXT_DBCN            0x4442434EUL
+#define SBI_DBCN_WRITE_BYTE     2UL
+#define SBI_EXT_SUPD            0x53555044UL
+#define SBI_SUPD_GET_ACTIVE     0UL
+#define SBI_EXT_COVH            0x434F5648UL
+#define COVH_TARGET_TSM         (1UL  << 26)
+#define COVH_CONVERT_PAGES      1UL
+#define COVH_RECLAIM_PAGES      2UL
+#define COVH_CREATE_TVM         5UL
+#define COVH_FINALIZE_TVM       6UL
+#define COVH_DESTROY_TVM        8UL
+#define COVH_ADD_MEMORY_REGION  9UL
+#define COVH_ADD_MEASURED_PAGES 11UL
+#define COVH_ADD_ZERO_PAGES     12UL
+#define COVH_CREATE_VCPU        14UL
+#define COVH_RUN_VCPU           15UL
+#define COVH_REMOVE_PAGES       19UL
 
-#define ELFCLASS64                 2
-#define ELFDATA2LSB                1
-#define EM_RISCV                   243
-#define PT_LOAD                    1U
+#define ELFCLASS64              2
+#define ELFDATA2LSB             1
+#define EM_RISCV                243
+#define PT_LOAD                 1U
 
 struct sbiret {
     long error;
@@ -84,11 +84,6 @@ static const size_t guest_elf_size = (size_t) __guest_elf_size;
 static unsigned char segment_staging[SEGMENT_STAGING_SIZE]
     __attribute__((aligned(PAGE_SIZE)));
 
-__attribute__((noreturn))
-static void halt(void) {
-    for (;;)
-        asm volatile("wfi");
-}
 
 static struct sbiret sbi_call(uintptr_t eid, uintptr_t fid,
                               uintptr_t arg0, uintptr_t arg1,
@@ -132,6 +127,11 @@ static void puthex(uintptr_t value)
     puts("0x");
     for (int shift = (int)(sizeof(value) * 8) - 4; shift >= 0; shift -= 4)
         putchar(digits[(value >> shift) & 0xf]);
+}
+
+__attribute__((noreturn)) static void halt(void) {
+    for (;;)
+        asm volatile("wfi");
 }
 
 static void assert_zeroed(const char *name, uintptr_t start, uintptr_t end)
