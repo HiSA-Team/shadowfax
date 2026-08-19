@@ -308,10 +308,6 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             (*domain_ctx).regs[10] as isize == 0
         };
 
-        if fid == SBI_COVH_FINALIZE_TVM && success {
-            state.finish_bootstrap(dst_id, src_id).unwrap();
-        }
-
         match fid {
             SBI_COVH_CONVERT_PAGES => {
                 /* Confirm the borrow */
@@ -335,7 +331,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     )
                     .unwrap();
 
-                    /* Zero out the memory region */
+                    // /* Zero out the memory region */
                     {
                         let vec = unsafe {
                             core::slice::from_raw_parts_mut(
@@ -406,7 +402,11 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     state.cancel_borrow(ticket).unwrap();
                 }
             }
-            SBI_COVH_RUN_TVM_VCPU => {}
+            SBI_COVH_FINALIZE_TVM => {
+                if success {
+                    state.finish_bootstrap(dst_id, src_id).unwrap();
+                }
+            }
             _ => {}
         }
         unsafe {
