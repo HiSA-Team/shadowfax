@@ -1,36 +1,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "baremetal.h"
+
 #define PAGE_SIZE              4096UL
 #define PAGE_DIRECTORY_SIZE    (160UL                *  PAGE_SIZE)
 #define TVM_STATE_SIZE         PAGE_SIZE
 #define METADATA_SIZE          (1UL                  *  1024UL * 1024UL)
+#ifndef GUEST_RAM_SIZE
 #define GUEST_RAM_SIZE         (256UL                *  1024UL * 1024UL)
+#endif
 #define PAYLOAD_SIZE           (32UL                 *  1024UL * 1024UL)
 #define SEGMENT_STAGING_SIZE   (2UL                  *  1024UL * 1024UL)
 #define MEASURED_CHUNK_PAGES   (SEGMENT_STAGING_SIZE /  PAGE_SIZE)
 #define MEASURED_CHUNKS        (PAYLOAD_SIZE         /  SEGMENT_STAGING_SIZE)
 #define COVH_CALL_COUNT        (MEASURED_CHUNKS + 7)
 
-#define SBI_EXT_DBCN           0x4442434EUL
-#define SBI_DBCN_WRITE_BYTE    2UL
-#define SBI_EXT_SUPD           0x53555044UL
-#define SBI_SUPD_GET_ACTIVE    0UL
-#define SBI_EXT_SRST           0x53525354UL
-#define SBI_EXT_COVH           0x434F5648UL
-#define COVH_TARGET_TSM        (1UL                  << 26)
-#define COVH_CONVERT_PAGES     1UL
-#define COVH_CREATE_TVM        5UL
-#define COVH_FINALIZE_TVM      6UL
-#define COVH_ADD_MEMORY_REGION 9UL
 #define COVH_ADD_MEASURED      11UL
 #define COVH_ADD_ZERO          12UL
-#define COVH_CREATE_VCPU       14UL
-
-struct sbiret {
-    long error;
-    long value;
-};
 
 struct counters {
     uint64_t cycle;
@@ -51,36 +38,6 @@ extern unsigned char __confidential_guest_end[];
 
 static unsigned char segment_staging[SEGMENT_STAGING_SIZE]
     __attribute__((aligned(PAGE_SIZE)));
-
-static struct sbiret sbi_call(uintptr_t eid, uintptr_t fid,
-                              uintptr_t arg0, uintptr_t arg1,
-                              uintptr_t arg2, uintptr_t arg3,
-                              uintptr_t arg4, uintptr_t arg5)
-{
-    register uintptr_t a0 asm("a0") = arg0;
-    register uintptr_t a1 asm("a1") = arg1;
-    register uintptr_t a2 asm("a2") = arg2;
-    register uintptr_t a3 asm("a3") = arg3;
-    register uintptr_t a4 asm("a4") = arg4;
-    register uintptr_t a5 asm("a5") = arg5;
-    register uintptr_t a6 asm("a6") = fid;
-    register uintptr_t a7 asm("a7") = eid;
-
-    asm volatile("ecall"
-                 : "+r"(a0), "+r"(a1)
-                 : "r"(a2), "r"(a3), "r"(a4), "r"(a5),
-                   "r"(a6), "r"(a7)
-                 : "memory");
-    return (struct sbiret){(long)a0, (long)a1};
-}
-
-static struct sbiret covh_call(uintptr_t fid, uintptr_t a0, uintptr_t a1,
-                               uintptr_t a2, uintptr_t a3, uintptr_t a4,
-                               uintptr_t a5)
-{
-    return sbi_call(SBI_EXT_COVH, COVH_TARGET_TSM | fid,
-                    a0, a1, a2, a3, a4, a5);
-}
 
 static uint64_t read_cycle(void)
 {
@@ -106,62 +63,6 @@ static uint64_t read_time(void)
 static struct counters read_counters(void)
 {
     return (struct counters){read_cycle(), read_instret(), read_time()};
-}
-
-static void putchar(char c)
-{
-    (void)sbi_call(SBI_EXT_DBCN, SBI_DBCN_WRITE_BYTE,
-                   (uintptr_t)(unsigned char)c, 0, 0, 0, 0, 0);
-}
-
-static void puts(const char *message)
-{
-    while (*message != '\0')
-        putchar(*message++);
-}
-
-static void putdec(uint64_t value)
-{
-    char digits[20];
-    size_t length = 0;
-
-    if (value == 0) {
-        putchar('0');
-        return;
-    }
-    while (value != 0) {
-        digits[length++] = (char)('0' + value % 10);
-        value /= 10;
-    }
-    while (length != 0)
-        putchar(digits[--length]);
-}
-
-static void puthex(uintptr_t value)
-{
-    static const char digits[] = "0123456789abcdef";
-
-    puts("0x");
-    for (int shift = (int)(sizeof(value) * 8) - 4; shift >= 0; shift -= 4)
-        putchar(digits[(value >> shift) & 0xf]);
-}
-
-__attribute__((noreturn))
-static void halt(void)
-{
-    for (;;)
-        asm volatile("wfi");
-}
-
-__attribute__((noreturn))
-static void fail(const char *operation, long error)
-{
-    puts("[HOST] ERROR: ");
-    puts(operation);
-    puts(" returned ");
-    puthex((uintptr_t)error);
-    puts("\n");
-    halt();
 }
 
 static void emit_latency(const char *kind, const char *operation,

@@ -8,7 +8,7 @@ _start:
     mv t0, zero
     mv t1, zero
     mv t2, zero
-    mv s0, zero
+    mv s0, a1
     mv s1, zero
     mv a0, zero
     mv a1, zero
@@ -36,8 +36,8 @@ _start:
     /* Load stack pointer */
     la sp, __stack_top
 
-    /* Zero out a0 register*/
-    add a0, zero, zero
+    /* Forward the TVM entry argument supplied in a1 to main in a0. */
+    mv a0, s0
 
     call main
     /* Hang */
