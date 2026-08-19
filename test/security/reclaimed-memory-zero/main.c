@@ -194,6 +194,6 @@ int main(void)
     create_and_run_tvm();
     /* Another process tries to access the same physical memory */
     info_stealer();
-    puts("[HOST] Program compelted. Halting\n");
-    halt();
+    puts("[HOST] Program completed. Shutting down\n");
+    shutdown();
 }

@@ -11,8 +11,5 @@ int main(void)
         tvm_secret[i] = 0xa5;
 
     puts("[TVM] secret planted; requesting shutdown\n");
-    (void)sbi_call(SBI_EXT_SRST, SBI_SRST_RESET, 0, 0, 0, 0, 0, 0);
-
-    for (;;)
-        asm volatile("wfi");
+    shutdown();
 }

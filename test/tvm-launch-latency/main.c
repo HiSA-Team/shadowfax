@@ -172,6 +172,5 @@ int main(void)
     emit_latency("tvm_startup", "TVM_STARTUP", (struct counters){0}, startup);
 
     puts("[HOST] PASS: TVM launch latency measured\n");
-    (void)sbi_call(SBI_EXT_SRST, 0, 0, 0, 0, 0, 0, 0);
-    halt();
+    shutdown();
 }

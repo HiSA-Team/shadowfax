@@ -149,6 +149,6 @@ int main(void)
                    (guest_memory_end - guest_memory_start) / PAGE_SIZE,
                    0, 0,0,0));
 
-    puts("[HOST] Program completed. Halting\n");
-    halt();
+    puts("[HOST] Program completed. Shutting down\n");
+    shutdown();
 }

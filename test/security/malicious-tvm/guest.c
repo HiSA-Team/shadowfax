@@ -6,12 +6,6 @@
 #define SECRET_GPA 0x300000UL
 #define SECRET_SIZE 4096UL
 
-static void shutdown(void)
-{
-    (void)sbi_call(SBI_EXT_SRST, 0, 0, 0, 0, 0, 0, 0);
-    for (;;) asm volatile("wfi");
-}
-
 int main(uintptr_t role)
 {
     volatile unsigned char *secret = (volatile unsigned char *)SECRET_GPA;

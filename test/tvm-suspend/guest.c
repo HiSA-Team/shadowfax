@@ -10,9 +10,5 @@ int main(void)
                    0, 0, 0, 0, 0, 0);
 
     puts("[TVM] resume\n");
-    (void)sbi_call(SBI_EXT_SRST, SBI_SRST_RESET,
-                   0, 0, 0, 0, 0, 0);
-
-    for (;;)
-        asm volatile("wfi");
+    shutdown();
 }

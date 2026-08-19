@@ -137,5 +137,5 @@ int main(void)
                          0, 0, 0, 0));
 
     puts("[HOST] PASS: two TVMs completed\n");
-    halt();
+    shutdown();
 }

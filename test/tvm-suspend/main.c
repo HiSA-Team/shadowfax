@@ -118,5 +118,5 @@ int main(void)
                          0, 0, 0, 0));
 
     puts("[HOST] PASS: TVM suspended and resumed\n");
-    halt();
+    shutdown();
 }

@@ -90,7 +90,6 @@ int main(void)
        covh_call(COVH_RECLAIM_PAGES, meta, (meta_end - meta) / PAGE_SIZE, 0, 0, 0, 0));
     ok("RECLAIM_GUEST_PAGES",
        covh_call(COVH_RECLAIM_PAGES, guest1, (2 * GUEST_RAM_SIZE) / PAGE_SIZE, 0, 0, 0, 0));
-    puts("[HOST] PASS: malicious TVM could not access trusted data\n. Halting");
-
-    halt();
+    puts("[HOST] PASS: malicious TVM could not access trusted data\n");
+    shutdown();
 }
