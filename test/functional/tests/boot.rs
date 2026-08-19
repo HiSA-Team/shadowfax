@@ -1,3 +1,4 @@
+use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -66,7 +67,9 @@ fn spawn_qemu_and_stream(
 #[test]
 fn firmware_boots_correctly() {
     let firmware = PathBuf::from("../../target/riscv64imac-unknown-none-elf/debug/shadowfax");
-    let dtb = PathBuf::from("../../bin/device-tree.dtb");
+    let dtb = env::var_os("FDT_IMAGE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("../../bin/generic/device-tree.dtb"));
     let dice = PathBuf::from("../../bin/shadowfax.dice.bin");
     let output = Command::new("fdtget")
         .args([

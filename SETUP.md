@@ -14,6 +14,9 @@ cd shadowfax
 
 For an existing clone, run `git submodule update --init --recursive`.
 
+Each linked Git worktree needs its own submodule checkout. Run the same command from that worktree
+before invoking Make there.
+
 ## Host dependencies
 
 Ubuntu 22.04/24.04 and Debian 12 users can install the base dependencies with:
@@ -73,25 +76,26 @@ pip install cbor2
 ```
 
 ```sh
-make -B PYTHON='uv run --with cbor2'
+make PYTHON='uv run --with cbor2' firmware
 ```
 
-The `-B` option is important after firmware or measurement changes because it regenerates signatures
-and DICE attestation input even when timestamps would otherwise reuse an artifact.
+Use `make -B ... firmware` after changing firmware or measurement inputs when a forced regeneration
+of signatures and DICE attestation input is required.
 
 ## Keys and firmware build
 
-Generate local ED25519 signing keys and DICE root-of-trust keys once:
+Generate local ED25519 signing keys and DICE root-of-trust keys once, then build the bare-metal
+guest used by the first example and stage the firmware artifacts:
 
 ```sh
-make generate-keys PYTHON='uv run --with cbor2'
+make PYTHON='uv run --with cbor2' generate-keys
+make guests
+make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
 ```
 
-Then build all guests, the TSM, firmware, signatures, and attestation data:
-
-```sh
-make -B PYTHON='uv run --with cbor2'
-```
+`firmware` produces the TSM, firmware, signature, DICE input, and
+`bin/generic/device-tree.dtb`. Test launchers consume these staged artifacts; they do not rebuild
+the firmware stack automatically. Run the example from the [README](README.md#run-the-attestation-example).
 
 Generated keys are development material under `shadowfax/keys/`; do not treat them as production
 secrets or commit private replacements.

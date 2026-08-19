@@ -1,44 +1,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "baremetal.h"
+#include "baremetal_elf.h"
+
 #define PAGE_SIZE               4096UL
 #define PAGE_TABLE_SIZE         (16UL *  PAGE_SIZE)
+#ifndef GUEST_RAM_SIZE
 #define GUEST_RAM_SIZE          (16UL *  1024UL * 1024UL)
+#endif
 #define SECRET_GPA              0x300000UL
-#define SBI_EXT_DBCN            0x4442434EUL
-#define SBI_DBCN_WRITE_BYTE     2UL
-#define SBI_EXT_SUPD            0x53555044UL
-#define SBI_SUPD_GET_ACTIVE     0UL
-#define SBI_EXT_COVH            0x434F5648UL
-#define COVH_TARGET_TSM         (1UL  << 26)
-#define COVH_CONVERT_PAGES      1UL
-#define COVH_RECLAIM_PAGES      2UL
-#define COVH_CREATE_TVM         5UL
-#define COVH_FINALIZE_TVM       6UL
-#define COVH_DESTROY_TVM        8UL
-#define COVH_ADD_MEMORY_REGION  9UL
-#define COVH_ADD_MEASURED_PAGES 11UL
-#define COVH_ADD_ZERO_PAGES     12UL
-#define COVH_CREATE_VCPU        14UL
-#define COVH_RUN_TVM_VCPU       15UL
-#define PT_LOAD                 1U
-
-struct sbiret {
-    long error;
-    long value;
-};
-typedef struct {
-    unsigned char ident[16];
-    uint16_t type, machine;
-    uint32_t version;
-    uint64_t entry, phoff, shoff;
-    uint32_t flags;
-    uint16_t ehsize, phentsize, phnum, shentsize, shnum, shstrndx;
-} Elf64_Ehdr;
-typedef struct {
-    uint32_t type, flags;
-    uint64_t offset, vaddr, paddr, filesz, memsz, align;
-} Elf64_Phdr;
+#define COVH_RUN_TVM_VCPU COVH_RUN_VCPU
+#define ok require_ok_silent
 
 extern const unsigned char __guest_elf[];
 extern const char __guest_elf_size[];
@@ -46,106 +19,22 @@ extern unsigned char __confidential_metadata_start[], __confidential_metadata_en
 extern unsigned char __confidential_guest_start[], __confidential_guest_end[];
 static unsigned char staging[2UL * 1024UL * 1024UL] __attribute__((aligned(PAGE_SIZE)));
 
-static struct sbiret sbi_call(uintptr_t eid, uintptr_t fid, uintptr_t a0v, uintptr_t a1v,
-                              uintptr_t a2v, uintptr_t a3v, uintptr_t a4v, uintptr_t a5v)
+static uintptr_t load_guest(uintptr_t tvm_id, uintptr_t physical)
 {
-    register uintptr_t a0 asm("a0") = a0v, a1 asm("a1") = a1v, a2 asm("a2") = a2v,
-                          a3 asm("a3") = a3v, a4 asm("a4") = a4v, a5 asm("a5") = a5v,
-                          a6 asm("a6") = fid, a7 asm("a7") = eid;
-    asm volatile("ecall"
-                 : "+r"(a0), "+r"(a1)
-                 : "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
-                 : "memory");
-    return (struct sbiret){(long)a0, (long)a1};
-}
+    const struct baremetal_elf_loader loader = {
+        .elf = __guest_elf,
+        .elf_size = (size_t)__guest_elf_size,
+        .staging = staging,
+        .staging_size = sizeof(staging),
+        .physical_start = physical,
+        .physical_end = (uintptr_t)__confidential_guest_end,
+        .guest_ram_size = GUEST_RAM_SIZE,
+        .premapped = 1,
+        .require_ok = ok,
+        .fail = fail,
+    };
 
-static struct sbiret covh_call(uintptr_t fid, uintptr_t a0, uintptr_t a1, uintptr_t a2,
-                               uintptr_t a3, uintptr_t a4, uintptr_t a5)
-{
-    return sbi_call(SBI_EXT_COVH, COVH_TARGET_TSM | fid, a0, a1, a2, a3, a4, a5);
-}
-
-static void putchar(char c)
-{
-    (void)sbi_call(SBI_EXT_DBCN, SBI_DBCN_WRITE_BYTE, (unsigned char)c, 0, 0, 0, 0, 0);
-}
-static void puts(const char *s)
-{
-    while (*s)
-        putchar(*s++);
-}
-static void puthex(uintptr_t value)
-{
-    static const char d[] = "0123456789abcdef";
-    puts("0x");
-    for (int i = (int)(sizeof(value) * 8) - 4; i >= 0; i -= 4)
-        putchar(d[(value >> i) & 0xf]);
-}
-__attribute__((noreturn)) static void halt(void)
-{
-    for (;;)
-        asm volatile("wfi");
-}
-
-__attribute__((noreturn)) static void fail(const char *op, long error)
-{
-    puts("[HOST] ERROR: ");
-    puts(op);
-    puts(" returned ");
-    puthex((uintptr_t)error);
-    puts("\n");
-    halt();
-}
-static long ok(const char *op, struct sbiret ret)
-{
-    if (ret.error)
-        fail(op, ret.error);
-    return ret.value;
-}
-static uintptr_t down(uintptr_t x) { return x & ~(PAGE_SIZE - 1); }
-static uintptr_t up(uintptr_t x) { return (x + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1); }
-static void clear(void *p, size_t n)
-{
-    volatile unsigned char *b = p;
-    while (n--)
-        *b++ = 0;
-}
-static void copy(void *d, const void *s, size_t n)
-{
-    unsigned char *dp = d;
-    const unsigned char *sp = s;
-    while (n--)
-        *dp++ = *sp++;
-}
-
-static uintptr_t load_guest(uintptr_t tvmid, uintptr_t physical)
-{
-    const unsigned char *elf = __guest_elf;
-    size_t size = (size_t)__guest_elf_size;
-    const Elf64_Ehdr *eh = (const Elf64_Ehdr *)elf;
-    uintptr_t next = 0;
-
-    ok("ADD_ZERO_PAGES",
-       covh_call(COVH_ADD_ZERO_PAGES, tvmid, physical, 0, GUEST_RAM_SIZE / PAGE_SIZE, 0, 0));
-    if (size < sizeof(*eh) || eh->ident[0] != 0x7f || eh->ident[1] != 'E' || eh->ident[2] != 'L' ||
-        eh->ident[3] != 'F' || eh->machine != 243)
-        fail("invalid guest ELF", -1);
-    for (uint16_t i = 0; i < eh->phnum; ++i) {
-        const Elf64_Phdr *ph = (const Elf64_Phdr *)(elf + eh->phoff + (uint64_t)i * eh->phentsize);
-        if (ph->type != PT_LOAD)
-            continue;
-        uintptr_t page = down((uintptr_t)ph->paddr);
-        size_t pages = (size_t)up((uintptr_t)(ph->paddr - page) + ph->filesz) / PAGE_SIZE;
-        if (ph->filesz > ph->memsz || ph->offset > size || ph->filesz > size - ph->offset ||
-            page < next || pages * PAGE_SIZE > sizeof(staging))
-            fail("invalid guest segment", -1);
-        clear(staging, pages * PAGE_SIZE);
-        copy(staging + ph->paddr - page, elf + ph->offset, ph->filesz);
-        ok("ADD_MEASURED_PAGES", covh_call(COVH_ADD_MEASURED_PAGES, tvmid, (uintptr_t)staging,
-                                           physical + page, 0, pages, page));
-        next = page + (size_t)up((uintptr_t)(ph->paddr - page) + ph->memsz);
-    }
-    return (uintptr_t)eh->entry;
+    return baremetal_load_guest_elf(tvm_id, &loader);
 }
 
 static uintptr_t create_tvm(uintptr_t pt, uintptr_t state, uintptr_t physical, uintptr_t role)
@@ -173,8 +62,8 @@ int main(void)
         fail("layout", -1);
     struct sbiret ret = sbi_call(SBI_EXT_SUPD, SBI_SUPD_GET_ACTIVE, 0, 0, 0, 0, 0, 0);
     ok("GET_ACTIVE", ret);
-    clear((void *)meta, meta_end - meta);
-    clear((void *)guest, guest_end - guest);
+    clear_bytes((void *)meta, meta_end - meta);
+    clear_bytes((void *)guest, guest_end - guest);
     ok("CONVERT_META_PAGES",
        covh_call(COVH_CONVERT_PAGES, meta, (meta_end - meta) / PAGE_SIZE, 0, 0, 0, 0));
     ok("CONVERT_GUEST_PAGES",
@@ -201,7 +90,6 @@ int main(void)
        covh_call(COVH_RECLAIM_PAGES, meta, (meta_end - meta) / PAGE_SIZE, 0, 0, 0, 0));
     ok("RECLAIM_GUEST_PAGES",
        covh_call(COVH_RECLAIM_PAGES, guest1, (2 * GUEST_RAM_SIZE) / PAGE_SIZE, 0, 0, 0, 0));
-    puts("[HOST] PASS: malicious TVM could not access trusted data\n. Halting");
-
-    halt();
+    puts("[HOST] PASS: malicious TVM could not access trusted data\n");
+    shutdown();
 }

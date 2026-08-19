@@ -18,7 +18,7 @@ trap 'rm -rf "$WORK"' EXIT
 [[ ! -e "$OUT" ]] || { echo "output already exists: $OUT"; exit 1; }
 mkdir -p "$OUT/logs"
 
-dtc -q -I dts -O dtb "$ROOT/shadowfax/platform/generic/device-tree.dts" -o "$WORK/platform.dtb"
+dtc -q -I dts -O dtb "$ROOT/platform/generic/device-tree.dts" -o "$WORK/platform.dtb"
 read -r _ M_RAM _ M_SIZE < <(fdtget -t x "$WORK/platform.dtb" /memory@80000000 reg)
 read -r _ M_UART _ _ < <(fdtget -t x "$WORK/platform.dtb" /soc/serial@10000000 reg)
 read -r _ M_TEST _ _ < <(fdtget -t x "$WORK/platform.dtb" /soc/test@100000 reg)

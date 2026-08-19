@@ -41,7 +41,7 @@ SECTIONS
 
     .confidential_metadata (NOLOAD) : ALIGN(512K) {
         __confidential_metadata_start = .;
-        . += 512K;
+        . += SHADOWFAX_METADATA_SIZE;
         __confidential_metadata_end = .;
     } > RAM
 
@@ -49,7 +49,7 @@ SECTIONS
         __confidential_guest_start = .;
         . += SHADOWFAX_GUEST_SIZE;
         __confidential_guest_end = .;
-    } > RAM
+    }
 
     __image_end = .;
 
@@ -60,12 +60,18 @@ SECTIONS
 }
 
 ASSERT(__confidential_metadata_end <= SHADOWFAX_HOST_FDT_ADDR,
-       "standalone launcher overlaps the device tree")
-ASSERT(SHADOWFAX_HOST_FDT_ADDR < SHADOWFAX_GUEST_BASE,
+       "launcher overlaps the device tree")
+ASSERT(!SHADOWFAX_GUEST_IN_RAM || SHADOWFAX_HOST_FDT_ADDR < SHADOWFAX_GUEST_BASE,
        "device tree must precede confidential guest RAM")
 ASSERT(__confidential_guest_start == SHADOWFAX_GUEST_BASE,
        "guest confidential RAM starts at the wrong address")
 ASSERT(__confidential_guest_end == SHADOWFAX_GUEST_BASE + SHADOWFAX_GUEST_SIZE,
        "guest confidential RAM has the wrong size")
-ASSERT(__confidential_guest_end <= ORIGIN(RAM) + LENGTH(RAM),
-       "standalone launcher exceeds untrusted-domain RAM")
+ASSERT(SHADOWFAX_GUEST_UNIT_SIZE > 0 &&
+       SHADOWFAX_GUEST_UNIT_SIZE % 4K == 0,
+       "per-TVM guest RAM must be non-zero and page aligned")
+ASSERT(SHADOWFAX_GUEST_SIZE <= SHADOWFAX_GUEST_REGION_SIZE,
+       "requested guest RAM exceeds the DTB guest region")
+ASSERT(!SHADOWFAX_GUEST_IN_RAM ||
+       __confidential_guest_end <= ORIGIN(RAM) + LENGTH(RAM),
+       "launcher exceeds untrusted-domain RAM")

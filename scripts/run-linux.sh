@@ -130,7 +130,7 @@ LINUX_RUNTIME_SIZE=$(od -An -j 16 -N 8 -tu8 "$LINUX_IMAGE_PATH" | tr -d '[:space
 PATCHED_DTB="$RUN_LINUX_TMP/device-tree.dtb"
 dtc -I dts -O dtb \
     -o "$PATCHED_DTB" \
-    "$PROJECT_ROOT/shadowfax/platform/$PLATFORM_NAME/device-tree.dts"
+    "$PROJECT_ROOT/platform/$PLATFORM_NAME/device-tree.dts"
 
 DOMAIN_PATH=/chosen/opensbi-domains
 LINUX_LOAD_ADDR=$(read_u64_property "$PATCHED_DTB" "$DOMAIN_PATH/untrusted-domain" next-addr)

@@ -13,14 +13,46 @@ the F and D extensions to its userspace.
 
 ## Documentation index
 
-- [Quick setup](#quick-setup): clone the project, generate keys, and verify the toolchain.
-- [Bare-metal TVM attestation](#the-holy-grail-bare-metal-host-and-tvm-attestation): run the
-  complete host-to-TVM demonstration.
+- [Run the attestation example](#run-the-attestation-example): go from a clone to a bare-metal
+  host and TVM demonstration.
+- [Setup](SETUP.md): detailed host dependencies, toolchains, keys, Linux, initramfs, Docker, and
+  musl instructions.
 - [Linux TVM guest](#boot-linux-as-a-tvm-guest): boot Linux inside a confidential VM.
 - [Linux host](#boot-linux-as-the-untrusted-host): boot Linux in the untrusted supervisor domain.
-- [SETUP.md](SETUP.md): detailed dependencies, toolchains, keys, Linux, initramfs, Docker, and musl
-  instructions.
 - [DEBUG.md](DEBUG.md): QEMU/GDB startup, synthetic CoVE-H scenarios, and debugger commands.
+
+## Run the attestation example
+
+The shortest working path launches a bare-metal CoVE host, creates a bare-metal TVM, and prints
+the layered attestation evidence. Clone with submodules and install the dependencies in
+[SETUP.md](SETUP.md):
+
+```sh
+git clone --recurse-submodules https://github.com/HiSA-Team/shadowfax
+cd shadowfax
+```
+
+If this is a linked Git worktree, initialize its submodules before building:
+
+```sh
+git submodule update --init --recursive
+```
+
+Generate development keys once, build the guest workload, stage the firmware artifacts, then run
+the launcher:
+
+```sh
+make PYTHON='uv run --with cbor2' generate-keys
+make guests
+make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
+make -C test/standalone-tvm-launcher run
+```
+
+The last command starts QEMU. It prints the TVM attestation evidence and finishes with
+`[HOST] Program completed. Halting`; stop QEMU with <kbd>Ctrl</kbd>+<kbd>C</kbd> afterwards.
+`firmware` deliberately stages the TSM, firmware, signature, DICE input, and
+`bin/generic/device-tree.dtb` before the launcher is built. Test launchers consume those artifacts
+instead of rebuilding them implicitly.
 
 ## Repository structure
 
@@ -44,29 +76,12 @@ Shadowfax configures three static OpenSBI domains:
 The implementation currently covers parts of SUPD, CoVE-H, and CoVE-G. CoVE-I and hardware-assisted
 interrupt virtualization are not implemented.
 
-## Quick setup
-
-Clone the submodules, install the dependencies described in [SETUP.md](SETUP.md), and generate the
-local development keys:
-
-```sh
-git clone --recurse-submodules https://github.com/HiSA-Team/shadowfax
-cd shadowfax
-make generate-keys
-make guests
-make -B PYTHON='uv run --with cbor2'
-```
-
-> [!WARNING]
-> It is very important to generate guests using `make guests` since other target do not attempt to build
-> guests on their own.
-
 Use `make build-info` to check the detected toolchain and platform. Pass `RV_PREFIX` explicitly if
 the RISC-V tools are not available under the default prefix. Shared compiler, assembler, linker,
 architecture, and QEMU defaults live in `config.mk`; see [SETUP.md](SETUP.md#shared-make-configuration)
 for supported overrides and debug behavior.
 
-## Bare-metal host and TVM attestation
+## How the attestation example works
 
 The most complete standalone demonstration runs a bare-metal CoVE host, creates a bare-metal TVM,
 and retrieves the layered attestation evidence containing the platform certificate:
@@ -75,9 +90,8 @@ and retrieves the layered attestation evidence containing the platform certifica
 make -C test/standalone-tvm-launcher/ run
 ```
 
-The root build prepares Shadowfax, the TSM, its signature, the default attestation guest, and the
-DICE-derived platform attestation input. The standalone launcher Makefile itself only embeds the
-selected guest and creates the bare-metal host image. When `run` starts QEMU:
+The standalone launcher embeds the selected guest and creates the bare-metal host image. When
+`run` starts QEMU:
 
 1. The complete `guests/bare-metal/attestation.out` ELF is embedded in the host executable's
    `.guest_elf` section.
@@ -88,8 +102,8 @@ selected guest and creates the bare-metal host image. When `run` starts QEMU:
    which the guest prints to the QEMU console.
 
 Use `GUEST_ELF=/path/to/guest.out` to embed another RISC-V ELF or `DTB=/path/to/tree.dtb` when
-running with another prebuilt device tree. Missing inputs are reported instead of being built
-implicitly.
+running with another prebuilt device tree. Missing staged inputs report the command needed to build
+them instead of being built implicitly.
 
 ## Boot Linux as a TVM guest
 
@@ -143,9 +157,9 @@ ssh -p 2222 root@127.0.0.1
 ```sh
 make help                                      # list supported targets
 make build-info                                # show detected build settings
-make -B PYTHON='uv run --with cbor2'           # force a complete measured build
-make test PYTHON='uv run --with cbor2'         # run the QEMU boot integration test
-make qemu-run PYTHON='uv run --with cbor2'     # boot the firmware directly
+make PYTHON='uv run --with cbor2' firmware      # stage firmware and the platform DTB
+make PYTHON='uv run --with cbor2' test          # run the QEMU boot integration test
+make PYTHON='uv run --with cbor2' qemu-run      # boot the firmware directly
 ```
 
 See [DEBUG.md](DEBUG.md) for GDB-driven CoVE scenarios.

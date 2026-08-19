@@ -3,7 +3,6 @@
  *      - link opensbi static library;
  *      - generate rust bindings from opensbi include;
  *      - specify correct linkerscript;
- *      - compile the device tree;
  *
  *  The idea of a build script is well documented here
  *  "https://doc.rust-lang.org/cargo/reference/build-scripts.html".
@@ -12,25 +11,17 @@
  * Author: Giuseppe Capasso <capassog97@gmail.com>
  */
 #![feature(stmt_expr_attributes)]
+use std::env;
 use std::path::PathBuf;
-use std::process::Command;
-use std::{env, fs};
 
-const PLATFORM_BASE_DIR: &str = "platform";
 const LINKERSCRIPT_PATH: &str = "memory.x";
 
 fn main() {
-    // Ensure the bin/ folder exists.
-    let bin_dir = PathBuf::from("../bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-
     let opensbi_path = PathBuf::from("opensbi");
 
     // Sourcing `environment.sh` allows users to specify a PLATFORM (defaults to 'generic').
     // Retrieve platform details if exists otherwise throw an error
     let platform = env::var("PLATFORM").unwrap_or_else(|_| "generic".to_string());
-
-    let platform_dir = PathBuf::from(PLATFORM_BASE_DIR).join(&platform);
 
     // Setup linker:
     // - build and link opensbi
@@ -62,28 +53,6 @@ fn main() {
 
         // recompile if linkerscript changes
         println!("cargo::rerun-if-changed={}", &libopensbi_path.display());
-    }
-
-    // Compile the platform device tree. Runtime configuration is parsed from a1.
-    {
-        let dts_file = &platform_dir.join("device-tree.dts").canonicalize().unwrap();
-        let dtb_file = &bin_dir.join("device-tree.dtb");
-        let status = Command::new("dtc")
-            .args([
-                "-I",
-                "dts",
-                "-O",
-                "dtb",
-                "-o",
-                &dtb_file.to_str().unwrap(),
-                &dts_file.to_str().unwrap(),
-            ])
-            .status()
-            .expect("Failed to execute dtc");
-        assert!(status.success(), "dtc failed with exit status: {status}");
-
-        // recompile if the device tree changes
-        println!("cargo::rerun-if-changed={}", dts_file.display());
     }
 
     // Generate rust bindgen

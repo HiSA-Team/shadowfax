@@ -1,6 +1,7 @@
 # Common settings for the bare-metal builds.
 
 DEBUG         ?= 0
+PLATFORM      ?= generic
 TARGET_TRIPLET ?= riscv64imac-unknown-none-elf
 PROFILE       ?= debug
 
@@ -9,6 +10,7 @@ CC         = $(RV_PREFIX)gcc
 AS         = $(RV_PREFIX)as
 OBJCOPY    = $(RV_PREFIX)objcopy
 GDB        = $(RV_PREFIX)gdb
+AR         = $(RV_PREFIX)ar
 
 ARCH ?= rv64imac
 ABI  ?= lp64
@@ -18,6 +20,17 @@ CFLAGS  = -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany -Wall -Wextra \
 ASFLAGS = -march=$(ARCH) -mabi=$(ABI)
 LDFLAGS = -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
 	-nostdlib -nostartfiles -static -no-pie
+
+CONFIG_DIR      := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+BIN_DIR         ?= $(CONFIG_DIR)bin
+FDT_IMAGE       ?= $(BIN_DIR)/$(PLATFORM)/device-tree.dtb
+GUEST_DIR       ?= $(CONFIG_DIR)guests/bare-metal
+GUEST_BUILD_DIR ?= $(GUEST_DIR)/build
+GUEST_CFLAGS    ?= -I$(GUEST_DIR)/include
+GUEST_ASFLAGS   ?= -I$(GUEST_DIR)
+GUEST_LIB       ?= $(GUEST_BUILD_DIR)/libbaremetal.a
+GUEST_LDFLAGS   ?= $(GUEST_LIB)
+GUEST_MEMORY_SIZE ?= 4194304
 
 ifeq ($(DEBUG),1)
 CFLAGS  += -O0 -g

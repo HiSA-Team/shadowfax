@@ -14,7 +14,6 @@
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 
 PYTHON            ?= python
-PLATFORM          ?= generic
 RUSTFLAGS         ?= -C target-feature=+h
 HOST_ARCHITECTURE := $(shell uname -m)
 HOST_TRIPLET      := $(shell rustc -vV | awk '/^host:/ { print $$2 }')
@@ -24,6 +23,7 @@ RV_PREFIX         ?= riscv64-unknown-linux-$(HOST_LIBC)-
 include config.mk
 
 OPENSBI_VERSION            := $(shell git -C shadowfax/opensbi describe)
+OPENSBI_PATCH              := shadowfax/opensbi-sbi-domain-change-active.diff
 QEMU_DEVICES               ?=
 
 # Files and Directories
@@ -40,7 +40,7 @@ TSM_SIG                     = $(BIN_DIR)/tsm.bin.signature
 
 # Keys and Dice files
 DICE_INPUT                  = $(BIN_DIR)/shadowfax.dice.bin
-FDT_IMAGE                  ?= $(BIN_DIR)/device-tree.dtb
+FDT_SOURCE                  = platform/$(PLATFORM)/device-tree.dts
 PRIVATE_KEY                 = $(KEYS_DIR)/privatekey.pem
 PUBLIC_KEY                  = $(KEYS_DIR)/publickey.pem
 DICE_PLATFORM_PUBLIC_KEY    = $(KEYS_DIR)/root_of_trust_pub.bin
@@ -57,6 +57,7 @@ export RV_PREFIX
 export RUSTFLAGS
 
 export PLATFORM
+export FDT_IMAGE
 
 ifeq ($(HOST_LIBC), musl)
 
@@ -69,32 +70,48 @@ endif
 export LLVM_CONFIG_PATH     := $(CURDIR)/scripts/llvm-config.sh
 endif
 
-.PHONY: all clean firmware tsm test generate-keys guests help
+.PHONY: all clean firmware tsm test generate-keys guests help opensbi-patch
 
-# ensure the bin directory is created
-$(shell mkdir -p $(BIN_DIR))
-
-## all: build tsm, firmware and attestation payload
-all: guests $(DICE_INPUT) build-info
+## all: build tsm, firmware, attestation payload, and platform DTB
+all: guests firmware build-info
 
 ## guests: build bare-metal guests in guests/bare-metal/
 guests:
 	$(MAKE) -C guests/
 
-## firmware: builds the firmware alongisde TSM elf and its signature
-firmware: $(DICE_INPUT)
+## firmware: builds the firmware, TSM, DICE input, and platform DTB
+firmware: opensbi-patch $(DICE_INPUT) $(FDT_IMAGE)
+
+opensbi-patch: $(OPENSBI_PATCH)
+	@patch=$$(realpath $<); \
+	git -C shadowfax/opensbi rev-parse --is-inside-work-tree >/dev/null 2>&1 || { \
+		echo "OpenSBI submodule is not initialized; run: git submodule update --init shadowfax/opensbi" >&2; \
+		exit 1; \
+	}; \
+	if git -C shadowfax/opensbi apply --reverse --check "$$patch"; then \
+		:; \
+	elif git -C shadowfax/opensbi apply --check "$$patch"; then \
+		git -C shadowfax/opensbi apply "$$patch"; \
+	else \
+		echo "OpenSBI patch cannot be applied cleanly: $(OPENSBI_PATCH)" >&2; \
+		exit 1; \
+	fi
 
 ## tsm: build the TSM and signs it
 tsm: $(TSM_SIG)
 
 # create attestation input (CDI_ID and Certificate) according to DICE specification
-$(DICE_INPUT): $(FW_BIN)
+$(DICE_INPUT): $(FW_BIN) | $(BIN_DIR)
 	$(PYTHON) scripts/dice_tool.py generate-platform-token \
 		--uds-private-key $(DICE_PLATFORM_PRIVATE_KEY) \
 		--uds-public-key $(DICE_PLATFORM_PUBLIC_KEY) \
 		$< $@
 
-$(FW_BIN): $(FW_ELF)
+$(FDT_IMAGE): $(FDT_SOURCE)
+	mkdir -p $(dir $@)
+	dtc -I dts -O dtb -o $@ $<
+
+$(FW_BIN): $(FW_ELF) | $(BIN_DIR)
 	$(OBJCOPY) -O binary $< $@
 
 $(FW_ELF): $(TSM_ELF) $(TSM_SIG)
@@ -147,9 +164,13 @@ build-info:
 	@echo "  PROFILE:                   $(PROFILE)"
 	@echo "  DEBUG:                     $(DEBUG)"
 	@echo "  PLATFORM:                  $(PLATFORM)"
+	@echo "  FDT_IMAGE:                 $(FDT_IMAGE)"
 	@echo "  CFLAGS:                    $(CFLAGS)"
+	@echo "  GUEST_CFLAGS:              $(GUEST_CFLAGS)"
+	@echo "  GUEST_MEMORY_SIZE:         $(GUEST_MEMORY_SIZE)"
 	@echo "  ASFLAGS:                   $(ASFLAGS)"
 	@echo "  LDFLAGS:                   $(LDFLAGS)"
+	@echo "  GUEST_LDFLAGS:             $(GUEST_LDFLAGS)"
 	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
 	@echo "  QEMU_FLAGS:                $(QEMU_FLAGS)"
 	@echo "  OPENSBI_VERSION:           $(OPENSBI_VERSION)"
@@ -162,6 +183,7 @@ endif
 clean:
 	cargo clean
 	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig
+	$(RM) $(FDT_IMAGE)
 	$(MAKE) -C shadowfax/opensbi clean distclean
 	$(MAKE) -C guests clean
 
