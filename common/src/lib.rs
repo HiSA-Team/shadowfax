@@ -68,7 +68,7 @@ pub mod attestation {
     use coset::{
         AsCborValue, CborSerializable, CoseKeyBuilder, CoseSign1, CoseSign1Builder, HeaderBuilder,
         cbor::{Value, Value::Integer},
-        cwt::{self, ClaimsSet},
+        cwt::{self, ClaimsSet, ClaimsSetBuilder},
         iana::{self, Algorithm},
     };
     use ed25519_compact::{KeyPair, PublicKey, Seed, Signature};
@@ -90,6 +90,8 @@ pub mod attestation {
     const PLATFORM_STATE_LABEL: i64 = -70_002;
     const PLATFORM_SW_COMPONENTS_LABEL: i64 = -70_003;
     const TSM_PUBLIC_KEY_LABEL: i64 = -70_004;
+    const TVM_PUBLIC_KEY_LABEL: i64 = -70_005;
+    const TVM_INITIAL_MEASUREMENT_LABEL: i64 = -70_006;
 
     #[derive(Debug)]
     pub enum AttestationError {
@@ -344,15 +346,28 @@ pub mod attestation {
             &self.cdi
         }
 
-        /// Returns (platform_token, tsm_token, tvm_token) packaged into a `Evidence` representation.
-        pub fn get_evidence(&self, _tvm_measurement: &[u8], challenge: &[u8]) -> Evidence {
-            // Build TVM token payload: include placeholder claims + the challenge
-            let mut tvm_payload = Vec::new();
-            tvm_payload.extend_from_slice(b"tvm-claims:");
-            tvm_payload.extend_from_slice(challenge);
+        /// Returns the platform, TSM, and TVM tokens packaged into an `Evidence`.
+        pub fn get_evidence(&self, tvm_measurement: &[u8], challenge: &[u8]) -> Evidence {
+            // The TVM token carries the key that identifies this TVM together with
+            // the caller's freshness challenge and the finalized measurement.
+            let tvm_key = self.cdi.derive_keys();
+            let tvm_public_key = CoseKeyBuilder::new_okp_key()
+                .algorithm(Algorithm::EdDSA)
+                .param(-2, Value::Bytes(tvm_key.pk.to_vec()))
+                .build()
+                .to_vec()
+                .unwrap();
+            let tvm_claims = ClaimsSetBuilder::new()
+                .claim(iana::CwtClaimName::Nonce, Value::Bytes(challenge.to_vec()))
+                .private_claim(TVM_PUBLIC_KEY_LABEL, Value::Bytes(tvm_public_key))
+                .private_claim(
+                    TVM_INITIAL_MEASUREMENT_LABEL,
+                    Value::Bytes(tvm_measurement.to_vec()),
+                )
+                .build();
+            let tvm_payload = tvm_claims.to_cbor_value().unwrap().to_vec().unwrap();
 
-            // Sign TVM token with TSM's key (i.e., key derived from TSM CDI)
-            let tsm_key = self.cdi.derive_keys();
+            // Sign the TVM token with the key derived from the TVM CDI.
             let protected = HeaderBuilder::new()
                 .algorithm(iana::Algorithm::EdDSA)
                 .build();
@@ -360,7 +375,7 @@ pub mod attestation {
             let tvm_token = CoseSign1Builder::new()
                 .protected(protected)
                 .payload(tvm_payload)
-                .create_signature(&[], |m| tsm_key.sk.sign(m, None).to_vec())
+                .create_signature(&[], |m| tvm_key.sk.sign(m, None).to_vec())
                 .build();
 
             // Compose riscv-cove-token (submodule map) with platform/tsm/tvm tokens

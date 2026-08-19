@@ -430,10 +430,16 @@ fn handle_covg_get_evidence(
     _pub_key_addr: usize,
     _pub_key_size: usize,
     challenge_addr: usize,
-    _cert_format: usize,
+    cert_format: usize,
     cert_addr_out: usize,
     cert_size: usize,
 ) -> SbiRet {
+    // The existing guest ABI uses zero for the CBOR format. Keep that
+    // compatibility behavior and reject all other formats.
+    if cert_format != 0 {
+        return SbiRet { a0: -1, a1: 0 };
+    }
+
     let hgatp_val = crate::h_extension::csrs::hgatp::read().bits();
     let root_pt = ((hgatp_val & 0xFF_FFFF_FFFF_F) << 12) as usize;
 
