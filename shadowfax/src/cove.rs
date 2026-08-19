@@ -335,6 +335,17 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     )
                     .unwrap();
 
+                    /* Zero out the memory region */
+                    {
+                        let vec = unsafe {
+                            core::slice::from_raw_parts_mut(
+                                base_address as *mut u8,
+                                num_pages * PAGE_SIZE,
+                            )
+                        };
+                        vec.zeroize();
+                    }
+
                     /* Add the region to the src domain (aka the tsm)*/
                     let tsm = &mut state.domains[src_id];
                     tsm.memory_regions
