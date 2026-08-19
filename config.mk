@@ -1,6 +1,7 @@
 # Common settings for the bare-metal builds.
 
 DEBUG         ?= 0
+PLATFORM      ?= generic
 TARGET_TRIPLET ?= riscv64imac-unknown-none-elf
 PROFILE       ?= debug
 
@@ -21,6 +22,8 @@ LDFLAGS = -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
 	-nostdlib -nostartfiles -static -no-pie
 
 CONFIG_DIR      := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+BIN_DIR         ?= $(CONFIG_DIR)bin
+FDT_IMAGE       ?= $(BIN_DIR)/$(PLATFORM)/device-tree.dtb
 GUEST_DIR       ?= $(CONFIG_DIR)guests/bare-metal
 GUEST_BUILD_DIR ?= $(GUEST_DIR)/build
 GUEST_CFLAGS    ?= -I$(GUEST_DIR)/include

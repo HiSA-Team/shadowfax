@@ -5,9 +5,10 @@ ROOT=$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RUNS=${1:-3}
 OUT=${2:-"$ROOT/experiments/tvm-launch-latency/run-$(date -u +%Y%m%dT%H%M%SZ)"}
 TARGET=riscv64imac-unknown-none-elf
+PLATFORM_NAME=${PLATFORM:-generic}
 FW="$ROOT/target/$TARGET/debug/shadowfax"
 DICE="$ROOT/bin/shadowfax.dice.bin"
-BASE_DTB="$ROOT/bin/device-tree.dtb"
+BASE_DTB="$ROOT/bin/$PLATFORM_NAME/device-tree.dtb"
 QEMU_TIMEOUT=${QEMU_TIMEOUT:-900}
 WORK=$(mktemp -d /tmp/shadowfax-tvm-launch-latency.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
@@ -30,7 +31,7 @@ done
 mkdir -p "$OUT/logs"
 
 echo "Building firmware with the COVH TSM entry point"
-make -B -C "$ROOT" firmware PYTHON="uv run --with cbor2"
+make -B -C "$ROOT" firmware PLATFORM="$PLATFORM_NAME" PYTHON="uv run --with cbor2"
 
 cp "$BASE_DTB" "$WORK/platform.dtb"
 fdtput -t x "$WORK/platform.dtb" /chosen/opensbi-domains/umem-high base 0 0xa0000000

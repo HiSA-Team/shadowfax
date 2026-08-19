@@ -103,6 +103,12 @@ __attribute__((noreturn)) void halt(void)
         asm volatile("wfi");
 }
 
+__attribute__((noreturn)) void shutdown(void)
+{
+    (void)sbi_call(SBI_EXT_SRST, SBI_SRST_RESET, 0, 0, 0, 0, 0, 0);
+    halt();
+}
+
 __attribute__((noreturn)) void fail(const char *operation, long error)
 {
     puts("[HOST] ERROR: ");

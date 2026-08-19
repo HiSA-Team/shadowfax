@@ -50,6 +50,7 @@ void copy_bytes(void *destination, const void *source, size_t size);
 uintptr_t align_down(uintptr_t value, size_t alignment);
 uintptr_t align_up(uintptr_t value, size_t alignment);
 __attribute__((noreturn)) void halt(void);
+__attribute__((noreturn)) void shutdown(void);
 __attribute__((noreturn)) void fail(const char *operation, long error);
 long require_ok(const char *operation, struct sbiret result);
 long require_ok_silent(const char *operation, struct sbiret result);

@@ -4,7 +4,7 @@ LAUNCHER_NAME       ?= launcher
 BUILD_DIR           ?= $(ROOT)/target/$(LAUNCHER_NAME)
 FIRMWARE            ?= $(ROOT)/target/$(TARGET_TRIPLET)/$(PROFILE)/shadowfax
 DICE_INPUT          ?= $(ROOT)/bin/shadowfax.dice.bin
-DTB                 ?= $(ROOT)/bin/device-tree.dtb
+DTB                 ?= $(FDT_IMAGE)
 LAUNCHER_MAIN       ?= main.c
 LAUNCHER_METADATA   ?= 512K
 GUEST_MEMORY_SIZE   ?= 4194304
@@ -47,6 +47,13 @@ all: $(BIN)
 
 $(BUILD_DIR):
 	mkdir -p $@
+
+$(FIRMWARE) $(DICE_INPUT) $(DTB):
+	@test -f $@ || { \
+		echo "missing staged platform artifact: $@" >&2; \
+		echo "run: make -C $(ROOT) PYTHON='uv run --with cbor2' PLATFORM=$(PLATFORM) firmware" >&2; \
+		exit 1; \
+	}
 
 FORCE:
 
