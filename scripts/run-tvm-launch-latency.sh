@@ -37,7 +37,7 @@ cp "$BASE_DTB" "$WORK/platform.dtb"
 fdtput -t x "$WORK/platform.dtb" /chosen/opensbi-domains/umem-high base 0 0xa0000000
 fdtput -t x "$WORK/platform.dtb" /chosen/opensbi-domains/umem-high order 0x1c
 
-make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" all
+make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=33554432 all
 
 read -r dice_hi dice_lo < <(fdtget -t x "$WORK/platform.dtb" /chosen/shadowfax dice-input)
 DICE_ADDR=$((16#$dice_hi << 32 | 16#$dice_lo))
