@@ -1,0 +1,718 @@
+===== NATIVE LINUX: direct QEMU, host CPU 0 =====
+
+OpenSBI v1.8.1
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name               : riscv-virtio,qemu
+Platform Features           : medeleg
+Platform HART Count         : 1
+Platform HART Protection    : pmp
+Platform IPI Device         : aclint-mswi
+Platform Timer Device       : aclint-mtimer @ 10000000Hz
+Platform Console Device     : uart8250
+Platform HSM Device         : ---
+Platform PMU Device         : ---
+Platform Reboot Device      : syscon-reboot
+Platform Shutdown Device    : syscon-poweroff
+Platform Suspend Device     : ---
+Platform CPPC Device        : ---
+Firmware Base               : 0x80000000
+Firmware Size               : 321 KB
+Firmware RW Offset          : 0x40000
+Firmware RW Size            : 65 KB
+Firmware Heap Offset        : 0x47000
+Firmware Heap Size          : 37 KB (total), 0 KB (reserved), 12 KB (used), 23 KB (free)
+Firmware Scratch Size       : 4096 B (total), 1464 B (used), 2632 B (free)
+Runtime SBI Version         : 3.0
+Standard SBI Extensions     : time,rfnc,ipi,base,hsm,srst,pmu,dbcn,fwft,legacy,dbtr,sse
+Experimental SBI Extensions : none
+
+Domain0 Name                : root
+Domain0 Boot HART           : 0
+Domain0 HARTs               : 0*
+Domain0 Region00            : 0x0000000080040000-0x000000008005ffff M: (F,R,W) S/U: ()
+Domain0 Region01            : 0x0000000080000000-0x000000008003ffff M: (F,R,X) S/U: ()
+Domain0 Region02            : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region03            : 0x0000000010000000-0x0000000010000fff M: (I,R,W) S/U: (R,W)
+Domain0 Region04            : 0x0000000002000000-0x000000000200ffff M: (I,R,W) S/U: ()
+Domain0 Region05            : 0x000000000c400000-0x000000000c5fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region06            : 0x000000000c000000-0x000000000c3fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region07            : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address        : 0x0000000080200000
+Domain0 Next Arg1           : 0x000000008fe00000
+Domain0 Next Mode           : S-mode
+Domain0 SysReset            : yes
+Domain0 SysSuspend          : yes
+
+Boot HART ID                : 0
+Boot HART Domain            : root
+Boot HART Priv Version      : v1.12
+Boot HART Base ISA          : rv64imafdch
+Boot HART ISA Extensions    : sstc,zicntr,zihpm,zicboz,zicbom,sdtrig,svadu
+Boot HART PMP Count         : 16
+Boot HART PMP Granularity   : 2 bits
+Boot HART PMP Address Bits  : 54
+Boot HART MHPM Info         : 16 (0x0007fff8)
+Boot HART Debug Triggers    : 2 triggers
+Boot HART MIDELEG           : 0x0000000000001666
+Boot HART MEDELEG           : 0x0000000000f4b509
+Linux version 7.1.0 (giuseppe@taurino) (riscv64-unknown-linux-gnu-gcc (g1b306039a) 15.1.0, GNU ld (GNU Binutils) 2.45) #10 PREEMPT Wed Aug 12 14:03:50 CEST 2026
+random: crng init done
+Machine model: riscv-virtio,qemu
+SBI specification v3.0 detected
+SBI implementation ID=0x1 Version=0x10008
+SBI TIME extension detected
+SBI IPI extension detected
+SBI RFENCE extension detected
+SBI SRST extension detected
+SBI DBCN extension detected
+SBI FWFT extension detected
+efi: UEFI not found.
+OF: reserved mem: 0x0000000080000000..0x000000008003ffff (256 KiB) nomap non-reusable mmode_resv1@80000000
+OF: reserved mem: 0x0000000080040000..0x000000008005ffff (128 KiB) nomap non-reusable mmode_resv0@80040000
+riscv: base ISA extensions acdfhim
+riscv: ELF capabilities acdfim
+Ticket spinlock: enabled
+Zone ranges:
+  DMA32    [mem 0x0000000080000000-0x000000008fffffff]
+  Normal   empty
+Movable zone start for each node
+Early memory node ranges
+  node   0: [mem 0x0000000080000000-0x000000008005ffff]
+  node   0: [mem 0x0000000080060000-0x000000008fffffff]
+Initmem setup node 0 [mem 0x0000000080000000-0x000000008fffffff]
+Kernel command line: console=ttyS0,115200 rv8.mode=native
+printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+Dentry cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+Inode-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+Built 1 zonelists, mobility grouping on.  Total pages: 65536
+mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+SLUB: HWalign=64, Order=0-1, MinObjects=0, CPUs=1, Nodes=1
+NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+riscv-intc: 64 local interrupts mapped
+clocksource: riscv_clocksource: mask: 0xffffffffffffffff max_cycles: 0x24e6a1710, max_idle_ns: 440795202120 ns
+sched_clock: 64 bits at 10MHz, resolution 100ns, wraps every 4398046511100ns
+riscv-timer: Timer interrupt in S-mode is available via sstc extension
+Console: colour dummy device 80x25
+Calibrating delay loop (skipped), value calculated using timer frequency.. 20.00 BogoMIPS (lpj=40000)
+pid_max: default: 32768 minimum: 301
+Mount-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+Mountpoint-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+VFS: Finished mounting rootfs on nullfs
+ASID allocator using 16 bits (65536 entries)
+EFI services will not be available.
+Memory: 247976K/262144K available (2119K kernel code, 615K rwdata, 366K rodata, 249K init, 248K bss, 13500K reserved, 0K cma-reserved)
+devtmpfs: initialized
+clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+posixtimers hash table entries: 512 (order: 0, 4096 bytes, linear)
+futex hash table entries: 256 (8192 bytes on 1 NUMA nodes, total 8 KiB, linear).
+NET: Registered PF_NETLINK/PF_ROUTE protocol family
+clocksource: Switched to clocksource riscv_clocksource
+NET: Registered PF_INET protocol family
+IP idents hash table entries: 4096 (order: 3, 32768 bytes, linear)
+tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes, linear)
+Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+TCP established hash table entries: 2048 (order: 2, 16384 bytes, linear)
+TCP bind hash table entries: 2048 (order: 3, 32768 bytes, linear)
+TCP: Hash tables configured (established 2048 bind 2048)
+UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+workingset: timestamp_bits=62 (anon: 58) max_order=16 bucket_order=0 (anon: 0)
+Unpacking initramfs...
+riscv-plic: interrupt-controller@c000000: mapped 96 interrupts with 1 handlers for 2 contexts.
+Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+printk: legacy console [ttyS0] disabled
+10000000.serial: ttyS0 at MMIO 0x10000000 (irq = 1, base_baud = 230400) is a 16550A
+printk: legacy console [ttyS0] enabled
+NET: Registered PF_INET6 protocol family
+Segment Routing with IPv6
+In-situ OAM (IOAM) with IPv6
+sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+cpu0: scalar unaligned word access speed is 66.38x byte access speed (fast)
+Legacy PMU implementation is available
+clk: Disabling unused clocks
+Freeing initrd memory: 4920K
+Freeing unused kernel image (initmem) memory: 248K
+Kernel memory protection not selected by kernel config.
+Run /init as init process
+0
+RV8_RESULT,native,aes,1,7.18,6.18,0.99,0
+0
+RV8_RESULT,native,aes,2,6.60,5.88,0.71,0
+0
+RV8_RESULT,native,aes,3,6.60,5.91,0.68,0
+0
+RV8_RESULT,native,aes,4,6.76,6.04,0.72,0
+0
+RV8_RESULT,native,aes,5,6.71,5.97,0.73,0
+0
+RV8_RESULT,native,aes,6,7.24,6.45,0.78,0
+0
+RV8_RESULT,native,aes,7,6.75,6.03,0.71,0
+0
+RV8_RESULT,native,aes,8,6.87,6.14,0.72,0
+0
+RV8_RESULT,native,aes,9,6.73,5.93,0.79,0
+0
+RV8_RESULT,native,aes,10,6.75,5.95,0.79,0
+0
+RV8_RESULT,native,aes,11,6.79,6.10,0.67,0
+0
+RV8_RESULT,native,aes,12,6.77,5.99,0.77,0
+0
+RV8_RESULT,native,aes,13,6.84,6.12,0.72,0
+0
+RV8_RESULT,native,aes,14,6.77,6.06,0.70,0
+0
+RV8_RESULT,native,aes,15,6.75,6.01,0.74,0
+0
+RV8_RESULT,native,aes,16,6.76,6.04,0.71,0
+0
+RV8_RESULT,native,aes,17,6.58,5.90,0.68,0
+0
+RV8_RESULT,native,aes,18,6.64,5.92,0.71,0
+0
+RV8_RESULT,native,aes,19,6.61,5.88,0.72,0
+0
+RV8_RESULT,native,aes,20,6.59,5.86,0.72,0
+0
+RV8_RESULT,native,aes,21,6.61,5.94,0.67,0
+0
+RV8_RESULT,native,aes,22,6.49,5.78,0.70,0
+0
+RV8_RESULT,native,aes,23,6.51,5.89,0.60,0
+0
+RV8_RESULT,native,aes,24,6.51,5.85,0.65,0
+0
+RV8_RESULT,native,aes,25,6.49,5.82,0.66,0
+0
+RV8_RESULT,native,aes,26,6.55,5.87,0.68,0
+0
+RV8_RESULT,native,aes,27,7.13,6.44,0.68,0
+0
+RV8_RESULT,native,aes,28,6.78,6.09,0.68,0
+0
+RV8_RESULT,native,aes,29,6.66,6.03,0.62,0
+0
+RV8_RESULT,native,aes,30,6.72,6.05,0.66,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,1,3.33,3.31,0.02,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,2,3.19,3.15,0.03,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,3,3.14,3.13,0.00,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,4,3.22,3.20,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,5,3.16,3.14,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,6,3.23,3.22,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,7,3.26,3.24,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,8,3.22,3.20,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,9,3.17,3.15,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,10,3.23,3.21,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,11,3.08,3.06,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,12,3.04,3.03,0.00,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,13,3.05,3.04,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,14,3.21,3.19,0.02,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,15,3.15,3.13,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,16,3.05,3.04,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,17,3.08,3.06,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,18,3.07,3.05,0.02,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,19,3.06,3.04,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,20,3.08,3.06,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,21,3.03,3.01,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,22,3.01,2.99,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,23,3.01,2.99,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,24,3.02,3.01,0.00,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,25,3.00,2.99,0.00,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,26,3.02,3.01,0.00,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,27,3.00,2.99,0.00,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,28,3.00,2.99,0.01,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,29,3.00,2.99,0.00,0
+23 ^ 111121 has 151317 digits
+RV8_RESULT,native,bigint,30,3.02,3.00,0.01,0
+Dhrystone(1.1-mc), 10000000 passes, 7337740 microseconds, 774 DMIPS
+RV8_RESULT,native,dhrystone,1,7.36,7.36,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7270764 microseconds, 781 DMIPS
+RV8_RESULT,native,dhrystone,2,7.28,7.26,0.01,0
+Dhrystone(1.1-mc), 10000000 passes, 8712361 microseconds, 651 DMIPS
+RV8_RESULT,native,dhrystone,3,8.72,8.71,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7331636 microseconds, 774 DMIPS
+RV8_RESULT,native,dhrystone,4,7.34,7.33,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7488332 microseconds, 758 DMIPS
+RV8_RESULT,native,dhrystone,5,7.49,7.48,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7281943 microseconds, 780 DMIPS
+RV8_RESULT,native,dhrystone,6,7.29,7.28,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7337192 microseconds, 774 DMIPS
+RV8_RESULT,native,dhrystone,7,7.34,7.33,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 8626857 microseconds, 658 DMIPS
+RV8_RESULT,native,dhrystone,8,8.63,8.62,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7351128 microseconds, 772 DMIPS
+RV8_RESULT,native,dhrystone,9,7.36,7.35,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7381967 microseconds, 769 DMIPS
+RV8_RESULT,native,dhrystone,10,7.39,7.38,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7327461 microseconds, 775 DMIPS
+RV8_RESULT,native,dhrystone,11,7.33,7.33,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 8803374 microseconds, 645 DMIPS
+RV8_RESULT,native,dhrystone,12,8.81,8.80,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7225656 microseconds, 786 DMIPS
+RV8_RESULT,native,dhrystone,13,7.23,7.23,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7218740 microseconds, 786 DMIPS
+RV8_RESULT,native,dhrystone,14,7.22,7.22,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7218053 microseconds, 786 DMIPS
+RV8_RESULT,native,dhrystone,15,7.22,7.22,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7240190 microseconds, 784 DMIPS
+RV8_RESULT,native,dhrystone,16,7.24,7.24,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7226527 microseconds, 785 DMIPS
+RV8_RESULT,native,dhrystone,17,7.23,7.23,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7239930 microseconds, 784 DMIPS
+RV8_RESULT,native,dhrystone,18,7.24,7.23,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7214074 microseconds, 787 DMIPS
+RV8_RESULT,native,dhrystone,19,7.22,7.21,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7211051 microseconds, 787 DMIPS
+RV8_RESULT,native,dhrystone,20,7.21,7.21,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7223899 microseconds, 786 DMIPS
+RV8_RESULT,native,dhrystone,21,7.23,7.22,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7209300 microseconds, 787 DMIPS
+RV8_RESULT,native,dhrystone,22,7.21,7.21,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7232239 microseconds, 785 DMIPS
+RV8_RESULT,native,dhrystone,23,7.24,7.23,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7236453 microseconds, 784 DMIPS
+RV8_RESULT,native,dhrystone,24,7.24,7.23,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7220567 microseconds, 786 DMIPS
+RV8_RESULT,native,dhrystone,25,7.22,7.22,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7239670 microseconds, 784 DMIPS
+RV8_RESULT,native,dhrystone,26,7.25,7.23,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7248999 microseconds, 783 DMIPS
+RV8_RESULT,native,dhrystone,27,7.25,7.24,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7229822 microseconds, 785 DMIPS
+RV8_RESULT,native,dhrystone,28,7.23,7.23,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7213760 microseconds, 787 DMIPS
+RV8_RESULT,native,dhrystone,29,7.22,7.21,0.00,0
+Dhrystone(1.1-mc), 10000000 passes, 7242401 microseconds, 784 DMIPS
+RV8_RESULT,native,dhrystone,30,7.25,7.24,0.00,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,1,8.71,8.61,0.10,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,2,8.33,8.20,0.13,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,3,8.29,8.13,0.15,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,4,8.34,8.20,0.13,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,5,8.32,8.15,0.17,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,6,8.32,8.18,0.13,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,7,8.30,8.14,0.16,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,8,8.27,8.15,0.12,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,9,8.26,8.14,0.12,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,10,8.31,8.18,0.12,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,11,8.26,8.11,0.14,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,12,8.27,8.11,0.15,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,13,8.39,8.25,0.13,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,14,8.68,8.50,0.17,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,15,8.83,8.67,0.15,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,16,8.72,8.55,0.16,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,17,8.87,8.70,0.16,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,18,8.69,8.49,0.19,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,19,8.56,8.38,0.18,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,20,8.54,8.40,0.13,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,21,8.68,8.53,0.15,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,22,8.65,8.50,0.14,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,23,8.72,8.56,0.15,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,24,8.71,8.51,0.19,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,25,8.57,8.38,0.18,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,26,8.64,8.47,0.16,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,27,8.77,8.57,0.19,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,28,8.75,8.56,0.18,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,29,8.49,8.31,0.17,0
+miniz.c version: 10.0.0
+Compressed from 8388608 to 3218050 bytes
+Decompressed from 3218050 to 8388608 bytes
+Success.
+RV8_RESULT,native,miniz,30,8.51,8.38,0.12,0
+0
+RV8_RESULT,native,norx,1,2.07,1.50,0.57,0
+0
+RV8_RESULT,native,norx,2,2.06,1.50,0.55,0
+0
+RV8_RESULT,native,norx,3,2.04,1.38,0.65,0
+0
+RV8_RESULT,native,norx,4,2.07,1.45,0.61,0
+0
+RV8_RESULT,native,norx,5,2.05,1.44,0.60,0
+0
+RV8_RESULT,native,norx,6,2.04,1.39,0.64,0
+0
+RV8_RESULT,native,norx,7,2.11,1.42,0.69,0
+0
+RV8_RESULT,native,norx,8,2.06,1.46,0.60,0
+0
+RV8_RESULT,native,norx,9,2.05,1.41,0.64,0
+0
+RV8_RESULT,native,norx,10,1.95,1.39,0.55,0
+0
+RV8_RESULT,native,norx,11,1.94,1.40,0.54,0
+0
+RV8_RESULT,native,norx,12,1.96,1.36,0.59,0
+0
+RV8_RESULT,native,norx,13,2.05,1.43,0.61,0
+0
+RV8_RESULT,native,norx,14,2.01,1.36,0.64,0
+0
+RV8_RESULT,native,norx,15,2.04,1.37,0.66,0
+0
+RV8_RESULT,native,norx,16,2.07,1.48,0.58,0
+0
+RV8_RESULT,native,norx,17,1.98,1.38,0.60,0
+0
+RV8_RESULT,native,norx,18,2.01,1.41,0.59,0
+0
+RV8_RESULT,native,norx,19,2.09,1.38,0.71,0
+0
+RV8_RESULT,native,norx,20,2.05,1.39,0.66,0
+0
+RV8_RESULT,native,norx,21,2.04,1.36,0.67,0
+0
+RV8_RESULT,native,norx,22,2.01,1.39,0.61,0
+0
+RV8_RESULT,native,norx,23,2.02,1.43,0.58,0
+0
+RV8_RESULT,native,norx,24,2.05,1.47,0.57,0
+0
+RV8_RESULT,native,norx,25,1.96,1.38,0.58,0
+0
+RV8_RESULT,native,norx,26,1.94,1.42,0.51,0
+0
+RV8_RESULT,native,norx,27,2.05,1.39,0.65,0
+0
+RV8_RESULT,native,norx,28,2.04,1.47,0.57,0
+0
+RV8_RESULT,native,norx,29,2.01,1.41,0.60,0
+0
+RV8_RESULT,native,norx,30,2.07,1.39,0.67,0
+33333331
+RV8_RESULT,native,primes,1,129.38,129.24,0.12,0
+33333331
+RV8_RESULT,native,primes,2,130.41,130.28,0.11,0
+33333331
+RV8_RESULT,native,primes,3,131.34,131.22,0.10,0
+33333331
+RV8_RESULT,native,primes,4,126.69,126.60,0.08,0
+33333331
+RV8_RESULT,native,primes,5,124.22,124.13,0.08,0
+33333331
+RV8_RESULT,native,primes,6,123.41,123.28,0.12,0
+33333331
+RV8_RESULT,native,primes,7,120.02,119.91,0.10,0
+33333331
+RV8_RESULT,native,primes,8,120.11,120.01,0.09,0
+33333331
+RV8_RESULT,native,primes,9,123.08,122.96,0.11,0
+33333331
+RV8_RESULT,native,primes,10,119.76,119.66,0.09,0
+33333331
+RV8_RESULT,native,primes,11,121.03,120.92,0.09,0
+33333331
+RV8_RESULT,native,primes,12,118.71,118.57,0.13,0
+33333331
+RV8_RESULT,native,primes,13,119.26,119.14,0.11,0
+33333331
+RV8_RESULT,native,primes,14,118.24,118.13,0.10,0
+33333331
+RV8_RESULT,native,primes,15,119.02,118.91,0.09,0
+33333331
+RV8_RESULT,native,primes,16,118.70,118.59,0.10,0
+33333331
+RV8_RESULT,native,primes,17,118.05,117.94,0.10,0
+33333331
+RV8_RESULT,native,primes,18,119.55,119.45,0.09,0
+33333331
+RV8_RESULT,native,primes,19,118.63,118.54,0.09,0
+33333331
+RV8_RESULT,native,primes,20,119.47,119.35,0.11,0
+33333331
+RV8_RESULT,native,primes,21,119.12,119.02,0.09,0
+33333331
+RV8_RESULT,native,primes,22,118.50,118.39,0.09,0
+33333331
+RV8_RESULT,native,primes,23,119.02,118.91,0.10,0
+33333331
+RV8_RESULT,native,primes,24,119.49,119.37,0.11,0
+33333331
+RV8_RESULT,native,primes,25,118.92,118.81,0.09,0
+33333331
+RV8_RESULT,native,primes,26,119.05,118.95,0.09,0
+33333331
+RV8_RESULT,native,primes,27,119.70,119.58,0.11,0
+33333331
+RV8_RESULT,native,primes,28,119.51,119.41,0.09,0
+33333331
+RV8_RESULT,native,primes,29,119.55,119.47,0.07,0
+
+
+
+33333331
+RV8_RESULT,native,primes,30,118.77,118.68,0.08,0
+3161985
+RV8_RESULT,native,qsort,1,18.93,17.82,1.10,0
+3161985
+RV8_RESULT,native,qsort,2,18.84,17.73,1.10,0
+3161985
+RV8_RESULT,native,qsort,3,18.88,17.81,1.07,0
+3161985
+RV8_RESULT,native,qsort,4,18.90,17.78,1.11,0
+3161985
+RV8_RESULT,native,qsort,5,18.93,17.84,1.09,0
+3161985
+RV8_RESULT,native,qsort,6,18.86,17.76,1.10,0
+3161985
+RV8_RESULT,native,qsort,7,18.86,17.78,1.07,0
+3161985
+RV8_RESULT,native,qsort,8,18.89,17.76,1.12,0
+3161985
+RV8_RESULT,native,qsort,9,18.83,17.67,1.15,0
+3161985
+RV8_RESULT,native,qsort,10,18.89,17.84,1.04,0
+3161985
+RV8_RESULT,native,qsort,11,18.85,17.77,1.07,0
+3161985
+RV8_RESULT,native,qsort,12,18.87,17.74,1.13,0
+3161985
+RV8_RESULT,native,qsort,13,18.87,17.78,1.09,0
+3161985
+RV8_RESULT,native,qsort,14,18.89,17.81,1.07,0
+3161985
+RV8_RESULT,native,qsort,15,18.94,17.87,1.07,0
+3161985
+RV8_RESULT,native,qsort,16,18.87,17.76,1.11,0
+3161985
+RV8_RESULT,native,qsort,17,18.87,17.84,1.02,0
+3161985
+RV8_RESULT,native,qsort,18,18.91,17.85,1.06,0
+3161985
+RV8_RESULT,native,qsort,19,18.87,17.81,1.06,0
+3161985
+RV8_RESULT,native,qsort,20,18.89,17.81,1.08,0
+3161985
+RV8_RESULT,native,qsort,21,18.91,17.81,1.09,0
+3161985
+RV8_RESULT,native,qsort,22,18.92,17.87,1.04,0
+3161985
+RV8_RESULT,native,qsort,23,18.90,17.77,1.12,0
+3161985
+RV8_RESULT,native,qsort,24,18.87,17.81,1.05,0
+3161985
+RV8_RESULT,native,qsort,25,18.86,17.74,1.11,0
+3161985
+RV8_RESULT,native,qsort,26,18.89,17.81,1.07,0
+3161985
+RV8_RESULT,native,qsort,27,18.88,17.80,1.07,0
+3161985
+RV8_RESULT,native,qsort,28,18.85,17.71,1.13,0
+3161985
+RV8_RESULT,native,qsort,29,18.84,17.79,1.04,0
+3161985
+RV8_RESULT,native,qsort,30,18.83,17.82,1.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,1,2.21,2.20,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,2,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,3,2.18,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,4,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,5,2.19,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,6,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,7,2.18,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,8,2.17,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,9,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,10,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,11,2.18,2.17,0.01,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,12,2.17,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,13,2.17,2.16,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,14,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,15,2.19,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,16,2.18,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,17,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,18,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,19,2.18,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,20,2.19,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,21,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,22,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,23,2.18,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,24,2.20,2.19,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,25,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,26,2.18,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,27,2.19,2.18,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,28,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,29,2.18,2.17,0.00,0
+ebdd6f20865ff41e3613b633b93c9b89c15d58fd9d64497f5b22554a7fe33757357cfa622f6fb4f40beadc02d18539ecd79e2da126b662839d296c41acbc2
+RV8_RESULT,native,sha512,30,2.18,2.17,0.00,0
+reboot: Power down
+===== NATIVE LINUX COMPLETE: 240 results =====
