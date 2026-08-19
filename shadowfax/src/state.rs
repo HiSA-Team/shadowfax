@@ -134,6 +134,21 @@ impl BorrowKind {
             tsm_id,
         }
     }
+
+    fn belongs_to(&self, owner_id: usize, tsm_id: usize) -> bool {
+        match self {
+            Self::Convert {
+                owner_id: expected_owner_id,
+                tsm_id: expected_tsm_id,
+                ..
+            }
+            | Self::Reclaim {
+                owner_id: expected_owner_id,
+                tsm_id: expected_tsm_id,
+                ..
+            } => owner_id == *expected_owner_id && tsm_id == *expected_tsm_id,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -219,61 +234,100 @@ impl State {
         Err(anyhow::anyhow!("no ticket available for memory allocation"))
     }
 
-    /* Confirms the transaction */
-    pub fn take_borrow(&mut self, ticket: usize) -> anyhow::Result<Allocation> {
+    /*
+     * Confirm a transaction only when it is returned by the same owner/TSM
+     * pair that created it. The caller identities come from the active
+     * OpenSBI domains, not TSM-controlled registers.
+     */
+    pub fn take_borrow(
+        &mut self,
+        ticket: usize,
+        owner_id: usize,
+        tsm_id: usize,
+    ) -> anyhow::Result<Allocation> {
         if !(1..=MAX_TICKET).contains(&ticket) {
             return Err(anyhow::anyhow!("invalid ticket"));
         }
-        let br = self.pending_memory_allocations[ticket].take();
-        if let Some(br) = br {
-            self.pending_memory_allocations[ticket] = None;
-            match br {
-                BorrowKind::Convert {
-                    base_address,
-                    num_pages,
-                    owner_id,
-                    tsm_id,
-                } => {
-                    let a = Allocation {
-                        base_address,
-                        num_pages,
-                        owner_id,
-                        tsm_id,
-                    };
-                    self.memory_allocations
-                        .push(a.clone())
-                        .map_err(|_| anyhow::anyhow!("cannot confirm borrow"))?;
-                    return Ok(a);
-                }
-                BorrowKind::Reclaim {
-                    base_address,
-                    num_pages,
-                    owner_id,
-                    tsm_id,
-                } => {
-                    let idx = self
-                        .memory_allocations
-                        .iter()
-                        .enumerate()
-                        .position(|(_, br)| {
-                            br.base_address == base_address
-                                && br.num_pages == num_pages
-                                && br.owner_id == owner_id
-                                && br.tsm_id == tsm_id
-                        })
-                        .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
 
-                    return Ok(self.memory_allocations.remove(idx));
+        let borrow = self.pending_memory_allocations[ticket]
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("invalid ticket"))?;
+        let (base_address, num_pages) = match borrow {
+            BorrowKind::Convert {
+                base_address,
+                num_pages,
+                owner_id: _,
+                tsm_id: _,
+            }
+            | BorrowKind::Reclaim {
+                base_address,
+                num_pages,
+                owner_id: _,
+                tsm_id: _,
+            } => (*base_address, *num_pages),
+        };
+
+        if !borrow.belongs_to(owner_id, tsm_id) {
+            return Err(anyhow::anyhow!(
+                "borrow returned by an unexpected domain pair"
+            ));
+        }
+
+        match borrow {
+            BorrowKind::Convert { .. } => {
+                if self.memory_allocations.len() == MAX_TICKET {
+                    return Err(anyhow::anyhow!("cannot confirm borrow"));
                 }
+
+                let allocation = Allocation {
+                    base_address,
+                    num_pages,
+                    owner_id,
+                    tsm_id,
+                };
+                self.memory_allocations
+                    .push(allocation.clone())
+                    .map_err(|_| anyhow::anyhow!("cannot confirm borrow"))?;
+                self.pending_memory_allocations[ticket] = None;
+                Ok(allocation)
+            }
+            BorrowKind::Reclaim { .. } => {
+                let idx = self
+                    .memory_allocations
+                    .iter()
+                    .enumerate()
+                    .position(|(_, allocation)| {
+                        allocation.base_address == base_address
+                            && allocation.num_pages == num_pages
+                            && allocation.owner_id == owner_id
+                            && allocation.tsm_id == tsm_id
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
+
+                let allocation = self.memory_allocations.remove(idx);
+                self.pending_memory_allocations[ticket] = None;
+                Ok(allocation)
             }
         }
-        Err(anyhow::anyhow!("invalid ticket"))
     }
 
-    /* Delete the transaction */
-    pub fn cancel_borrow(&mut self, ticket: usize) -> anyhow::Result<()> {
+    /* Delete a transaction only for its original owner/TSM pair. */
+    pub fn cancel_borrow(
+        &mut self,
+        ticket: usize,
+        owner_id: usize,
+        tsm_id: usize,
+    ) -> anyhow::Result<()> {
         if !(1..=MAX_TICKET).contains(&ticket) {
             return Err(anyhow::anyhow!("invalid ticket"));
+        }
+        let borrow = self.pending_memory_allocations[ticket]
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("invalid ticket"))?;
+        if !borrow.belongs_to(owner_id, tsm_id) {
+            return Err(anyhow::anyhow!(
+                "borrow returned by an unexpected domain pair"
+            ));
         }
         self.pending_memory_allocations[ticket] = None;
 
