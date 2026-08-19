@@ -5,13 +5,14 @@ BUILD_DIR           ?= $(ROOT)/target/$(LAUNCHER_NAME)
 FIRMWARE            ?= $(ROOT)/target/$(TARGET_TRIPLET)/$(PROFILE)/shadowfax
 DICE_INPUT          ?= $(ROOT)/bin/shadowfax.dice.bin
 DTB                 ?= $(FDT_IMAGE)
+DTB_GENERATED       ?= 0
 LAUNCHER_MAIN       ?= main.c
 LAUNCHER_METADATA   ?= 512K
-GUEST_MEMORY_SIZE   ?= 4194304
+GUEST_RAM_SIZE      ?= 4194304
 GUEST_MEMORY_COUNT  ?= 1
 GUEST_IN_RAM        ?= 1
 LAUNCHER_EXTRA_CFLAGS ?=
-LAUNCHER_EXTRA_CFLAGS += -DGUEST_RAM_SIZE=$(GUEST_MEMORY_SIZE)
+LAUNCHER_EXTRA_CFLAGS += -DGUEST_RAM_SIZE=$(GUEST_RAM_SIZE)
 LAUNCHER_EXTRA_LDFLAGS ?=
 RUN_QEMU_FLAGS      ?= $(QEMU_FLAGS)
 LOAD_ADDR           ?=
@@ -48,17 +49,26 @@ all: $(BIN)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(FIRMWARE) $(DICE_INPUT) $(DTB):
+$(FIRMWARE) $(DICE_INPUT):
 	@test -f $@ || { \
 		echo "missing staged platform artifact: $@" >&2; \
 		echo "run: make -C $(ROOT) PYTHON='uv run --with cbor2' PLATFORM=$(PLATFORM) firmware" >&2; \
 		exit 1; \
 	}
 
+ifeq ($(DTB_GENERATED),0)
+$(DTB):
+	@test -f $@ || { \
+		echo "missing staged platform artifact: $@" >&2; \
+		echo "run: make -C $(ROOT) PYTHON='uv run --with cbor2' PLATFORM=$(PLATFORM) firmware" >&2; \
+		exit 1; \
+	}
+endif
+
 FORCE:
 
 $(GUEST_CONFIG_STAMP): FORCE | $(BUILD_DIR)
-	@expected='$(GUEST_MEMORY_SIZE) $(GUEST_MEMORY_COUNT)'; \
+	@expected='$(GUEST_RAM_SIZE) $(GUEST_MEMORY_COUNT)'; \
 	actual=''; test ! -f $@ || read -r actual < $@; \
 	test "$$actual" = "$$expected" || printf '%s\n' "$$expected" > $@
 
@@ -109,8 +119,8 @@ $(ELF): $(OBJECTS) $(GUEST_DIR)/launcher.ld $(DTB) $(GUEST_LIB)
 		-Wl,--defsym=SHADOWFAX_RAM_SIZE=$$ram_size \
 		-Wl,--defsym=SHADOWFAX_HOST_FDT_ADDR=$$host_fdt_addr \
 		-Wl,--defsym=SHADOWFAX_GUEST_BASE=$$guest_base \
-		-Wl,--defsym=SHADOWFAX_GUEST_UNIT_SIZE=$(GUEST_MEMORY_SIZE) \
-		-Wl,--defsym=SHADOWFAX_GUEST_SIZE=$(GUEST_MEMORY_SIZE)*$(GUEST_MEMORY_COUNT) \
+		-Wl,--defsym=SHADOWFAX_GUEST_UNIT_SIZE=$(GUEST_RAM_SIZE) \
+		-Wl,--defsym=SHADOWFAX_GUEST_SIZE=$(GUEST_RAM_SIZE)*$(GUEST_MEMORY_COUNT) \
 		-Wl,--defsym=SHADOWFAX_GUEST_REGION_SIZE=$$guest_region_size \
 		-Wl,--defsym=SHADOWFAX_METADATA_SIZE=$(LAUNCHER_METADATA) \
 		-Wl,--defsym=SHADOWFAX_GUEST_IN_RAM=$(GUEST_IN_RAM) \

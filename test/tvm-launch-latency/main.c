@@ -10,7 +10,7 @@
 #ifndef GUEST_RAM_SIZE
 #define GUEST_RAM_SIZE         (256UL                *  1024UL * 1024UL)
 #endif
-#define PAYLOAD_SIZE           (32UL                 *  1024UL * 1024UL)
+#define PAYLOAD_SIZE           (16UL                 *  1024UL * 1024UL)
 #define SEGMENT_STAGING_SIZE   (2UL                  *  1024UL * 1024UL)
 #define MEASURED_CHUNK_PAGES   (SEGMENT_STAGING_SIZE /  PAGE_SIZE)
 #define MEASURED_CHUNKS        (PAYLOAD_SIZE         /  SEGMENT_STAGING_SIZE)

@@ -37,7 +37,7 @@ make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
 The fragment also supports an externally built `GUEST_ELF`, an optional
 `GUEST_DTB`, custom metadata size, split or contiguous guest memory, and the
 existing firmware, DTB, QEMU, build-directory, and load-address overrides.
-`GUEST_MEMORY_SIZE` selects the per-TVM guest RAM size in bytes and defaults to
+`GUEST_RAM_SIZE` selects the per-TVM guest RAM size in bytes and defaults to
 4 MiB. Tests hosting multiple TVMs set `GUEST_MEMORY_COUNT` so the linker
 reserves the total, while the latency test explicitly retains 256 MiB. The
 requested total must fit within the guest region described by the DTB. The

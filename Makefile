@@ -167,7 +167,7 @@ build-info:
 	@echo "  FDT_IMAGE:                 $(FDT_IMAGE)"
 	@echo "  CFLAGS:                    $(CFLAGS)"
 	@echo "  GUEST_CFLAGS:              $(GUEST_CFLAGS)"
-	@echo "  GUEST_MEMORY_SIZE:         $(GUEST_MEMORY_SIZE)"
+	@echo "  GUEST_RAM_SIZE:            $(GUEST_RAM_SIZE)"
 	@echo "  ASFLAGS:                   $(ASFLAGS)"
 	@echo "  LDFLAGS:                   $(LDFLAGS)"
 	@echo "  GUEST_LDFLAGS:             $(GUEST_LDFLAGS)"
