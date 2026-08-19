@@ -239,9 +239,10 @@ fn handle_covh(
     // bits[31:26]: SDID target
     // bits[15:0]: function ID
     let fid = a6 & 0xFFFF;
+    let owner = (a6 >> 26) & 0x3F;
 
     if fid == SBI_COVH_RUN_TVM_VCPU {
-        let prepared = state.hypervisor.prepare_tvm_vcpu(a0, a1);
+        let prepared = state.hypervisor.prepare_tvm_vcpu(owner, a0, a1);
         drop(lock);
 
         match prepared {
@@ -254,7 +255,9 @@ fn handle_covh(
 
     match fid {
         SBI_COVH_GET_TSM_INFO => {
-            assert!(a1 >= core::mem::size_of::<TsmInfo>());
+            if a1 < core::mem::size_of::<TsmInfo>() || a0 % core::mem::align_of::<TsmInfo>() != 0 {
+                return SbiRet { a0: -1, a1: 0 };
+            }
             unsafe {
                 core::ptr::write(a0 as *mut TsmInfo, state.info.clone());
             }
@@ -264,25 +267,25 @@ fn handle_covh(
             }
         }
 
-        SBI_COVH_CONVERT_PAGES => match state.hypervisor.add_confidential_pages(a0, a1) {
+        SBI_COVH_CONVERT_PAGES => match state.hypervisor.add_confidential_pages(owner, a0, a1) {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
 
-        SBI_COVH_RECLAIM_PAGES => match state.hypervisor.reclaim_pages(a0, a1) {
+        SBI_COVH_RECLAIM_PAGES => match state.hypervisor.reclaim_pages(owner, a0, a1) {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
 
         SBI_COVH_CREATE_TVM => {
-            assert!(a1 == 16);
+            if a1 != 2 * core::mem::size_of::<usize>() || a0 % core::mem::align_of::<usize>() != 0 {
+                return SbiRet { a0: -1, a1: 0 };
+            }
             let tvm_params = unsafe {
                 let page_table_address = core::ptr::read(a0 as *const usize);
                 let state_address = core::ptr::read((a0 + 8) as *const usize);
                 (page_table_address, state_address)
             };
-
-            let owner = (a6 >> 26) & 0x3F;
 
             let attestation_context = state.attestation_context.compute_next(&[0; 32]);
             println!("Creating TVM for domain {}", owner);
@@ -304,7 +307,7 @@ fn handle_covh(
         SBI_COVH_FINALIZE_TVM => {
             match state
                 .hypervisor
-                .finalize_tvm(a0, a1, a2, a3, &state.attestation_context)
+                .finalize_tvm(owner, a0, a1, a2, a3, &state.attestation_context)
             {
                 Ok(_) => SbiRet { a0: 0, a1: 0 },
                 Err(_) => SbiRet { a0: -1, a1: 0 },
@@ -312,7 +315,7 @@ fn handle_covh(
         }
 
         SBI_COVH_ADD_TVM_MEMORY_REGION => {
-            match state.hypervisor.add_tvm_memory_region(a0, a1, a2) {
+            match state.hypervisor.add_tvm_memory_region(owner, a0, a1, a2) {
                 Ok(_) => SbiRet { a0: 0, a1: 0 },
                 Err(_) => SbiRet { a0: -1, a1: 0 },
             }
@@ -321,24 +324,27 @@ fn handle_covh(
         SBI_COVH_ADD_TVM_MEASURED_PAGES => {
             match state
                 .hypervisor
-                .add_tvm_measured_pages(a0, a1, a2, a3, a4, a5)
+                .add_tvm_measured_pages(owner, a0, a1, a2, a3, a4, a5)
             {
                 Ok(_) => SbiRet { a0: 0, a1: 0 },
                 Err(_) => SbiRet { a0: -1, a1: 0 },
             }
         }
 
-        SBI_COVH_ADD_ZERO_PAGES => match state.hypervisor.add_tvm_zero_pages(a0, a1, a2, a3, a4) {
+        SBI_COVH_ADD_ZERO_PAGES => match state
+            .hypervisor
+            .add_tvm_zero_pages(owner, a0, a1, a2, a3, a4)
+        {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
 
-        SBI_COVH_CREATE_TVM_VCPU => match state.hypervisor.create_tvm_vcpu(a0, a1, a2) {
+        SBI_COVH_CREATE_TVM_VCPU => match state.hypervisor.create_tvm_vcpu(owner, a0, a1, a2) {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
 
-        SBI_COVH_DESTROY_TVM => match state.hypervisor.destroy_tvm(a0) {
+        SBI_COVH_DESTROY_TVM => match state.hypervisor.destroy_tvm(owner, a0) {
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },

@@ -66,11 +66,12 @@ fn spawn_qemu_and_stream(
 
 #[test]
 fn firmware_boots_correctly() {
-    let firmware = PathBuf::from("../../target/riscv64imac-unknown-none-elf/debug/shadowfax");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let firmware = root.join("target/riscv64imac-unknown-none-elf/debug/shadowfax");
     let dtb = env::var_os("FDT_IMAGE")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("../../bin/generic/device-tree.dtb"));
-    let dice = PathBuf::from("../../bin/shadowfax.dice.bin");
+        .unwrap_or_else(|| root.join("bin/generic/device-tree.dtb"));
+    let dice = root.join("bin/shadowfax.dice.bin");
     let output = Command::new("fdtget")
         .args([
             "-t",

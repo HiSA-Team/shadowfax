@@ -3,6 +3,7 @@ use common::attestation::TsmAttestationContext;
 use ed25519_compact::Signature;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 use heapless::Vec;
+use sha2::{Digest, Sha512};
 
 use crate::{
     context::Context,
@@ -20,6 +21,10 @@ mod tsm {
 
     #[link_section = ".rodata"]
     pub static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey.pem");
+}
+
+pub fn default_tsm_measurement() -> [u8; 64] {
+    Sha512::digest(tsm::DEFAULT_TSM).into()
 }
 
 #[derive(Clone, Debug)]
