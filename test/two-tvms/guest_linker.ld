@@ -3,7 +3,6 @@ ENTRY(_start)
 
 MEMORY
 {
-    /* GPA default payload address */
     RAM (rwx) : ORIGIN = 0x200000, LENGTH = 0x20000
 }
 
@@ -27,10 +26,9 @@ SECTIONS
     } > RAM
 
     .bss : ALIGN(8) {
-      __bss_start = .;
+        __bss_start = .;
         *(.bss*)
         *(COMMON)
-      __bss_end = .;
+        __bss_end = .;
     } > RAM
-
 }

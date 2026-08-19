@@ -1,34 +1,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PAGE_SIZE               4096UL
-#define PAGE_DIRECTORY_SIZE     (64UL *  PAGE_SIZE)
-#define TVM_STATE_SIZE          PAGE_SIZE
-#define GUEST_RAM_SIZE          (64UL *  1024UL * 1024UL)
-#define SEGMENT_STAGING_SIZE    (2UL  *  1024UL * 1024UL)
+#define PAGE_SIZE                  4096UL
+#define PAGE_DIRECTORY_SIZE        (64UL * PAGE_SIZE)
+#define GUEST_RAM_SIZE             (64UL * 1024UL * 1024UL)
+#define SEGMENT_STAGING_SIZE       (2UL * 1024UL * 1024UL)
 
-#define SBI_EXT_DBCN            0x4442434EUL
-#define SBI_DBCN_WRITE_BYTE     2UL
-#define SBI_EXT_SUPD            0x53555044UL
-#define SBI_SUPD_GET_ACTIVE     0UL
-#define SBI_EXT_COVH            0x434F5648UL
-#define COVH_TARGET_TSM         (1UL  << 26)
-#define COVH_CONVERT_PAGES      1UL
-#define COVH_RECLAIM_PAGES      2UL
-#define COVH_CREATE_TVM         5UL
-#define COVH_FINALIZE_TVM       6UL
-#define COVH_DESTROY_TVM        8UL
-#define COVH_ADD_MEMORY_REGION  9UL
-#define COVH_ADD_MEASURED_PAGES 11UL
-#define COVH_ADD_ZERO_PAGES     12UL
-#define COVH_CREATE_VCPU        14UL
-#define COVH_RUN_VCPU           15UL
-#define COVH_REMOVE_PAGES       19UL
+#define SBI_EXT_DBCN               0x4442434eUL
+#define SBI_DBCN_WRITE_BYTE        2UL
+#define SBI_EXT_SUPD               0x53555044UL
+#define SBI_SUPD_GET_ACTIVE        0UL
+#define SBI_EXT_COVH               0x434f5648UL
+#define COVH_TARGET_TSM            (1UL << 26)
+#define COVH_CONVERT_PAGES         1UL
+#define COVH_RECLAIM_PAGES         2UL
+#define COVH_CREATE_TVM            5UL
+#define COVH_FINALIZE_TVM          6UL
+#define COVH_DESTROY_TVM           8UL
+#define COVH_ADD_MEMORY_REGION     9UL
+#define COVH_ADD_MEASURED_PAGES    11UL
+#define COVH_ADD_ZERO_PAGES        12UL
+#define COVH_CREATE_VCPU           14UL
+#define COVH_RUN_VCPU              15UL
 
-#define ELFCLASS64              2
-#define ELFDATA2LSB             1
-#define EM_RISCV                243
-#define PT_LOAD                 1U
+#define ELFCLASS64                 2
+#define ELFDATA2LSB                1
+#define EM_RISCV                   243
+#define PT_LOAD                    1U
 
 struct sbiret {
     long error;
@@ -65,25 +63,13 @@ typedef struct {
 
 extern const unsigned char __guest_elf[];
 extern const char __guest_elf_size[];
-extern const unsigned char __guest_dtb[];
-extern const unsigned char __guest_dtb_end[];
 extern unsigned char __confidential_metadata_start[];
 extern unsigned char __confidential_metadata_end[];
 extern unsigned char __confidential_guest_start[];
 extern unsigned char __confidential_guest_end[];
 
-static const uintptr_t metadata_start = (uintptr_t)__confidential_metadata_start;
-static const uintptr_t metadata_end = (uintptr_t)__confidential_metadata_end;
-static const uintptr_t guest_memory_start = (uintptr_t)__confidential_guest_start;
-static const uintptr_t guest_memory_end = (uintptr_t)__confidential_guest_end;
-static const uintptr_t page_table = metadata_start;
-static const uintptr_t tvm_state = page_table + PAGE_DIRECTORY_SIZE;
-static const uintptr_t guest_physical = guest_memory_start;
-static const size_t guest_elf_size = (size_t) __guest_elf_size;
-
 static unsigned char segment_staging[SEGMENT_STAGING_SIZE]
     __attribute__((aligned(PAGE_SIZE)));
-
 
 static struct sbiret sbi_call(uintptr_t eid, uintptr_t fid,
                               uintptr_t arg0, uintptr_t arg1,
@@ -108,6 +94,15 @@ static struct sbiret sbi_call(uintptr_t eid, uintptr_t fid,
     return (struct sbiret){(long)a0, (long)a1};
 }
 
+static struct sbiret covh_call(uintptr_t fid,
+                               uintptr_t a0, uintptr_t a1,
+                               uintptr_t a2, uintptr_t a3,
+                               uintptr_t a4, uintptr_t a5)
+{
+    return sbi_call(SBI_EXT_COVH, COVH_TARGET_TSM | fid,
+                    a0, a1, a2, a3, a4, a5);
+}
+
 static void putchar(char c)
 {
     (void)sbi_call(SBI_EXT_DBCN, SBI_DBCN_WRITE_BYTE,
@@ -129,66 +124,11 @@ static void puthex(uintptr_t value)
         putchar(digits[(value >> shift) & 0xf]);
 }
 
-__attribute__((noreturn)) static void halt(void) {
+__attribute__((noreturn))
+static void halt(void)
+{
     for (;;)
         asm volatile("wfi");
-}
-
-static void assert_zeroed(const char *name, uintptr_t start, uintptr_t end)
-{
-    volatile const unsigned char *memory =
-        (volatile const unsigned char *)start;
-
-    for (uintptr_t address = start; address < end; ++address) {
-        unsigned char value = memory[address - start];
-
-        if (value != 0) {
-            puts("[ATTACK] leaked byte in ");
-            puts(name);
-            puts(" at ");
-            puthex(address);
-            puts(": ");
-            puthex(value);
-            putchar('\n');
-            puts("halting");
-            halt();
-        }
-    }
-
-    puts("[ATTACK] ");
-    puts(name);
-    puts(" contains only zeroes\n");
-}
-
-static struct sbiret covh_call(uintptr_t fid,
-                               uintptr_t a0, uintptr_t a1,
-                               uintptr_t a2, uintptr_t a3,
-                               uintptr_t a4, uintptr_t a5) {
-    return sbi_call(SBI_EXT_COVH, COVH_TARGET_TSM | fid,
-                    a0, a1, a2, a3, a4, a5);
-}
-
-static void info_stealer()
-{
-    puts("[ATTACK] reading reclaimed TVM memory\n");
-    assert_zeroed("metadata", metadata_start, metadata_end);
-    assert_zeroed("guest RAM", guest_memory_start, guest_memory_end);
-    puts("[ATTACK] PASS: no reclaimed TVM data is visible\n");
-}
-
-static void clear_bytes(void *address, size_t size) {
-    volatile unsigned char *p = address;
-
-    while (size-- != 0)
-        *p++ = 0;
-}
-
-static void copy_bytes(void *destination, const void *source, size_t size) {
-    unsigned char *dst = destination;
-    const unsigned char *src = source;
-
-    while (size-- != 0)
-        *dst++ = *src++;
 }
 
 __attribute__((noreturn))
@@ -207,9 +147,6 @@ static long require_ok(const char *operation, struct sbiret ret)
     if (ret.error != 0)
         fail(operation, ret.error);
 
-    puts("[HOST] ");
-    puts(operation);
-    puts(" OK\n");
     return ret.value;
 }
 
@@ -221,6 +158,23 @@ static uintptr_t align_down(uintptr_t value)
 static uintptr_t align_up(uintptr_t value)
 {
     return (value + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+}
+
+static void clear_bytes(void *address, size_t size)
+{
+    volatile unsigned char *p = address;
+
+    while (size-- != 0)
+        *p++ = 0;
+}
+
+static void copy_bytes(void *destination, const void *source, size_t size)
+{
+    unsigned char *dst = destination;
+    const unsigned char *src = source;
+
+    while (size-- != 0)
+        *dst++ = *src++;
 }
 
 static void check_guest_space(uintptr_t next, size_t num_pages)
@@ -248,15 +202,12 @@ static void add_zero_pages(uintptr_t tvm_id, uintptr_t *next_physical,
 static uintptr_t load_guest_elf(uintptr_t tvm_id, uintptr_t next_physical)
 {
     const unsigned char *elf = __guest_elf;
-    size_t elf_size = (size_t)(__guest_elf_size);
-    const Elf64_Ehdr *header;
+    size_t elf_size = (size_t)__guest_elf_size;
+    const Elf64_Ehdr *header = (const Elf64_Ehdr *)elf;
     uintptr_t next_guest_page = 0;
 
-    if (elf_size < sizeof(Elf64_Ehdr))
-        fail("embedded ELF is too small", -1);
-
-    header = (const Elf64_Ehdr *)elf;
-    if (header->e_ident[0] != 0x7f || header->e_ident[1] != 'E' ||
+    if (elf_size < sizeof(*header) ||
+        header->e_ident[0] != 0x7f || header->e_ident[1] != 'E' ||
         header->e_ident[2] != 'L' || header->e_ident[3] != 'F' ||
         header->e_ident[4] != ELFCLASS64 ||
         header->e_ident[5] != ELFDATA2LSB ||
@@ -268,10 +219,6 @@ static uintptr_t load_guest_elf(uintptr_t tvm_id, uintptr_t next_physical)
         header->e_phnum >
             (elf_size - (size_t)header->e_phoff) / header->e_phentsize)
         fail("invalid ELF program headers", -1);
-
-    puts("[HOST] Guest entry: ");
-    puthex((uintptr_t)header->e_entry);
-    puts("\n");
 
     for (uint16_t i = 0; i < header->e_phnum; ++i) {
         const Elf64_Phdr *segment = (const Elf64_Phdr *)(
@@ -338,33 +285,21 @@ static uintptr_t load_guest_elf(uintptr_t tvm_id, uintptr_t next_physical)
     return (uintptr_t)header->e_entry;
 }
 
-static void create_and_run_tvm() {
-
-    struct sbiret ret;
+int main(void)
+{
+    uintptr_t metadata_start = (uintptr_t)__confidential_metadata_start;
+    uintptr_t metadata_end = (uintptr_t)__confidential_metadata_end;
+    uintptr_t guest_memory_start = (uintptr_t)__confidential_guest_start;
+    uintptr_t guest_memory_end = (uintptr_t)__confidential_guest_end;
+    uintptr_t page_table = metadata_start;
+    uintptr_t tvm_state = page_table + PAGE_DIRECTORY_SIZE;
+    uintptr_t guest_physical = guest_memory_start;
+    uintptr_t create_params[2] __attribute__((aligned(16)));
     uintptr_t tvm_id;
     uintptr_t guest_entry;
-    uintptr_t create_params[2] __attribute__((aligned(16)));
+    struct sbiret ret;
 
-    puts("\n[HOST] Creating TVM\n");
-    puts("[HOST] Embedded ELF: ");
-    puthex((uintptr_t)__guest_elf);
-    puts("-");
-    puthex((uintptr_t)__guest_elf  + guest_elf_size - 1);
-    if ((uintptr_t)__guest_dtb != (uintptr_t)__guest_dtb_end) {
-        puts("\n[HOST] Embedded DTB: \n");
-        puthex((uintptr_t)__guest_dtb);
-        puts("-");
-        puthex((uintptr_t)__guest_dtb_end - 1);
-    }
-    puts("\n[HOST] Confidential metadata: ");
-    puthex(metadata_start);
-    puts("-");
-    puthex(metadata_end - 1);
-    puts("\n[HOST] Confidential guest RAM: ");
-    puthex(guest_memory_start);
-    puts("-");
-    puthex(guest_memory_end - 1);
-    puts("\n");
+    puts("[HOST] TVM suspend/resume test\n");
 
     ret = sbi_call(SBI_EXT_SUPD, SBI_SUPD_GET_ACTIVE,
                    0, 0, 0, 0, 0, 0);
@@ -372,13 +307,10 @@ static void create_and_run_tvm() {
     if (((uintptr_t)ret.value & 0x3) != 0x3)
         fail("TSM domain is not active", -1);
 
-    /* ADD_ZERO_PAGES maps without clearing; initialize pages before donation. */
-    clear_bytes(__confidential_metadata_start,
-                (size_t)(__confidential_metadata_end -
-                         __confidential_metadata_start));
-    clear_bytes(__confidential_guest_start,
-                (size_t)(__confidential_guest_end -
-                         __confidential_guest_start));
+    /* ADD_ZERO_PAGES maps pages without clearing them. */
+    clear_bytes((void *)metadata_start, metadata_end - metadata_start);
+    clear_bytes((void *)guest_memory_start, guest_memory_end - guest_memory_start);
+
     require_ok("CONVERT_META_PAGES",
                covh_call(COVH_CONVERT_PAGES,
                          metadata_start,
@@ -410,37 +342,27 @@ static void create_and_run_tvm() {
                covh_call(COVH_FINALIZE_TVM,
                          tvm_id, guest_entry, 0, 0, 0, 0));
 
-    puts("[HOST] Entering TVM\n");
-    ret = covh_call(COVH_RUN_VCPU, tvm_id, 0, 0, 0, 0, 0);
+    puts("[HOST] run_tvm_vcpu: first call\n");
+    require_ok("RUN_VCPU_FIRST",
+               covh_call(COVH_RUN_VCPU, tvm_id, 0, 0, 0, 0, 0));
 
-    puts("[HOST] TVM exited with code ");
-    puthex(ret.error);
-    putchar('\n');
+    puts("[HOST] run_tvm_vcpu: second call\n");
+    require_ok("RUN_VCPU_SECOND",
+               covh_call(COVH_RUN_VCPU, tvm_id, 0, 0, 0, 0, 0));
 
-    /* Destroy the TVM */
     require_ok("DESTROY_TVM",
-               covh_call(COVH_DESTROY_TVM, tvm_id, 0, 0, 0,0,0));
+               covh_call(COVH_DESTROY_TVM, tvm_id, 0, 0, 0, 0, 0));
     require_ok("RECLAIM_META_PAGES",
                covh_call(COVH_RECLAIM_PAGES,
-                   metadata_start,
-                   (metadata_end - metadata_start) / PAGE_SIZE,
-                   0, 0,0,0));
-
+                         metadata_start,
+                         (metadata_end - metadata_start) / PAGE_SIZE,
+                         0, 0, 0, 0));
     require_ok("RECLAIM_GUEST_PAGES",
                covh_call(COVH_RECLAIM_PAGES,
-                   guest_memory_start,
-                   (guest_memory_end - guest_memory_start) / PAGE_SIZE,
-                   0, 0,0,0));
+                         guest_memory_start,
+                         (guest_memory_end - guest_memory_start) / PAGE_SIZE,
+                         0, 0, 0, 0));
 
-    puts("[HOST] TVM destroyed\n");
-}
-
-int main(void)
-{
-    puts("[HOST] Info stealing test after TVM disposal\n");
-    create_and_run_tvm();
-    /* Another process tries to access the same physical memory */
-    info_stealer();
-    puts("[HOST] Program compelted. Halting\n");
+    puts("[HOST] PASS: TVM suspended and resumed\n");
     halt();
 }

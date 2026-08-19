@@ -324,7 +324,7 @@ int main(void) {
     for (int i = 0; i < sizeof(CERT_BUFFER); i++) CERT_BUFFER[i] = 0;
 
     // 3. Call Hypervisor (SBI)
-    unsigned long pub_key_addr = 0; // Not used in your implementation yet
+    unsigned long pub_key_addr = 0;
     unsigned long pub_key_size = 0;
 
     print_str("[GUEST] Invoking SBI_COVG_GET_EVIDENCE...\n");
