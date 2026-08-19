@@ -220,8 +220,7 @@ int main(void)
     struct sbiret ret;
     struct counters startup = {0};
 
-    if (guest_end - guest_start != GUEST_RAM_SIZE ||
-        tvm_state + TVM_STATE_SIZE > metadata_end)
+    if (guest_end - guest_start != GUEST_RAM_SIZE || tvm_state + TVM_STATE_SIZE > metadata_end)
         fail("invalid launcher memory layout", -1);
 
     initialize_segment_staging();
