@@ -39,7 +39,7 @@ SECTIONS
         __stack_top = .;
     } > RAM
 
-    .confidential_metadata (NOLOAD) : ALIGN(512K) {
+    .confidential_metadata (NOLOAD) : ALIGN(SHADOWFAX_METADATA_SIZE) {
         __confidential_metadata_start = .;
         . += SHADOWFAX_METADATA_SIZE;
         __confidential_metadata_end = .;
@@ -70,6 +70,9 @@ ASSERT(__confidential_guest_end == SHADOWFAX_GUEST_BASE + SHADOWFAX_GUEST_SIZE,
 ASSERT(SHADOWFAX_GUEST_UNIT_SIZE > 0 &&
        SHADOWFAX_GUEST_UNIT_SIZE % 4K == 0,
        "per-TVM guest RAM must be non-zero and page aligned")
+ASSERT(SHADOWFAX_METADATA_SIZE > 0 &&
+       (SHADOWFAX_METADATA_SIZE & (SHADOWFAX_METADATA_SIZE - 1)) == 0,
+       "launcher metadata size must be a power of two")
 ASSERT(SHADOWFAX_GUEST_SIZE <= SHADOWFAX_GUEST_REGION_SIZE,
        "requested guest RAM exceeds the DTB guest region")
 ASSERT(!SHADOWFAX_GUEST_IN_RAM ||

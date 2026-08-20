@@ -1,5 +1,4 @@
 #![no_std]
-#![no_main]
 
 pub mod sbi {
     // Standrd SBI constants
@@ -43,6 +42,7 @@ pub mod sbi {
         pub a1: isize,
     }
 
+    #[cfg(target_arch = "riscv64")]
     pub fn sbi_call(extid: usize, fid: usize, args: &[usize; 6]) -> SbiRet {
         let (a0, a1);
         unsafe {
@@ -67,7 +67,7 @@ pub mod attestation {
     use alloc::vec::Vec;
     use coset::{
         AsCborValue, CborSerializable, CoseKeyBuilder, CoseSign1, CoseSign1Builder, HeaderBuilder,
-        cbor::{Value, Value::Integer},
+        cbor::Value,
         cwt::{self, ClaimsSet, ClaimsSetBuilder},
         iana::{self, Algorithm},
     };
@@ -92,6 +92,7 @@ pub mod attestation {
     const TSM_PUBLIC_KEY_LABEL: i64 = -70_004;
     const TVM_PUBLIC_KEY_LABEL: i64 = -70_005;
     const TVM_INITIAL_MEASUREMENT_LABEL: i64 = -70_006;
+    const EAT_SUBMODULE_LABEL: i64 = 266;
 
     #[derive(Debug)]
     pub enum AttestationError {
@@ -310,6 +311,7 @@ pub mod attestation {
             TvmAttestationContext {
                 platform_token: self.platform_token.clone(),
                 cdi: next_cdi,
+                tsm_cdi: self.cdi.clone(),
                 tsm_token: self.token.clone(),
             }
         }
@@ -327,6 +329,7 @@ pub mod attestation {
     #[derive(Clone)]
     pub struct TvmAttestationContext {
         cdi: Cdi,
+        tsm_cdi: Cdi,
         platform_token: CoseSign1,
         tsm_token: CoseSign1,
     }
@@ -335,6 +338,7 @@ pub mod attestation {
         fn default() -> Self {
             Self {
                 cdi: Cdi::default(),
+                tsm_cdi: Cdi::default(),
                 platform_token: Default::default(),
                 tsm_token: Default::default(),
             }
@@ -367,7 +371,9 @@ pub mod attestation {
                 .build();
             let tvm_payload = tvm_claims.to_cbor_value().unwrap().to_vec().unwrap();
 
-            // Sign the TVM token with the key derived from the TVM CDI.
+            // The TSM attests the TVM. The TVM-derived key remains an
+            // identity claim, but must not self-sign its evidence.
+            let tsm_key = self.tsm_cdi.derive_keys();
             let protected = HeaderBuilder::new()
                 .algorithm(iana::Algorithm::EdDSA)
                 .build();
@@ -375,7 +381,7 @@ pub mod attestation {
             let tvm_token = CoseSign1Builder::new()
                 .protected(protected)
                 .payload(tvm_payload)
-                .create_signature(&[], |m| tvm_key.sk.sign(m, None).to_vec())
+                .create_signature(&[], |m| tsm_key.sk.sign(m, None).to_vec())
                 .build();
 
             // Compose riscv-cove-token (submodule map) with platform/tsm/tvm tokens
@@ -396,7 +402,7 @@ pub mod attestation {
 
     impl Evidence {
         /// Serializes the Evidence into a CBOR byte vector.
-        /// Format: CBOR Array [PlatformToken, TsmToken, TvmToken]
+        /// Format: CoVE EAT submodule map containing all three tokens.
         pub fn to_bytes(&self) -> Result<Vec<u8>, coset::CoseError> {
             let value = self.to_cbor_value()?;
             let mut bytes = Vec::new();
@@ -408,11 +414,17 @@ pub mod attestation {
 
         /// Converts the Evidence struct into a generic CBOR Value.
         fn to_cbor_value(&self) -> Result<Value, coset::CoseError> {
-            Ok(Value::Array(alloc::vec![
-                self.platform.clone().to_cbor_value()?,
-                self.tsm.clone().to_cbor_value()?,
-                self.tvm.clone().to_cbor_value()?,
-            ]))
+            Ok(Value::Map(alloc::vec![(
+                Value::Integer(EAT_SUBMODULE_LABEL.into()),
+                Value::Map(alloc::vec![
+                    (
+                        Value::Text("platform".into()),
+                        self.platform.clone().to_cbor_value()?,
+                    ),
+                    (Value::Text("tsm".into()), self.tsm.clone().to_cbor_value()?,),
+                    (Value::Text("tvm".into()), self.tvm.clone().to_cbor_value()?,),
+                ]),
+            )]))
         }
     }
 
@@ -449,6 +461,42 @@ pub mod attestation {
         }
     }
     impl core::error::Error for AttestationError {}
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn tvm_evidence_is_signed_by_the_tsm_and_uses_the_cove_map() {
+            let tsm_cdi = Cdi(alloc::vec![0x5a; CDI_LENGTH]);
+            let context = TsmAttestationContext {
+                cdi: tsm_cdi.clone(),
+                platform_token: CoseSign1::default(),
+                token: CoseSign1::default(),
+            }
+            .compute_next(b"measured launch");
+            let evidence = context.get_evidence(b"measurement", &[0xa5; 64]);
+
+            let tsm_public_key = tsm_cdi.derive_keys().pk;
+            assert!(verify_cose_signature(&evidence.tvm, tsm_public_key.as_ref()).is_ok());
+            assert!(
+                verify_cose_signature(&evidence.tvm, context.cdi.derive_keys().pk.as_ref())
+                    .is_err()
+            );
+
+            let encoded = evidence.to_bytes().unwrap();
+            let decoded: Value = coset::cbor::from_reader(encoded.as_slice()).unwrap();
+            let Value::Map(envelope) = decoded else {
+                panic!("evidence is not a map");
+            };
+            assert_eq!(envelope.len(), 1);
+            assert_eq!(envelope[0].0, Value::Integer(EAT_SUBMODULE_LABEL.into()));
+            let Value::Map(submodules) = &envelope[0].1 else {
+                panic!("submodules are not a map");
+            };
+            assert_eq!(submodules.len(), 3);
+        }
+    }
 
     #[derive(Debug, Clone)]
     struct RiscvCoveSwComponent {

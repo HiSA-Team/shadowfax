@@ -117,7 +117,7 @@ $(FW_BIN): $(FW_ELF) | $(BIN_DIR)
 $(FW_ELF): $(TSM_ELF) $(TSM_SIG)
 	cargo build --target $(TARGET_TRIPLET) -p shadowfax $(CARGO_FLAGS)
 
-$(TSM_SIG): $(TSM_ELF)
+$(TSM_SIG): $(TSM_ELF) | $(BIN_DIR)
 	openssl pkeyutl -sign -inkey $(PRIVATE_KEY) -in $< -out $@
 
 $(TSM_ELF):
