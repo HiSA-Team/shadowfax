@@ -70,7 +70,7 @@ use spin::mutex::Mutex;
 use crate::{
     context::Context,
     cove::TEE_SCRATCH_SIZE,
-    domain::{create_confidential_domain, Domain, MemoryRegion},
+    domain::{create_confidential_domain, default_tsm_measurement, Domain, MemoryRegion},
     platform::{DomainConfig, PlatformConfig, MAX_SUPERVISOR_DOMAINS},
     print_raw,
 };
@@ -149,6 +149,21 @@ impl BorrowKind {
             } => owner_id == *expected_owner_id && tsm_id == *expected_tsm_id,
         }
     }
+
+    fn range(&self) -> (usize, usize) {
+        match self {
+            Self::Convert {
+                base_address,
+                num_pages,
+                ..
+            }
+            | Self::Reclaim {
+                base_address,
+                num_pages,
+                ..
+            } => (*base_address, *num_pages),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -216,6 +231,86 @@ impl State {
         }
     }
 
+    pub fn validate_convert_range(
+        &self,
+        owner_id: usize,
+        base_address: usize,
+        num_pages: usize,
+    ) -> anyhow::Result<()> {
+        let size = num_pages
+            .checked_mul(common::sbi::PAGE_SIZE)
+            .ok_or_else(|| anyhow::anyhow!("page range overflow"))?;
+        if size == 0 || !size.is_power_of_two() || base_address % size != 0 {
+            return Err(anyhow::anyhow!(
+                "range must be a non-zero, naturally aligned power of two"
+            ));
+        }
+        let end = base_address
+            .checked_add(size)
+            .ok_or_else(|| anyhow::anyhow!("page range overflow"))?;
+        if !self.domain_owns_ram_range(owner_id, base_address, size) {
+            return Err(anyhow::anyhow!("range is outside caller RAM"));
+        }
+
+        let overlaps = |other_base: usize, other_pages: usize| {
+            let other_end =
+                other_base.saturating_add(other_pages.saturating_mul(common::sbi::PAGE_SIZE));
+            base_address < other_end && other_base < end
+        };
+        if self
+            .memory_allocations
+            .iter()
+            .any(|allocation| overlaps(allocation.base_address, allocation.num_pages))
+            || self
+                .pending_memory_allocations
+                .iter()
+                .flatten()
+                .any(|pending| {
+                    let (pending_base, pending_pages) = pending.range();
+                    overlaps(pending_base, pending_pages)
+                })
+        {
+            return Err(anyhow::anyhow!("range overlaps confidential memory"));
+        }
+        Ok(())
+    }
+
+    pub fn domain_owns_ram_range(&self, owner_id: usize, base_address: usize, size: usize) -> bool {
+        let Some(end) = base_address.checked_add(size) else {
+            return false;
+        };
+        let Some(domain) = self.domains.get(owner_id) else {
+            return false;
+        };
+        size != 0
+            && domain.memory_regions.iter().any(|region| {
+                if region.mmio || region.order >= usize::BITS {
+                    return false;
+                }
+                let region_end = region.base_address.saturating_add(1usize << region.order);
+                base_address >= region.base_address && end <= region_end
+            })
+    }
+
+    pub fn validate_reclaim_range(
+        &self,
+        owner_id: usize,
+        tsm_id: usize,
+        base_address: usize,
+        num_pages: usize,
+    ) -> anyhow::Result<()> {
+        self.memory_allocations
+            .iter()
+            .any(|allocation| {
+                allocation.base_address == base_address
+                    && allocation.num_pages == num_pages
+                    && allocation.owner_id == owner_id
+                    && allocation.tsm_id == tsm_id
+            })
+            .then_some(())
+            .ok_or_else(|| anyhow::anyhow!("no matching confidential allocation"))
+    }
+
     /* This does not start borrowing, but returns a ticket to the transaction */
     pub fn request_borrow(&mut self, req: BorrowKind) -> anyhow::Result<usize> {
         for _ in 0..MAX_TICKET {
@@ -248,7 +343,6 @@ impl State {
         if !(1..=MAX_TICKET).contains(&ticket) {
             return Err(anyhow::anyhow!("invalid ticket"));
         }
-
         let borrow = self.pending_memory_allocations[ticket]
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("invalid ticket"))?;

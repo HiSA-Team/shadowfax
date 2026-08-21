@@ -203,7 +203,15 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         // Perform operations to allow the specific functionality
         match fid {
             SBI_COVH_CREATE_TVM => {
-                state.start_bootstrap(src_id, dst_id).unwrap();
+                let params_addr = unsafe { (*domain_ctx).regs[10] };
+                let params_size = unsafe { (*domain_ctx).regs[11] };
+                if params_size != 2 * size_of::<usize>()
+                    || params_addr % align_of::<usize>() != 0
+                    || !state.domain_owns_ram_range(src_id, params_addr, params_size)
+                    || state.start_bootstrap(src_id, dst_id).is_err()
+                {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
             }
             // For sbi_covh_get_domain_info we need to give the TSM access to the memory space
             // where he will write the domain_info struct (a0) for the necessary size (a1).
@@ -213,14 +221,21 @@ extern "C" fn covh_handler(fid: usize) -> usize {
 
                 // Base address must be page aligned, we cannot exceed number of available pmp
                 // registers
-                assert!(base_address % COVH_DEFAULT_PAGE_SIZE == 0);
+                if base_address % COVH_DEFAULT_PAGE_SIZE != 0
+                    || !state.domain_owns_ram_range(src_id, base_address, size)
+                {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
 
-                let order = if (size & (size - 1)) == 0 {
+                let order = if size.is_power_of_two() {
                     size.trailing_zeros()
                 } else {
                     size.next_power_of_two().trailing_zeros()
                 }
                 .max(3);
+                if base_address % (1usize << order) != 0 {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
 
                 /*
                  * Borrow the domain only for this operation.
@@ -245,7 +260,12 @@ extern "C" fn covh_handler(fid: usize) -> usize {
 
                 // Base address must be page aligned, we cannot exceed number of available pmp
                 // registers
-                assert!(base_address % COVH_DEFAULT_PAGE_SIZE == 0);
+                if state
+                    .validate_convert_range(src_id, base_address, num_pages)
+                    .is_err()
+                {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
 
                 let ticket = state
                     .request_borrow(BorrowKind::new_alloc(
@@ -265,6 +285,13 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             SBI_COVH_RECLAIM_PAGES => {
                 let base_address = unsafe { (*domain_ctx).regs[10] };
                 let num_pages = unsafe { (*domain_ctx).regs[11] };
+
+                if state
+                    .validate_reclaim_range(src_id, dst_id, base_address, num_pages)
+                    .is_err()
+                {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
 
                 let ticket = state
                     .request_borrow(BorrowKind::new_reclaim(
@@ -309,6 +336,15 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         };
 
         match fid {
+            SBI_COVH_GET_TSM_INFO => {
+                // The output buffer is lent only for this call.
+                let _ = state.domains[src_id].memory_regions.pop();
+            }
+            SBI_COVH_CREATE_TVM => {
+                if !success {
+                    let _ = state.finish_bootstrap(dst_id, src_id);
+                }
+            }
             SBI_COVH_CONVERT_PAGES => {
                 /* Confirm the borrow */
                 let a6 = unsafe { (*scratch_ctx).regs[16] };
@@ -414,9 +450,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 }
             }
             SBI_COVH_FINALIZE_TVM => {
-                if success {
-                    state.finish_bootstrap(dst_id, src_id).unwrap();
-                }
+                let _ = state.finish_bootstrap(dst_id, src_id);
             }
             _ => {}
         }

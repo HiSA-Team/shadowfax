@@ -207,22 +207,32 @@ void parse_and_print_evidence(uint8_t *data, size_t len) {
 
     print_str("[GUEST] Parsing Evidence CBOR...\n");
 
-    // 1. Evidence Envelope: Expect Array(3)
+    // 1. Evidence Envelope: { 266: { "platform": ..., "tsm": ..., "tvm": ... } }
     if (cbor_read_head(&curr, end, &mt, &val) != 0) {
         print_str("Err: Stream Empty\n"); return;
     }
-    if (mt != CBOR_MT_ARRAY || val != 3) {
-        print_str("Error: Expected Evidence Array(3), got MT=");
+    if (mt != CBOR_MT_MAP || val != 1) {
+        print_str("Error: Expected Evidence Map(1), got MT=");
         print_uint(mt); print_str(" Len="); print_uint(val); print_str("\n");
         return;
     }
-
-    const char *names[] = {"Platform", "TSM     ", "TVM     "};
+    if (cbor_read_head(&curr, end, &mt, &val) != 0 || mt != CBOR_MT_UINT || val != 266 ||
+        cbor_read_head(&curr, end, &mt, &val) != 0 || mt != CBOR_MT_MAP || val != 3) {
+        print_str("Error: Invalid CoVE submodule map\n");
+        return;
+    }
 
     for (int i = 0; i < 3; i++) {
+        uint64_t name_len;
+        if (cbor_read_head(&curr, end, &mt, &name_len) != 0 || mt != CBOR_MT_TSTR ||
+            curr + name_len > end) {
+            print_str("Error: Invalid submodule name\n");
+            return;
+        }
         print_str("  --------------------------------------------------\n");
         print_str("  Layer: ");
-        print_str(names[i]);
+        for (uint64_t j = 0; j < name_len; j++) sbi_putc((char)curr[j]);
+        curr += name_len;
         print_str("\n");
 
         // Peek/Read Head for the COSE_Sign1 Item

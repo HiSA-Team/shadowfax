@@ -30,6 +30,10 @@ mod tsm {
     pub static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey.pem");
 }
 
+pub fn default_tsm_measurement() -> [u8; 64] {
+    Sha512::digest(tsm::DEFAULT_TSM).into()
+}
+
 #[derive(Clone, Debug)]
 pub struct MemoryRegion {
     pub base_address: usize,
