@@ -521,6 +521,7 @@ dependencies = [
  "libfdt-rs",
  "linked_list_allocator",
  "riscv",
+ "sha2",
  "spin",
  "zeroize",
 ]

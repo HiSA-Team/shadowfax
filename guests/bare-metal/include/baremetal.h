@@ -13,7 +13,10 @@
 #define SBI_EXT_SUPD                    0x53555044UL
 #define SBI_SUPD_GET_ACTIVE             0UL
 #define SBI_EXT_COVH                    0x434f5648UL
-#define COVH_TARGET_TSM                 (1UL << 26)
+#define COVH_DOMAIN_SHIFT               26UL
+#define COVH_DOMAIN_MASK                0x3fUL
+#define COVH_DEFAULT_TSM_DOMAIN         1UL
+#define COVH_TARGET_TSM                 (COVH_DEFAULT_TSM_DOMAIN << COVH_DOMAIN_SHIFT)
 #define COVH_CONVERT_PAGES              1UL
 #define COVH_RECLAIM_PAGES              2UL
 #define COVH_CREATE_TVM                 5UL
@@ -39,6 +42,10 @@ struct sbiret covh_call(uintptr_t fid,
                         uintptr_t arg0, uintptr_t arg1,
                         uintptr_t arg2, uintptr_t arg3,
                         uintptr_t arg4, uintptr_t arg5);
+struct sbiret covh_call_to(uintptr_t tsm_domain_id, uintptr_t fid,
+                           uintptr_t arg0, uintptr_t arg1,
+                           uintptr_t arg2, uintptr_t arg3,
+                           uintptr_t arg4, uintptr_t arg5);
 
 void putchar(char character);
 void puts(const char *message);

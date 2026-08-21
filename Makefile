@@ -36,7 +36,9 @@ CARGO_FLAGS                 =
 FW_ELF                      = $(TARGET_DIR)/shadowfax
 FW_BIN                      = $(BIN_DIR)/shadowfax.bin
 TSM_ELF                     = $(TARGET_DIR)/tsm
+TSM_IMAGE                   = $(BIN_DIR)/tsm.elf
 TSM_SIG                     = $(BIN_DIR)/tsm.bin.signature
+TSM_RUSTFLAGS               = $(RUSTFLAGS) -C relocation-model=pic -C link-arg=-pie
 
 # Keys and Dice files
 DICE_INPUT                  = $(BIN_DIR)/shadowfax.dice.bin
@@ -114,14 +116,18 @@ $(FDT_IMAGE): $(FDT_SOURCE)
 $(FW_BIN): $(FW_ELF) | $(BIN_DIR)
 	$(OBJCOPY) -O binary $< $@
 
-$(FW_ELF): $(TSM_ELF) $(TSM_SIG)
+$(FW_ELF): $(TSM_IMAGE) $(TSM_SIG)
 	cargo build --target $(TARGET_TRIPLET) -p shadowfax $(CARGO_FLAGS)
 
-$(TSM_SIG): $(TSM_ELF)
+$(TSM_IMAGE): $(TSM_ELF) | $(BIN_DIR)
+	cp $< $@
+
+$(TSM_SIG): $(TSM_IMAGE)
 	openssl pkeyutl -sign -inkey $(PRIVATE_KEY) -in $< -out $@
 
 $(TSM_ELF):
-	 cargo build --target $(TARGET_TRIPLET) -p tsm $(CARGO_FLAGS)
+	RUSTFLAGS='$(TSM_RUSTFLAGS)' cargo -Z build-std=core,alloc build \
+		--target $(TARGET_TRIPLET) -p tsm $(CARGO_FLAGS)
 
 ## test: build and run the tests
 test: firmware
@@ -168,6 +174,7 @@ build-info:
 	@echo "  CFLAGS:                    $(CFLAGS)"
 	@echo "  GUEST_CFLAGS:              $(GUEST_CFLAGS)"
 	@echo "  GUEST_RAM_SIZE:            $(GUEST_RAM_SIZE)"
+	@echo "  TSM_RUSTFLAGS:             $(TSM_RUSTFLAGS)"
 	@echo "  ASFLAGS:                   $(ASFLAGS)"
 	@echo "  LDFLAGS:                   $(LDFLAGS)"
 	@echo "  GUEST_LDFLAGS:             $(GUEST_LDFLAGS)"

@@ -340,7 +340,7 @@ impl State {
 /// certificate
 /// - initialize the TEE stack
 /// - create every supervisor domain declared by the platform device tree;
-/// - load a TSM in domains marked with `shadowfax,load-tsm`.
+/// - load a built-in or externally staged TSM in domains marked with `shadowfax,tsm`.
 /// Assumption: the domain id matches with its position in the domain array
 pub fn init(fdt_addr: usize) -> Result<usize, anyhow::Error> {
     let platform = PlatformConfig::from_addr(fdt_addr)?;
@@ -381,9 +381,8 @@ pub fn init(fdt_addr: usize) -> Result<usize, anyhow::Error> {
     let base_context = tee_stack - (TEE_SCRATCH_SIZE + size_of::<Context>());
     for config in platform.domains {
         let context_addr = base_context - config.id * size_of::<Context>();
-        let domain = if config.load_tsm {
-            let tsm_context = state.attestation_context.compute_next(&[0; 32]);
-            create_confidential_domain(config, context_addr, tsm_context)
+        let domain = if !matches!(config.tsm_source, crate::platform::TsmSource::None) {
+            create_confidential_domain(config, context_addr, &state.attestation_context)?
         } else {
             domain_from_config(config, context_addr)
         };

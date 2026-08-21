@@ -28,7 +28,20 @@ struct sbiret covh_call(uintptr_t fid,
                         uintptr_t arg2, uintptr_t arg3,
                         uintptr_t arg4, uintptr_t arg5)
 {
-    return sbi_call(SBI_EXT_COVH, COVH_TARGET_TSM | fid,
+    return covh_call_to(COVH_DEFAULT_TSM_DOMAIN, fid,
+                        arg0, arg1, arg2, arg3, arg4, arg5);
+}
+
+struct sbiret covh_call_to(uintptr_t tsm_domain_id, uintptr_t fid,
+                           uintptr_t arg0, uintptr_t arg1,
+                           uintptr_t arg2, uintptr_t arg3,
+                           uintptr_t arg4, uintptr_t arg5)
+{
+    uintptr_t targeted_fid =
+        ((tsm_domain_id & COVH_DOMAIN_MASK) << COVH_DOMAIN_SHIFT) |
+        (fid & 0xffffUL);
+
+    return sbi_call(SBI_EXT_COVH, targeted_fid,
                     arg0, arg1, arg2, arg3, arg4, arg5);
 }
 

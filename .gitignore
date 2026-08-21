@@ -23,9 +23,11 @@
 !/guests
 !/LICENSE
 !/Makefile
+!/MULTIPLE_TSMS.md
 !/README.md
 !/SETUP.md
 !/DEBUG.md
+!/platform
 !/requirements.txt
 !/rust-toolchain.toml
 !/scripts

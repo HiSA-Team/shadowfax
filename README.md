@@ -19,6 +19,8 @@ the F and D extensions to its userspace.
   musl instructions.
 - [Linux TVM guest](#boot-linux-as-a-tvm-guest): boot Linux inside a confidential VM.
 - [Linux host](#boot-linux-as-the-untrusted-host): boot Linux in the untrusted supervisor domain.
+- [Multiple TSMs](MULTIPLE_TSMS.md): configure built-in and externally staged relocatable TSMs
+  in separate trusted supervisor domains.
 - [DEBUG.md](DEBUG.md): QEMU/GDB startup, synthetic CoVE-H scenarios, and debugger commands.
 
 ## Run the attestation example
@@ -67,7 +69,7 @@ instead of rebuilding them implicitly.
 
 ## Architecture
 
-Shadowfax configures three static OpenSBI domains:
+The default platform configures three static OpenSBI domains:
 
 - **Root domain:** owns resources not assigned to another domain and is not used as a workload.
 - **Untrusted domain:** runs the host OS, VMM, or bare-metal CoVE-H client.

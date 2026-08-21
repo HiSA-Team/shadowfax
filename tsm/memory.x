@@ -1,6 +1,6 @@
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x90000000, LENGTH = 32M
+    RAM (rwx) : ORIGIN = 0, LENGTH = 32M
 }
 
 REGION_ALIAS("REGION_TEXT", RAM);
@@ -9,7 +9,8 @@ REGION_ALIAS("REGION_BSS", RAM);
 
 _heap_size          = 1024 * 1024 * 16;
 
-_stack_top = ORIGIN(RAM) + LENGTH(RAM);
+_tsm_region_start = ORIGIN(RAM);
+_tsm_region_end = ORIGIN(RAM) + LENGTH(RAM);
 
 SECTIONS {
   . = ORIGIN(RAM);

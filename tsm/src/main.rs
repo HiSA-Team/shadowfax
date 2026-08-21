@@ -13,6 +13,7 @@ use common::{
         SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM,
         SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES, SBI_COVH_RUN_TVM_VCPU,
     },
+    tsm_abi::{TsmBootInfo, TSM_BOOT_ABI_VERSION, TSM_BOOT_MAGIC},
 };
 use linked_list_allocator::LockedHeap;
 use spin::Mutex;
@@ -34,9 +35,6 @@ extern crate alloc;
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
 unsafe extern "C" {
-    /// boot stack top (defined in `memory.x`)
-    pub static mut _stack_top: u8;
-
     // Heap
     static mut _heap_start: u8;
     static _heap_end: u8;
@@ -54,6 +52,8 @@ fn panic(info: &PanicInfo) -> ! {
 
 // Give each hart 32K stack
 const STACK_SIZE_PER_HART: usize = 1024 * 32;
+// The project TSM PIE is linked at offset zero in a 32 MiB supervisor domain.
+const TSM_REGION_SIZE: usize = 32 * 1024 * 1024;
 
 #[no_mangle]
 #[unsafe(naked)]
@@ -68,16 +68,19 @@ extern "C" fn _start() -> ! {
         r#"
         .attribute arch, "rv64imac"
 
-        // setup up the stack
+        // _start is at PIE offset zero, so this AUIPC recovers the runtime load base
+        // without relying on an absolute linker symbol or a dynamic relocation.
+        auipc sp, 0
+        li t1, {tsm_region_size}
+        add sp, sp, t1
         li t1, {stack_size_per_hart}
-        la sp, {stack_top}
         sub sp, sp, t1
 
         call {main}
         "#,
 
         stack_size_per_hart = const STACK_SIZE_PER_HART,
-        stack_top = sym _stack_top,
+        tsm_region_size = const TSM_REGION_SIZE,
         main = sym tsm_entry,
     )
 }
@@ -165,7 +168,7 @@ static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
 #[link_section = "._secure_init"]
 /// This function will be called by the TSM-driver to initialize securely the TSM after the
 /// signature has bee authenticated.
-fn _secure_init(addr: usize) {
+extern "C" fn _secure_init(addr: usize) -> isize {
     // Initialize heap
     unsafe {
         let heap_start = (&raw const _heap_start as *const u8) as usize;
@@ -180,7 +183,24 @@ fn _secure_init(addr: usize) {
     let initial_context = if addr == 0 {
         TsmAttestationContext::default()
     } else {
-        unsafe { (*(addr as *const TsmAttestationContext)).clone() }
+        let boot = unsafe { &*(addr as *const TsmBootInfo) };
+        if boot.magic != TSM_BOOT_MAGIC
+            || boot.abi_version != TSM_BOOT_ABI_VERSION
+            || boot.struct_size as usize != size_of::<TsmBootInfo>()
+            || boot.dice_context_size > usize::MAX as u64
+        {
+            return -1;
+        }
+        let bytes = unsafe {
+            core::slice::from_raw_parts(
+                boot.dice_context_addr as *const u8,
+                boot.dice_context_size as usize,
+            )
+        };
+        match TsmAttestationContext::from_slice(bytes) {
+            Ok(context) => context,
+            Err(_) => return -1,
+        }
     };
 
     // 3. Update Global State
@@ -190,6 +210,7 @@ fn _secure_init(addr: usize) {
     state.replace(TsmState::new(initial_context));
 
     drop(state);
+    0
 }
 
 // Since this is a TSM with non reentrant model, an ECALL should be a TEERET

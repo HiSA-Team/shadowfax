@@ -62,6 +62,24 @@ pub mod sbi {
     }
 }
 
+pub mod tsm_abi {
+    pub const TSM_BOOT_MAGIC: u64 = 0x5348_4457_5453_4d31; // "SHDWTSM1"
+    pub const TSM_BOOT_ABI_VERSION: u32 = 1;
+    pub const TSM_MEASUREMENT_SIZE: usize = 64;
+
+    #[repr(C)]
+    pub struct TsmBootInfo {
+        pub magic: u64,
+        pub abi_version: u32,
+        pub struct_size: u32,
+        pub domain_id: u64,
+        pub load_base: u64,
+        pub measurement: [u8; TSM_MEASUREMENT_SIZE],
+        pub dice_context_addr: u64,
+        pub dice_context_size: u64,
+    }
+}
+
 pub mod attestation {
     extern crate alloc;
     use alloc::vec::Vec;
@@ -99,6 +117,7 @@ pub mod attestation {
         MissingSignature,
         InvalidSignatureFormat,
         SignatureVerificationFailed,
+        MalformedContext,
     }
     /// A Compound Device Identifier (CDI) wrapper.
     #[derive(Clone)]
@@ -290,13 +309,58 @@ pub mod attestation {
     }
 
     impl TsmAttestationContext {
-        pub fn init_from_addr(addr: usize) -> Self {
-            let ptr = addr as *const u8;
-            Self::from_raw_bytes(ptr)
+        pub fn to_raw_bytes(&self) -> Vec<u8> {
+            let platform_token = self.platform_token.clone().to_vec().unwrap();
+            let tsm_token = self.token.clone().to_vec().unwrap();
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&(self.cdi.0.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&self.cdi.0);
+            bytes.extend_from_slice(&(platform_token.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&platform_token);
+            bytes.extend_from_slice(&(tsm_token.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&tsm_token);
+            bytes
         }
 
-        fn from_raw_bytes(ptr: *const u8) -> Self {
-            todo!()
+        pub fn from_slice(bytes: &[u8]) -> Result<Self, AttestationError> {
+            fn take<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Option<&'a [u8]> {
+                let end = offset.checked_add(len)?;
+                let value = bytes.get(*offset..end)?;
+                *offset = end;
+                Some(value)
+            }
+            fn take_len(bytes: &[u8], offset: &mut usize) -> Option<usize> {
+                let raw: [u8; 4] = take(bytes, offset, 4)?.try_into().ok()?;
+                Some(u32::from_le_bytes(raw) as usize)
+            }
+
+            let mut offset = 0;
+            let cdi_len = take_len(bytes, &mut offset).ok_or(AttestationError::MalformedContext)?;
+            let cdi = Cdi(take(bytes, &mut offset, cdi_len)
+                .ok_or(AttestationError::MalformedContext)?
+                .to_vec());
+            let platform_token = {
+                let len = take_len(bytes, &mut offset).ok_or(AttestationError::MalformedContext)?;
+                CoseSign1::from_slice(
+                    take(bytes, &mut offset, len).ok_or(AttestationError::MalformedContext)?,
+                )
+                .map_err(|_| AttestationError::MalformedContext)?
+            };
+            let token = {
+                let len = take_len(bytes, &mut offset).ok_or(AttestationError::MalformedContext)?;
+                CoseSign1::from_slice(
+                    take(bytes, &mut offset, len).ok_or(AttestationError::MalformedContext)?,
+                )
+                .map_err(|_| AttestationError::MalformedContext)?
+            };
+            if offset != bytes.len() || cdi.0.len() != CDI_LENGTH {
+                return Err(AttestationError::MalformedContext);
+            }
+            Ok(Self {
+                cdi,
+                platform_token,
+                token,
+            })
         }
     }
 
@@ -445,6 +509,7 @@ pub mod attestation {
                 Self::MissingSignature => write!(f, "missing signature"),
                 Self::InvalidSignatureFormat => write!(f, "invalid signature format"),
                 Self::SignatureVerificationFailed => write!(f, "signature verification failed"),
+                Self::MalformedContext => write!(f, "malformed attestation context"),
             }
         }
     }

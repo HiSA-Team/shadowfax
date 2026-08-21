@@ -53,5 +53,8 @@ struct baremetal_elf_loader {
 
 uintptr_t baremetal_load_guest_elf(uintptr_t tvm_id,
                                    const struct baremetal_elf_loader *loader);
+uintptr_t baremetal_load_guest_elf_to(uintptr_t tsm_domain_id,
+                                      uintptr_t tvm_id,
+                                      const struct baremetal_elf_loader *loader);
 
 #endif
