@@ -35,7 +35,7 @@ static GUEST_INITRD: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.initrd
 pub fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Starting Mapping TVM from ELF");
     // We'll simulate a dummy attestation context for testing.
-    _secure_init(0);
+    let _ = _secure_init(0);
 
     let mut lock = STATE.lock();
     let state = lock.as_mut().expect("State not initialized");

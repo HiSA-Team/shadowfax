@@ -14,6 +14,23 @@ const FDT_HEADER_SIZE: usize = 40;
 
 pub const MAX_MEMORY_REGIONS: usize = 16;
 pub const MAX_SUPERVISOR_DOMAINS: usize = 64;
+pub const MAX_RESERVED_REGIONS: usize = 16;
+
+#[derive(Clone, Copy)]
+pub struct AddressRange {
+    pub base: usize,
+    pub size: usize,
+}
+
+#[derive(Clone, Copy)]
+pub enum TsmSource {
+    None,
+    Builtin,
+    External {
+        image: AddressRange,
+        signature: AddressRange,
+    },
+}
 
 #[derive(Clone)]
 pub struct DomainConfig {
@@ -22,8 +39,8 @@ pub struct DomainConfig {
     pub memory_regions: Vec<MemoryRegion, MAX_MEMORY_REGIONS>,
     pub trust_map: usize,
     pub next_addr: usize,
-    pub load_tsm: bool,
-    pub boot_hart: bool,
+    pub tsm_source: TsmSource,
+    pub boot_hart: Option<usize>,
 }
 
 pub struct PlatformConfig {
@@ -33,7 +50,7 @@ pub struct PlatformConfig {
 }
 
 impl PlatformConfig {
-    pub fn from_addr(fdt_addr: usize) -> anyhow::Result<Self> {
+    pub fn from_addr(fdt_addr: usize, cold_boot_hart: usize) -> anyhow::Result<Self> {
         let fdt = copy_fdt(fdt_addr)?;
         let shadowfax = fdt
             .get_node("/chosen/shadowfax")
@@ -41,6 +58,7 @@ impl PlatformConfig {
         ensure_compatible(&fdt, &shadowfax, "shadowfax,platform-config")?;
 
         let dice_input_addr = read_u64_property(&shadowfax, "dice-input")? as usize;
+        let reserved_regions = read_reserved_regions(&fdt)?;
 
         let domain_root = fdt
             .get_node("/chosen/opensbi-domains")
@@ -71,8 +89,8 @@ impl PlatformConfig {
                         memory_regions: read_regions(&fdt, &node)?,
                         trust_map: 0,
                         next_addr: read_u64_property(&node, "next-addr")? as usize,
-                        load_tsm: node.get_property("shadowfax,load-tsm").is_ok(),
-                        boot_hart: node.get_property("boot-hart").is_ok(),
+                        tsm_source: read_tsm_source(&node)?,
+                        boot_hart: read_boot_hart(&fdt, &node)?,
                     },
                 ))
                 .map_err(|_| anyhow::anyhow!("max supervisor domain exceeded"))?;
@@ -83,20 +101,185 @@ impl PlatformConfig {
         }
 
         let mut boot_domain_id = None;
+        let mut boot_harts = 0usize;
         for index in 0..parsed.len() {
             parsed[index].1.trust_map = read_trust_map(&fdt, &parsed[index].0, &parsed)?;
-            if parsed[index].1.boot_hart && boot_domain_id.replace(parsed[index].1.id).is_some() {
-                bail!("more than one domain declares boot-hart");
+            if let Some(hart_id) = parsed[index].1.boot_hart {
+                let hart_bit = 1usize
+                    .checked_shl(hart_id as u32)
+                    .context("boot hart ID does not fit the platform hart mask")?;
+                if boot_harts & hart_bit != 0 {
+                    bail!("more than one domain declares boot hart {hart_id}");
+                }
+                boot_harts |= hart_bit;
+                if hart_id == cold_boot_hart {
+                    boot_domain_id = Some(parsed[index].1.id);
+                }
             }
         }
 
-        let boot_domain_id = boot_domain_id.context("no domain declares boot-hart")?;
+        let boot_domain_id = boot_domain_id
+            .with_context(|| format!("no domain boots on cold-boot hart {cold_boot_hart}"))?;
+        for (_, config) in &parsed {
+            if let TsmSource::External { image, signature } = config.tsm_source {
+                for range in [image, signature] {
+                    if !reserved_regions
+                        .iter()
+                        .any(|reserved| contains(*reserved, range))
+                    {
+                        bail!("domain {} TSM staging range is not reserved", config.name);
+                    }
+                    for (_, other) in &parsed {
+                        if other.memory_regions.iter().any(|region| {
+                            let size = 1usize.checked_shl(region.order).unwrap_or(0);
+                            overlaps(
+                                range,
+                                AddressRange {
+                                    base: region.base_address,
+                                    size,
+                                },
+                            )
+                        }) {
+                            bail!(
+                                "domain {} TSM staging overlaps supervisor memory",
+                                config.name
+                            );
+                        }
+                    }
+                }
+            }
+        }
         let domains = parsed.into_iter().map(|(_, config)| config).collect();
         Ok(Self {
             dice_input_addr,
             boot_domain_id,
             domains,
         })
+    }
+}
+
+fn read_boot_hart(fdt: &Fdt, domain: &FdtNode<'_>) -> anyhow::Result<Option<usize>> {
+    let property = match domain.get_property("boot-hart") {
+        Ok(property) => property,
+        Err(libfdt_rs::Error::NotFound) => return Ok(None),
+        Err(error) => bail!("cannot read {}/boot-hart: {error:?}", domain.name()),
+    };
+    let mut reader = PropertyReader::from(&property);
+    let raw_phandle = unsafe { reader.read::<PropertyCellParser>() }
+        .with_context(|| format!("{}/boot-hart has no value", domain.name()))?;
+    let phandle = Phandle::try_from(raw_phandle)
+        .map_err(|error| anyhow!("invalid boot-hart phandle {raw_phandle:#x}: {error:?}"))?;
+    let cpu = fdt
+        .get_node_by_phandle(&phandle)
+        .map_err(|error| anyhow!("unknown boot-hart phandle {raw_phandle:#x}: {error:?}"))?;
+    Ok(Some(read_u32_property(&cpu, "reg")? as usize))
+}
+
+fn read_tsm_source(node: &FdtNode<'_>) -> anyhow::Result<TsmSource> {
+    let is_tsm = node.get_property("shadowfax,tsm").is_ok();
+    let builtin = node.get_property("shadowfax,load-tsm").is_ok();
+    let image = read_optional_range_property(node, "shadowfax,tsm-image")?;
+    let signature = read_optional_range_property(node, "shadowfax,tsm-signature")?;
+
+    if builtin && (image.is_some() || signature.is_some()) {
+        bail!("domain {} selects multiple TSM sources", node.name());
+    }
+    if image.is_some() != signature.is_some() {
+        bail!(
+            "domain {} has an incomplete external TSM source",
+            node.name()
+        );
+    }
+    if !is_tsm && image.is_some() {
+        bail!(
+            "domain {} supplies a TSM image without shadowfax,tsm",
+            node.name()
+        );
+    }
+    if builtin {
+        return Ok(TsmSource::Builtin);
+    }
+    if let (Some(image), Some(signature)) = (image, signature) {
+        if image.size == 0 || signature.size != 64 {
+            bail!("domain {} has invalid external TSM sizes", node.name());
+        }
+        return Ok(TsmSource::External { image, signature });
+    }
+    if is_tsm {
+        bail!("domain {} has no TSM source", node.name());
+    }
+    Ok(TsmSource::None)
+}
+
+fn read_reserved_regions(fdt: &Fdt) -> anyhow::Result<Vec<AddressRange, MAX_RESERVED_REGIONS>> {
+    let root = fdt
+        .get_node("/reserved-memory")
+        .map_err(|error| anyhow!("missing /reserved-memory: {error:?}"))?;
+    let mut ranges = Vec::new();
+    for node in root
+        .subnodes_iter()
+        .map_err(|error| anyhow!("cannot iterate reserved memory: {error:?}"))?
+    {
+        if node.get_property("no-map").is_err() {
+            continue;
+        }
+        if let Some(range) = read_optional_range_property(&node, "reg")? {
+            ranges
+                .push(range)
+                .map_err(|_| anyhow!("too many reserved-memory ranges"))?;
+        }
+    }
+    Ok(ranges)
+}
+
+fn read_optional_range_property(
+    node: &FdtNode<'_>,
+    name: &str,
+) -> anyhow::Result<Option<AddressRange>> {
+    let property = match node.get_property(name) {
+        Ok(property) => property,
+        Err(libfdt_rs::Error::NotFound) => return Ok(None),
+        Err(error) => bail!("cannot read {}/{name}: {error:?}", node.name()),
+    };
+    let mut reader = PropertyReader::from(&property);
+    let mut read_u64 = || -> anyhow::Result<u64> {
+        let high = unsafe { reader.read::<PropertyCellParser>() }
+            .with_context(|| format!("{}/{name} has a truncated value", node.name()))?;
+        let low = unsafe { reader.read::<PropertyCellParser>() }
+            .with_context(|| format!("{}/{name} has a truncated value", node.name()))?;
+        Ok(((high as u64) << 32) | low as u64)
+    };
+    let base = read_u64()?;
+    let size = read_u64()?;
+    if base > usize::MAX as u64 || size > usize::MAX as u64 {
+        bail!(
+            "{}/{name} does not fit the platform address size",
+            node.name()
+        );
+    }
+    Ok(Some(AddressRange {
+        base: base as usize,
+        size: size as usize,
+    }))
+}
+
+fn contains(outer: AddressRange, inner: AddressRange) -> bool {
+    match (
+        outer.base.checked_add(outer.size),
+        inner.base.checked_add(inner.size),
+    ) {
+        (Some(outer_end), Some(inner_end)) => inner.base >= outer.base && inner_end <= outer_end,
+        _ => false,
+    }
+}
+
+fn overlaps(left: AddressRange, right: AddressRange) -> bool {
+    match (
+        left.base.checked_add(left.size),
+        right.base.checked_add(right.size),
+    ) {
+        (Some(left_end), Some(right_end)) => left.base < right_end && right.base < left_end,
+        _ => true,
     }
 }
 

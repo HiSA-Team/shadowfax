@@ -11,7 +11,7 @@ static void check_space(const struct baremetal_elf_loader *loader,
         loader->fail("confidential memory exhausted", -1);
 }
 
-static void add_zero_pages(uintptr_t tvm_id,
+static void add_zero_pages(uintptr_t tsm_domain_id, uintptr_t tvm_id,
                            const struct baremetal_elf_loader *loader,
                            uintptr_t *next_physical, uintptr_t guest_page,
                            size_t pages)
@@ -21,14 +21,21 @@ static void add_zero_pages(uintptr_t tvm_id,
 
     check_space(loader, *next_physical, pages);
     loader->require_ok("ADD_ZERO_PAGES",
-                       covh_call(COVH_ADD_ZERO_PAGES,
-                                 tvm_id, *next_physical, 0, pages,
-                                 guest_page, 0));
+                       covh_call_to(tsm_domain_id, COVH_ADD_ZERO_PAGES,
+                                    tvm_id, *next_physical, 0, pages,
+                                    guest_page, 0));
     *next_physical += pages * PAGE_SIZE;
 }
 
 uintptr_t baremetal_load_guest_elf(uintptr_t tvm_id,
                                    const struct baremetal_elf_loader *loader)
+{
+    return baremetal_load_guest_elf_to(COVH_DEFAULT_TSM_DOMAIN, tvm_id, loader);
+}
+
+uintptr_t baremetal_load_guest_elf_to(uintptr_t tsm_domain_id,
+                                      uintptr_t tvm_id,
+                                      const struct baremetal_elf_loader *loader)
 {
     const Elf64_Ehdr *header;
     uintptr_t next_physical = loader->physical_start;
@@ -52,7 +59,7 @@ uintptr_t baremetal_load_guest_elf(uintptr_t tvm_id,
         loader->fail("embedded ELF program headers are invalid", -1);
 
     if (loader->premapped)
-        add_zero_pages(tvm_id, loader, &next_physical, 0,
+        add_zero_pages(tsm_domain_id, tvm_id, loader, &next_physical, 0,
                        loader->guest_ram_size / PAGE_SIZE);
 
     for (uint16_t index = 0; index < header->e_phnum; ++index) {
@@ -88,7 +95,8 @@ uintptr_t baremetal_load_guest_elf(uintptr_t tvm_id,
             loader->fail("embedded ELF segments are invalid", -1);
 
         if (!loader->premapped)
-            add_zero_pages(tvm_id, loader, &next_physical, next_guest_page,
+            add_zero_pages(tsm_domain_id, tvm_id, loader, &next_physical,
+                           next_guest_page,
                            (guest_page - next_guest_page) / PAGE_SIZE);
 
         if (measured_pages != 0) {
@@ -103,24 +111,26 @@ uintptr_t baremetal_load_guest_elf(uintptr_t tvm_id,
                 : next_physical;
             check_space(loader, measured_physical, measured_pages);
             loader->require_ok("ADD_MEASURED_PAGES",
-                               covh_call(COVH_ADD_MEASURED_PAGES,
-                                         tvm_id,
-                                         (uintptr_t)loader->staging,
-                                         measured_physical, 0,
-                                         measured_pages, guest_page));
+                               covh_call_to(tsm_domain_id,
+                                            COVH_ADD_MEASURED_PAGES,
+                                            tvm_id,
+                                            (uintptr_t)loader->staging,
+                                            measured_physical, 0,
+                                            measured_pages, guest_page));
             if (!loader->premapped)
                 next_physical += measured_size;
         }
 
         if (!loader->premapped)
-            add_zero_pages(tvm_id, loader, &next_physical,
+            add_zero_pages(tsm_domain_id, tvm_id, loader, &next_physical,
                            guest_page + measured_pages * PAGE_SIZE,
                            total_pages - measured_pages);
         next_guest_page = segment_end;
     }
 
     if (!loader->premapped)
-        add_zero_pages(tvm_id, loader, &next_physical, next_guest_page,
+        add_zero_pages(tsm_domain_id, tvm_id, loader, &next_physical,
+                       next_guest_page,
                        (loader->guest_ram_size - next_guest_page) / PAGE_SIZE);
 
     return (uintptr_t)header->e_entry;

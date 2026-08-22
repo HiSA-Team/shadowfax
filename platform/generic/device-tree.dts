@@ -136,6 +136,7 @@
 				next-addr = <0x0 0x90000000>;
 				next-mode = <0x1>;
 				shadowfax,load-tsm;
+				shadowfax,tsm;
 				shadowfax,trusts = <&udomain>;
 			};
 

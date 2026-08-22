@@ -28,7 +28,11 @@
 #![feature(once_cell_get_mut)]
 #![feature(naked_functions_rustic_abi)]
 
-use core::{ffi, panic::PanicInfo};
+use core::{
+    ffi,
+    panic::PanicInfo,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use linked_list_allocator::LockedHeap;
 use riscv::{
@@ -104,6 +108,14 @@ fn panic(info: &PanicInfo) -> ! {
 
 // Stack size per HART: 8K
 const STACK_SIZE_PER_HART: usize = 1024 * 8;
+const SECONDARY_WAITING: usize = 0x5348_4457;
+const SECONDARY_READY_VALUE: usize = 0x5348_5244;
+
+// Keep this word in the firmware image rather than BSS so secondary harts can
+// safely wait while hart 0 clears BSS and initializes the platform.
+#[used]
+#[link_section = ".data"]
+static SECONDARY_READY: AtomicUsize = AtomicUsize::new(SECONDARY_WAITING);
 
 /// The _start function is the first function loaded at the starting address of
 /// the linkerscript. This function:
@@ -119,16 +131,17 @@ const STACK_SIZE_PER_HART: usize = 1024 * 8;
 /// Since qemu does not support creating opensbi domains
 /// from the cli, we need to provide a custom linkerscript.
 #[no_mangle]
+#[link_section = "._start"]
 #[unsafe(naked)]
 extern "C" fn _start() -> ! {
     core::arch::naked_asm!(
-        // If there are multiple hart, init only hartid 0
+        // Hart 0 performs global initialization. Other harts wait until their
+        // OpenSBI scratch structures have been prepared.
         // The .attribute is needed. LLVM does not produce code seems to be a bug.
         r#"
         .attribute arch, "rv64imac"
         csrr s6, mhartid
-        // If not zero, go to wait loop
-        bnez s6, {hang}
+        bnez s6, {secondary_start}
 
         // setup a temporary stack pointer
         li t0, {stack_size_per_hart}
@@ -170,12 +183,49 @@ extern "C" fn _start() -> ! {
         "#,
         stack_size_per_hart = const STACK_SIZE_PER_HART,
         stack_top = sym _stack_top,
-        hang = sym hang,
+        secondary_start = sym secondary_start,
         fw_platform_init = sym opensbi::fw_platform_init,
         main = sym main,
         bss_start = sym _start_bss,
         bss_end = sym _end_bss,
         pointer_size = const size_of::<usize>(),
+    )
+}
+
+/// Entry used both by initially released secondary harts and by OpenSBI HSM.
+///
+/// This has to remain assembly-only until `enter_opensbi` installs the per-hart
+/// scratch record and machine trap vector. QEMU may release secondary harts
+/// while hart 0 is still preparing those records.
+#[unsafe(naked)]
+extern "C" fn secondary_start() -> ! {
+    core::arch::naked_asm!(
+        "csrr t2, mhartid",
+        "li t0, {stack_size_per_hart}",
+        "mul t1, t2, t0",
+        "la sp, {stack_top}",
+        "sub sp, sp, t1",
+        // Do not let an early exception vector to address zero while this
+        // hart waits for the primary hart to publish OpenSBI scratch records.
+        "la t0, {hang}",
+        "csrw mtvec, t0",
+        "1:",
+        "la t0, {secondary_ready}",
+        "ld t1, 0(t0)",
+        "li t0, {secondary_ready_value}",
+        "bne t1, t0, 1b",
+        "fence r, rw",
+        // The test-local QEMU platform has contiguous hart IDs, so the ID is
+        // also the OpenSBI hart index.
+        "csrr a0, mhartid",
+        "mv a1, a0",
+        "j {enter_opensbi}",
+        stack_size_per_hart = const STACK_SIZE_PER_HART,
+        stack_top = sym _stack_top,
+        hang = sym hang,
+        secondary_ready = sym SECONDARY_READY,
+        secondary_ready_value = const SECONDARY_READY_VALUE,
+        enter_opensbi = sym enter_opensbi,
     )
 }
 
@@ -261,7 +311,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     dump_linker_symbols(fdt_addr);
 
     // initialize shadowfax state which will be used to handle the CoVE SBI
-    let next_stage_address = state::init(fdt_addr).unwrap();
+    let next_stage_address = state::init(fdt_addr, boot_hartid).unwrap();
     print_raw!("State initialized correctly\r\n");
     //
     /*
@@ -372,7 +422,7 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
             // warmboot_addr: address of the warmboot function.
             // This is not supported for now, but is needed for
             // hotplug harts and multicore
-            warmboot_addr: 0,
+            warmboot_addr: secondary_start as ffi::c_ulong,
             // platform_addr: address of the opensbi::platform struct populated
             // with fw_platform_init
             platform_addr: platform_addr as ffi::c_ulong,
@@ -408,16 +458,22 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
         }
     }
 
+    SECONDARY_READY.store(SECONDARY_READY_VALUE, Ordering::Release);
+
     // Prepare and jump to sbi_init. We need to:
     //  - disable interrupts
     //  - find the scratch for hart 0
+    enter_opensbi(boot_hartid, boot_hartid)
+}
+
+fn enter_opensbi(hartid: usize, hartindex: usize) -> ! {
     unsafe {
         use riscv::register::mtvec::Mtvec;
         // According to the opensbi documentation, we need to disable the interrupt
         riscv::interrupt::disable();
 
         // Set the mscratch to the correct address
-        let scratch_addr = hartid_to_scratch(boot_hartid, boot_hartid);
+        let scratch_addr = hartid_to_scratch(hartid, hartindex);
         riscv::register::mscratch::write(scratch_addr);
 
         // set the stack pointer to the scratch.
