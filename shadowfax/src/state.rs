@@ -436,8 +436,8 @@ impl State {
 /// - create every supervisor domain declared by the platform device tree;
 /// - load a built-in or externally staged TSM in domains marked with `shadowfax,tsm`.
 /// Assumption: the domain id matches with its position in the domain array
-pub fn init(fdt_addr: usize) -> Result<usize, anyhow::Error> {
-    let platform = PlatformConfig::from_addr(fdt_addr)?;
+pub fn init(fdt_addr: usize, boot_hartid: usize) -> Result<usize, anyhow::Error> {
+    let platform = PlatformConfig::from_addr(fdt_addr, boot_hartid)?;
 
     // First, get the security context
     let attestation_context = PlatformAttestationContext::init_from_addr(platform.dice_input_addr);
@@ -499,7 +499,7 @@ fn domain_from_config(config: DomainConfig, context_addr: usize) -> Domain {
         next_addr: config.next_addr,
         context_addr,
         has_tsm: false,
-        boot_hart: config.boot_hart,
+        boot_hart: config.boot_hart.is_some(),
     }
 }
 

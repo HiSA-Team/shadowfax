@@ -40,7 +40,7 @@ pub struct DomainConfig {
     pub trust_map: usize,
     pub next_addr: usize,
     pub tsm_source: TsmSource,
-    pub boot_hart: bool,
+    pub boot_hart: Option<usize>,
 }
 
 pub struct PlatformConfig {
@@ -50,7 +50,7 @@ pub struct PlatformConfig {
 }
 
 impl PlatformConfig {
-    pub fn from_addr(fdt_addr: usize) -> anyhow::Result<Self> {
+    pub fn from_addr(fdt_addr: usize, cold_boot_hart: usize) -> anyhow::Result<Self> {
         let fdt = copy_fdt(fdt_addr)?;
         let shadowfax = fdt
             .get_node("/chosen/shadowfax")
@@ -90,7 +90,7 @@ impl PlatformConfig {
                         trust_map: 0,
                         next_addr: read_u64_property(&node, "next-addr")? as usize,
                         tsm_source: read_tsm_source(&node)?,
-                        boot_hart: node.get_property("boot-hart").is_ok(),
+                        boot_hart: read_boot_hart(&fdt, &node)?,
                     },
                 ))
                 .map_err(|_| anyhow::anyhow!("max supervisor domain exceeded"))?;
@@ -101,14 +101,25 @@ impl PlatformConfig {
         }
 
         let mut boot_domain_id = None;
+        let mut boot_harts = 0usize;
         for index in 0..parsed.len() {
             parsed[index].1.trust_map = read_trust_map(&fdt, &parsed[index].0, &parsed)?;
-            if parsed[index].1.boot_hart && boot_domain_id.replace(parsed[index].1.id).is_some() {
-                bail!("more than one domain declares boot-hart");
+            if let Some(hart_id) = parsed[index].1.boot_hart {
+                let hart_bit = 1usize
+                    .checked_shl(hart_id as u32)
+                    .context("boot hart ID does not fit the platform hart mask")?;
+                if boot_harts & hart_bit != 0 {
+                    bail!("more than one domain declares boot hart {hart_id}");
+                }
+                boot_harts |= hart_bit;
+                if hart_id == cold_boot_hart {
+                    boot_domain_id = Some(parsed[index].1.id);
+                }
             }
         }
 
-        let boot_domain_id = boot_domain_id.context("no domain declares boot-hart")?;
+        let boot_domain_id = boot_domain_id
+            .with_context(|| format!("no domain boots on cold-boot hart {cold_boot_hart}"))?;
         for (_, config) in &parsed {
             if let TsmSource::External { image, signature } = config.tsm_source {
                 for range in [image, signature] {
@@ -145,6 +156,23 @@ impl PlatformConfig {
             domains,
         })
     }
+}
+
+fn read_boot_hart(fdt: &Fdt, domain: &FdtNode<'_>) -> anyhow::Result<Option<usize>> {
+    let property = match domain.get_property("boot-hart") {
+        Ok(property) => property,
+        Err(libfdt_rs::Error::NotFound) => return Ok(None),
+        Err(error) => bail!("cannot read {}/boot-hart: {error:?}", domain.name()),
+    };
+    let mut reader = PropertyReader::from(&property);
+    let raw_phandle = unsafe { reader.read::<PropertyCellParser>() }
+        .with_context(|| format!("{}/boot-hart has no value", domain.name()))?;
+    let phandle = Phandle::try_from(raw_phandle)
+        .map_err(|error| anyhow!("invalid boot-hart phandle {raw_phandle:#x}: {error:?}"))?;
+    let cpu = fdt
+        .get_node_by_phandle(&phandle)
+        .map_err(|error| anyhow!("unknown boot-hart phandle {raw_phandle:#x}: {error:?}"))?;
+    Ok(Some(read_u32_property(&cpu, "reg")? as usize))
 }
 
 fn read_tsm_source(node: &FdtNode<'_>) -> anyhow::Result<TsmSource> {

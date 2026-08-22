@@ -85,7 +85,7 @@ pub fn create_confidential_domain(
         next_addr: config.next_addr,
         context_addr,
         has_tsm: true,
-        boot_hart: config.boot_hart,
+        boot_hart: config.boot_hart.is_some(),
     };
 
     // zero out the tsm supervisor state area
