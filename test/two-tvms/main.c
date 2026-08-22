@@ -79,11 +79,7 @@ int main(void)
     uintptr_t guest_end = (uintptr_t)__confidential_guest_end;
     uintptr_t page_table1 = metadata_start;
     uintptr_t state1 = page_table1 + PAGE_DIRECTORY_SIZE;
-<<<<<<< HEAD
-    uintptr_t page_table2 = metadata_start + (metadata_end - metadata_start) / 2;
-=======
     uintptr_t page_table2 = metadata_start + TVM_METADATA_STRIDE;
->>>>>>> 132c306 (fix: overlapping TVM metadata)
     uintptr_t state2 = page_table2 + PAGE_DIRECTORY_SIZE;
     uintptr_t guest1 = guest_start;
     uintptr_t guest2 = guest1 + GUEST_RAM_SIZE;
