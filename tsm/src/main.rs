@@ -262,18 +262,6 @@ fn handle_covh(
     let fid = a6 & 0xFFFF;
     let owner = (a6 >> 26) & 0x3F;
 
-    if fid == SBI_COVH_RUN_TVM_VCPU {
-        let prepared = state.hypervisor.prepare_tvm_vcpu(owner, a0, a1);
-        drop(lock);
-
-        match prepared {
-            Ok((vcpu_addr, entry_sepc, entry_arg, resume)) => unsafe {
-                HypervisorState::enter_prepared_tvm_vcpu(vcpu_addr, entry_sepc, entry_arg, resume)
-            },
-            Err(_) => return SbiRet { a0: -1, a1: 0 },
-        }
-    }
-
     match fid {
         SBI_COVH_GET_TSM_INFO => {
             if a1 < core::mem::size_of::<TsmInfo>() || a0 % core::mem::align_of::<TsmInfo>() != 0 {
@@ -369,6 +357,19 @@ fn handle_covh(
             Ok(_) => SbiRet { a0: 0, a1: 0 },
             Err(_) => SbiRet { a0: -1, a1: 0 },
         },
+        SBI_COVH_RUN_TVM_VCPU => {
+            let prepared = state.hypervisor.prepare_tvm_vcpu(owner, a0, a1);
+            drop(lock);
+
+            match prepared {
+                Ok((vcpu_addr, entry_sepc, entry_arg, resume)) => unsafe {
+                    HypervisorState::enter_prepared_tvm_vcpu(
+                        vcpu_addr, entry_sepc, entry_arg, resume,
+                    )
+                },
+                Err(_) => return SbiRet { a0: -1, a1: 0 },
+            }
+        }
         _ => SbiRet { a0: -1, a1: 0 },
     }
 }
