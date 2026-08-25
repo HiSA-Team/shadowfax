@@ -558,11 +558,21 @@ fn supd_handler(fid: usize) -> usize {
     let scratch_addr = &raw const _tee_stack_top as *const u8 as usize;
     let dst_addr = scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let dst_ctx = dst_addr as *mut Context;
+    let src_id = unsafe {
+        let hart_id = riscv::register::mhartid::read();
+        let hart_index = opensbi::sbi_hartid_to_hartindex(hart_id as u32);
+        let domain = opensbi::sbi_hartindex_to_domain(hart_index);
+        (*domain).index as usize
+    };
 
     if fid == SBI_EXT_SUPD_GET_ACTIVE_DOMAINS {
-        // root supervisor domain is mandatory
-        let mut ret: usize = 1;
-        for i in 0..state.domains.len() {
+        let mut ret: usize = 0;
+        let mut tmp = state
+            .domains
+            .iter()
+            .position(|d| d.has_tsm && d.is_trusted(src_id))
+            .into_iter();
+        while let Some(i) = tmp.next() {
             ret |= 1 << i;
         }
 
