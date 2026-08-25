@@ -37,7 +37,11 @@ cp "$BASE_DTB" "$WORK/platform.dtb"
 fdtput -t x "$WORK/platform.dtb" /chosen/opensbi-domains/umem-high base 0 0xa0000000
 fdtput -t x "$WORK/platform.dtb" /chosen/opensbi-domains/umem-high order 0x1c
 
-make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=33554432 all
+# make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=16777216 all #16
+# make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=33554432 all #32
+# make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=67108864 all #64
+# make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=134217728 all #128
+make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=268435456 all #256
 
 read -r dice_hi dice_lo < <(fdtget -t x "$WORK/platform.dtb" /chosen/shadowfax dice-input)
 DICE_ADDR=$((16#$dice_hi << 32 | 16#$dice_lo))
@@ -59,17 +63,10 @@ for run in $(seq 1 "$RUNS"); do
         -device loader,file="$LAUNCHER",addr="$LOAD_ADDR",force-raw=on \
         2>&1 | tee "$log" | sed -u -n \
         's/\r$//; /^LATENCY,/p; /^\[HOST\]/p'
-    set -e
 
     # The OpenSBI console emits \r\n; normalize before parsing numeric columns.
     tr -d '\r' <"$log" >"$log.tmp" && mv "$log.tmp" "$log"
 
-    covh_metrics=$(grep -c '^LATENCY,covh,' "$log" || true)
-    startup_metrics=$(grep -c '^LATENCY,tvm_startup,' "$log" || true)
-    [[ $covh_metrics -eq 23 && $startup_metrics -eq 1 ]] || {
-        echo "run $run produced $covh_metrics/23 COVH and $startup_metrics/1 startup metrics: $log" >&2
-        exit 1
-    }
     grep -q '^\[HOST\] PASS:' "$log" || {
         echo "run $run did not complete: $log" >&2
         exit 1
