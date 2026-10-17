@@ -28,7 +28,7 @@
 //!     tmem: trusted-memory {
 //!         compatible = "opensbi,domain,memregion";
 //!         base = <0x0 0x90000000>;
-//!         order = <26>;
+//!         order = <25>;
 //!     };
 //!
 //!     umem: untrusted-memory {
@@ -70,7 +70,7 @@ use spin::mutex::Mutex;
 use crate::{
     context::Context,
     cove::TEE_SCRATCH_SIZE,
-    domain::{create_confidential_domain, default_tsm_measurement, Domain, MemoryRegion},
+    domain::{create_confidential_domain, initialize_default_tsm, Domain, MemoryRegion},
     platform::{DomainConfig, PlatformConfig, MAX_SUPERVISOR_DOMAINS},
     print_raw,
 };
@@ -86,11 +86,19 @@ const TICKET_BITS: usize = 10;
 const TICKET_MASK: usize = (1 << TICKET_BITS) - 1; // 0x3ff
 const MAX_TICKET: usize = TICKET_MASK; // 1023
 const TICKET_SLOTS: usize = MAX_TICKET + 1; // includes unused slot 0
+const TEE_STACK_SIZE: usize = 64 * 1024;
 
 #[link_section = ".rodata"]
 static DICE_PLATFORM_PUBLIC_KEY: &[u8; 32] = include_bytes!("../keys/root_of_trust_pub.bin");
 
 pub static STATE: Mutex<OnceCell<State>> = Mutex::new(OnceCell::new());
+
+#[no_mangle]
+pub(crate) static mut TEE_STACK_TOP: usize = 0;
+
+pub fn tee_stack_top() -> usize {
+    unsafe { TEE_STACK_TOP }
+}
 
 pub enum BorrowKind {
     Convert {
@@ -180,7 +188,9 @@ struct BootstrapGrant {
     tsm_id: usize,
 }
 
+#[repr(C, align(4096))]
 pub struct State {
+    tee_stack: [u8; TEE_STACK_SIZE],
     pub domains: Vec<Domain, MAX_SUPERVISOR_DOMAINS>,
     pub boot_domain_id: usize,
     pub attestation_context: PlatformAttestationContext,
@@ -195,6 +205,7 @@ pub struct State {
 impl State {
     fn new(attestation_context: PlatformAttestationContext, boot_domain_id: usize) -> Self {
         Self {
+            tee_stack: [0; TEE_STACK_SIZE],
             domains: Vec::new(),
             boot_domain_id,
             attestation_context,
@@ -438,6 +449,9 @@ impl State {
 /// Assumption: the domain id matches with its position in the domain array
 pub fn init(fdt_addr: usize, boot_hartid: usize) -> Result<usize, anyhow::Error> {
     let platform = PlatformConfig::from_addr(fdt_addr, boot_hartid)?;
+    if let Some((image, signature)) = platform.default_tsm {
+        initialize_default_tsm(image, signature);
+    }
 
     // First, get the security context
     let attestation_context = PlatformAttestationContext::init_from_addr(platform.dice_input_addr);
@@ -448,7 +462,10 @@ pub fn init(fdt_addr: usize, boot_hartid: usize) -> Result<usize, anyhow::Error>
     let mut state = STATE.lock();
     let state = state.get_mut_or_init(|| State::new(attestation_context, platform.boot_domain_id));
 
-    let tee_stack = &raw const crate::_tee_stack_top as *const u8 as usize;
+    let tee_stack = state.tee_stack.as_ptr_range().end as usize;
+    unsafe {
+        TEE_STACK_TOP = tee_stack;
+    }
 
     // Create the root domain. The root domain id is always zero, so it has to be the first
     let root_domain = Domain {

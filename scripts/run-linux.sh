@@ -5,12 +5,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 
-# Keep the toolchain setup identical to direct Makefile use.
-source "$PROJECT_ROOT/config.rc"
-
 LINUX_IMAGE_PATH=${LINUX_IMAGE:-"$PROJECT_ROOT/linux/host/arch/riscv/boot/Image"}
 INITRAMFS_IMAGE_PATH=${INITRAMFS:-"$PROJECT_ROOT/bin/linux-host-initramfs.cpio.gz"}
-SHADOWFAX_PYTHON=${SHADOWFAX_PYTHON:-"uv run --with cbor2"}
 PLATFORM_NAME=${PLATFORM:-generic}
 SSH_FORWARD_PORT=${SSH_FORWARD_PORT:-2222}
 
@@ -24,7 +20,7 @@ Environment overrides:
   LINUX_IMAGE=/path/to/Image
   INITRAMFS=/path/to/initramfs.cpio.gz
   SSH_FORWARD_PORT=2222
-  SHADOWFAX_PYTHON='uv run --with cbor2'
+  PYTHON3='uv run --with cbor2 --with cryptography --with pycose --with pylibfdt python3'
   QEMU_DEVICES='additional QEMU arguments'
 EOF
 }
@@ -32,24 +28,6 @@ EOF
 die() {
     echo "run-linux.sh: $*" >&2
     exit 1
-}
-
-read_u64_property() {
-    local dtb=$1
-    local node=$2
-    local property=$3
-    local high low
-    read -r high low < <(fdtget -t x "$dtb" "$node" "$property")
-    printf '%u\n' "$(((16#$high << 32) | 16#$low))"
-}
-
-read_u32_property() {
-    local dtb=$1
-    local node=$2
-    local property=$3
-    local value
-    value=$(fdtget -t x "$dtb" "$node" "$property")
-    printf '%u\n' "$((16#$value))"
 }
 
 print_range() {
@@ -113,11 +91,12 @@ case "$INITRAMFS_IMAGE_PATH" in
     *) die "unsupported initramfs format; use .cpio or .cpio.gz" ;;
 esac
 
-for tool in dtc fdtget fdtput make od qemu-system-riscv64 stat tr; do
+for tool in fdtput make od "${QEMU:-qemu-system-riscv64}" stat tr; do
     command -v "$tool" >/dev/null || die "required command not found: $tool"
 done
 
-RUN_LINUX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/shadowfax-linux.XXXXXX")
+mkdir -p "$PROJECT_ROOT/target/linux-launcher"
+RUN_LINUX_TMP=$(mktemp -d "$PROJECT_ROOT/target/linux-launcher/run.XXXXXX")
 trap 'rm -rf -- "$RUN_LINUX_TMP"' EXIT
 
 LINUX_IMAGE_SIZE=$(stat -c %s "$LINUX_IMAGE_PATH")
@@ -126,23 +105,20 @@ LINUX_RUNTIME_SIZE=$(od -An -j 16 -N 8 -tu8 "$LINUX_IMAGE_PATH" | tr -d '[:space
 [[ "$LINUX_RUNTIME_SIZE" =~ ^[0-9]+$ ]] || die "cannot read the RISC-V Image runtime size"
 (( LINUX_RUNTIME_SIZE >= LINUX_IMAGE_SIZE )) || LINUX_RUNTIME_SIZE=$LINUX_IMAGE_SIZE
 
-# Compile and patch a private platform DTB.
+# Stage firmware incrementally, then patch a private copy of its sized DTB.
+make -C "$PROJECT_ROOT" PLATFORM="$PLATFORM_NAME" firmware
+LAYOUT_DIR="$PROJECT_ROOT/target/platform/$PLATFORM_NAME"
+source "$LAYOUT_DIR/layout.sh"
 PATCHED_DTB="$RUN_LINUX_TMP/device-tree.dtb"
-dtc -I dts -O dtb \
-    -o "$PATCHED_DTB" \
-    "$PROJECT_ROOT/platform/$PLATFORM_NAME/device-tree.dts"
+cp "$LAYOUT_DIR/device-tree.dtb" "$PATCHED_DTB"
 
-DOMAIN_PATH=/chosen/opensbi-domains
-LINUX_LOAD_ADDR=$(read_u64_property "$PATCHED_DTB" "$DOMAIN_PATH/untrusted-domain" next-addr)
-LOW_RAM_BASE=$(read_u64_property "$PATCHED_DTB" "$DOMAIN_PATH/umem" base)
-LOW_RAM_ORDER=$(read_u32_property "$PATCHED_DTB" "$DOMAIN_PATH/umem" order)
-HIGH_RAM_BASE=$(read_u64_property "$PATCHED_DTB" "$DOMAIN_PATH/umem-high" base)
-HIGH_RAM_ORDER=$(read_u32_property "$PATCHED_DTB" "$DOMAIN_PATH/umem-high" order)
-SUPERVISOR_START_ADDR=$LOW_RAM_BASE
-SUPERVISOR_END_ADDR=$((HIGH_RAM_BASE + (1 << HIGH_RAM_ORDER)))
-SUPERVISOR_REGION_SIZE=$((SUPERVISOR_END_ADDR - SUPERVISOR_START_ADDR))
+# This launcher uses the default untrusted-domain and its two named RAM regions.
+LINUX_LOAD_ADDR=$((SHADOWFAX_DOMAIN_UNTRUSTED_DOMAIN_ENTRY))
+SUPERVISOR_START_ADDR=$((SHADOWFAX_REGION_UMEM_BASE))
+SUPERVISOR_REGION_SIZE=$((SHADOWFAX_REGION_UMEM_SIZE + SHADOWFAX_REGION_UMEM_HIGH_SIZE))
+SUPERVISOR_END_ADDR=$((SUPERVISOR_START_ADDR + SUPERVISOR_REGION_SIZE))
 
-(( LOW_RAM_BASE + (1 << LOW_RAM_ORDER) == HIGH_RAM_BASE )) || \
+(( SHADOWFAX_REGION_UMEM_BASE + SHADOWFAX_REGION_UMEM_SIZE == SHADOWFAX_REGION_UMEM_HIGH_BASE )) || \
     die "boot-domain RAM regions are not contiguous"
 
 LINUX_FILE_END_ADDR=$((LINUX_LOAD_ADDR + LINUX_IMAGE_SIZE))
@@ -170,23 +146,24 @@ check_no_overlap "Linux runtime" "$LINUX_LOAD_ADDR" "$LINUX_RUNTIME_END_ADDR" \
 check_in_supervisor_region "Linux runtime" "$LINUX_LOAD_ADDR" "$LINUX_RUNTIME_END_ADDR"
 check_in_supervisor_region "initramfs" "$INITRAMFS_LOAD_ADDR" "$INITRAMFS_END_ADDR"
 
-make -B -C "$PROJECT_ROOT" PYTHON="$SHADOWFAX_PYTHON" PLATFORM="$PLATFORM_NAME" firmware
-
-LINUX_QEMU_DEVICES="-device loader,file=$LINUX_IMAGE_PATH,addr=0x$(printf '%x' "$LINUX_LOAD_ADDR"),force-raw=on"
-LINUX_QEMU_DEVICES+=" -device loader,file=$INITRAMFS_IMAGE_PATH,addr=0x$(printf '%x' "$INITRAMFS_LOAD_ADDR"),force-raw=on"
-LINUX_QEMU_DEVICES+=" -netdev user,id=net0,ipv4=on,ipv6=off,hostfwd=tcp:127.0.0.1:$SSH_FORWARD_PORT-:22"
-LINUX_QEMU_DEVICES+=" -device virtio-net-device,netdev=net0"
-
-if [[ -n "${QEMU_DEVICES:-}" ]]; then
-    LINUX_QEMU_DEVICES+=" $QEMU_DEVICES"
+EXTRA_QEMU_ARGS=()
+read -r -a EXTRA_QEMU_ARGS <<< "${QEMU_DEVICES:-}"
+if [[ "${DEBUG:-0}" == 1 ]]; then
+    EXTRA_QEMU_ARGS+=(-s -S -monitor unix:/tmp/shadowfax-qemu-monitor,server,nowait)
 fi
 
 printf 'Patched DTB : %s\n' "$PATCHED_DTB"
 printf 'SSH forward : 127.0.0.1:%s -> guest:22\n' "$SSH_FORWARD_PORT"
 
-make -C "$PROJECT_ROOT" \
-    PYTHON="$SHADOWFAX_PYTHON" \
-    PLATFORM="$PLATFORM_NAME" \
-    FDT_IMAGE="$PATCHED_DTB" \
-    QEMU_DEVICES="$LINUX_QEMU_DEVICES" \
-    qemu-run
+"${QEMU:-qemu-system-riscv64}" \
+    -M virt -m "$SHADOWFAX_QEMU_MEM" -smp "$SHADOWFAX_SMP" -nographic \
+    -bios "$PROJECT_ROOT/target/${TARGET_TRIPLET:-riscv64imac-unknown-none-elf}/${PROFILE:-debug}/shadowfax" \
+    -dtb "$PATCHED_DTB" \
+    -device "loader,file=$PROJECT_ROOT/target/artifacts/shadowfax.dice.bin,addr=$SHADOWFAX_DICE_ADDR,force-raw=on" \
+    -device "loader,file=$PROJECT_ROOT/target/artifacts/tsm.elf,addr=$SHADOWFAX_TSM_IMAGE_ADDR,force-raw=on" \
+    -device "loader,file=$PROJECT_ROOT/target/artifacts/tsm.bin.signature,addr=$SHADOWFAX_TSM_SIGNATURE_ADDR,force-raw=on" \
+    -device "loader,file=$LINUX_IMAGE_PATH,addr=$LINUX_LOAD_ADDR,force-raw=on" \
+    -device "loader,file=$INITRAMFS_IMAGE_PATH,addr=$INITRAMFS_LOAD_ADDR,force-raw=on" \
+    -netdev "user,id=net0,ipv4=on,ipv6=off,hostfwd=tcp:127.0.0.1:$SSH_FORWARD_PORT-:22" \
+    -device virtio-net-device,netdev=net0 \
+    "${EXTRA_QEMU_ARGS[@]}"

@@ -1,0 +1,23 @@
+/dts-v1/;
+
+/include/ "platform/generic/base.dtsi"
+/include/ "platform/generic/default-domains.dtsi"
+
+/*
+ * The launch-latency measurement needs a confidential region larger than the
+ * generic platform's, so it carries its own memory map rather than patching
+ * the staged blob after the fact.
+ *
+ * main.c measures a fixed 16 MiB payload and fills the rest with zero pages,
+ * so GUEST_RAM_SIZE must exceed 16 MiB; 32 MiB is the smallest useful run.
+ * Raise the region and GUEST_RAM_SIZE together, keeping the region aligned to
+ * its own size, to measure a larger TVM.
+ */
+&{/memory@80000000} {
+	reg = <0x00 0x80000000 0x00 0x06000000>;
+};
+
+&umem_high {
+	base = <0x0 0x82000000>;
+	order = <25>;
+};

@@ -10,7 +10,7 @@ starting GDB:
 
 ```sh
 make guests
-make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
+make PLATFORM=generic firmware
 ```
 
 Use a RISC-V GDB matching `RV_PREFIX`. The default GDB initialization loads symbols from:
@@ -25,17 +25,27 @@ target/riscv64imac-unknown-none-elf/debug/tsm
 Start QEMU halted at reset in the first terminal:
 
 ```sh
-make qemu-run DEBUG=1 PYTHON='uv run --with cbor2'
+make -C test/standalone-tvm-launcher run DEBUG=1
 ```
 
 `DEBUG=1` enables the GDB server on TCP port 1234, stops the CPUs before execution, and exposes a
 QEMU monitor socket at `/tmp/shadowfax-qemu-monitor`.
 
-In a second terminal, attach GDB and select a scenario:
+In a second terminal, attach GDB and select a scenario. The scripts want the boot domain's entry
+address, which `scripts/layout.py` exported alongside the device tree:
 
 ```sh
-make debug GDB_COVE_SCRIPT=test/debug/gdb_covh_get_tsm_info.py
+source target/standalone-tvm-launcher/layout.sh
+BOOT_DOMAIN_ADDRESS=$SHADOWFAX_DOMAIN_RUNNER_ENTRY \
+TSM_LOAD_ADDRESS=$SHADOWFAX_REGION_MONITOR_RAM_BASE \
+  riscv64-unknown-elf-gdb -x test/debug/gdbinit \
+    -x test/debug/gdb_covh_get_tsm_info.py \
+    target/riscv64imac-unknown-none-elf/debug/shadowfax
 ```
+
+`TSM_LOAD_ADDRESS` is required: the TSM is a position-independent ELF relocated to its domain
+base, so without it every TSM symbol resolves at the wrong address. See
+[test/debug/README.md](test/debug/README.md) for the full guide.
 
 The session initially stops at `tsm::main`. Type `continue` each time the Python runner reaches the
 next programmed breakpoint:
@@ -51,7 +61,9 @@ Keep the QEMU terminal visible because firmware and guest console output appears
 ### Query TSM information
 
 ```sh
-make debug GDB_COVE_SCRIPT=test/debug/gdb_covh_get_tsm_info.py
+BOOT_DOMAIN_ADDRESS=$SHADOWFAX_DOMAIN_RUNNER_ENTRY TSM_LOAD_ADDRESS=$SHADOWFAX_REGION_MONITOR_RAM_BASE \
+  riscv64-unknown-elf-gdb -x test/debug/gdbinit -x test/debug/gdb_covh_get_tsm_info.py \
+    target/riscv64imac-unknown-none-elf/debug/shadowfax
 ```
 
 This enumerates active supervisor domains, requests the TSM information structure, reads it from
@@ -60,7 +72,9 @@ untrusted memory, and validates the reported state and TVM capabilities.
 ### Create a synthetic TVM
 
 ```sh
-make debug GDB_COVE_SCRIPT=test/debug/gdb_covh_create_tvm.py
+BOOT_DOMAIN_ADDRESS=$SHADOWFAX_DOMAIN_RUNNER_ENTRY TSM_LOAD_ADDRESS=$SHADOWFAX_REGION_MONITOR_RAM_BASE \
+  riscv64-unknown-elf-gdb -x test/debug/gdbinit -x test/debug/gdb_covh_create_tvm.py \
+    target/riscv64imac-unknown-none-elf/debug/shadowfax
 ```
 
 This scenario donates pages, creates a TVM and memory region, installs a minimal loop as measured
@@ -69,7 +83,9 @@ guest code, creates a vCPU, finalizes the TVM, and enters it.
 ### Create a TVM from an ELF
 
 ```sh
-make debug GDB_COVE_SCRIPT=test/debug/gdb_covh_create_tvm_from_elf.py
+BOOT_DOMAIN_ADDRESS=$SHADOWFAX_DOMAIN_RUNNER_ENTRY TSM_LOAD_ADDRESS=$SHADOWFAX_REGION_MONITOR_RAM_BASE \
+  riscv64-unknown-elf-gdb -x test/debug/gdbinit -x test/debug/gdb_covh_create_tvm_from_elf.py \
+    target/riscv64imac-unknown-none-elf/debug/shadowfax
 ```
 
 This is the debugger-driven counterpart of the standalone launcher. It reads
@@ -124,7 +140,7 @@ Restart both QEMU and GDB when changing firmware addresses or rebuilding debug s
 The non-interactive integration test builds the firmware and verifies its QEMU boot output:
 
 ```sh
-make PYTHON='uv run --with cbor2' test
+make test
 ```
 
 Use this as a regression check after debugging a firmware or domain-layout change.

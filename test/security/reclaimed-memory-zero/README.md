@@ -24,7 +24,7 @@ Expected final output:
 [ATTACK] PASS: no reclaimed TVM data is visible
 ```
 
-The test intentionally reads 64 MiB after reclamation.  With the current
-implementation reclaim also securely clears that RAM twice, once in the TSM
-and once in Shadowfax, so QEMU can take a noticeable amount of time before
-printing the attack result.
+The test reads the 512 KiB metadata region and the 4 MiB guest RAM
+(`GUEST_RAM_SIZE` from the shared launcher). Reclaimed memory is cleared
+twice: once by the TSM when the TVM is destroyed, and once by Shadowfax when
+the pages return to the supervisor domain.

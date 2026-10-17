@@ -12,7 +12,7 @@ pub struct Context {
     pub stvec: usize,
     sip: usize,
     scounteren: usize,
-    sscratch: usize,
+    pub sscratch: usize,
     satp: usize,
     senvcfg: usize,
     scontext: usize,

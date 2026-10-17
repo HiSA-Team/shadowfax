@@ -13,8 +13,6 @@ KERNEL_ELF="$ROOT/linux/guest/vmlinux"
 WORK=$(mktemp -d /tmp/shadowfax-coremark.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 
-source "$ROOT/config.rc"
-
 [[ $RUNS =~ ^[1-9][0-9]*$ ]] || { echo "usage: $0 [runs] [output-directory]"; exit 2; }
 [[ ! -e "$OUT" ]] || { echo "output already exists: $OUT"; exit 1; }
 mkdir -p "$OUT/logs" "$WORK/m-mode/riscv" "$WORK/s-mode/riscv" "$WORK/linux" "$WORK/rootfs"

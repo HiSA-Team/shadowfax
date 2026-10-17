@@ -7,7 +7,7 @@
 #define PAGE_SIZE               4096UL
 #define PAGE_TABLE_SIZE         (16UL *  PAGE_SIZE)
 #ifndef GUEST_RAM_SIZE
-#define GUEST_RAM_SIZE          (16UL *  1024UL * 1024UL)
+#define GUEST_RAM_SIZE          (2UL * 1024UL * 1024UL)
 #endif
 #define SECRET_GPA              0x300000UL
 #define COVH_RUN_TVM_VCPU COVH_RUN_VCPU
@@ -17,7 +17,7 @@ extern const unsigned char __guest_elf[];
 extern const char __guest_elf_size[];
 extern unsigned char __confidential_metadata_start[], __confidential_metadata_end[];
 extern unsigned char __confidential_guest_start[], __confidential_guest_end[];
-static unsigned char staging[2UL * 1024UL * 1024UL] __attribute__((aligned(PAGE_SIZE)));
+static unsigned char staging[64UL * 1024UL] __attribute__((aligned(PAGE_SIZE)));
 
 static uintptr_t load_guest(uintptr_t tvm_id, uintptr_t physical)
 {

@@ -45,6 +45,7 @@ pub struct DomainConfig {
 
 pub struct PlatformConfig {
     pub dice_input_addr: usize,
+    pub default_tsm: Option<(AddressRange, AddressRange)>,
     pub boot_domain_id: usize,
     pub domains: Vec<DomainConfig, MAX_SUPERVISOR_DOMAINS>,
 }
@@ -58,6 +59,15 @@ impl PlatformConfig {
         ensure_compatible(&fdt, &shadowfax, "shadowfax,platform-config")?;
 
         let dice_input_addr = read_u64_property(&shadowfax, "dice-input")? as usize;
+        let tsm_image = read_optional_range_property(&shadowfax, "tsm-image")?;
+        let tsm_signature = read_optional_range_property(&shadowfax, "tsm-signature")?;
+        let default_tsm = match (tsm_image, tsm_signature) {
+            (Some(image), Some(signature)) if image.size != 0 && signature.size == 64 => {
+                Some((image, signature))
+            }
+            (None, None) => None,
+            _ => bail!("invalid default TSM staging ranges"),
+        };
         let reserved_regions = read_reserved_regions(&fdt)?;
 
         let domain_root = fdt
@@ -98,6 +108,24 @@ impl PlatformConfig {
 
         if parsed.is_empty() {
             bail!("the OpenSBI domain configuration contains no domains");
+        }
+        if parsed
+            .iter()
+            .any(|(_, domain)| matches!(domain.tsm_source, TsmSource::Builtin))
+            && default_tsm.is_none()
+        {
+            bail!("default TSM staging is missing");
+        }
+
+        if let Some((image, signature)) = default_tsm {
+            for range in [image, signature] {
+                if !reserved_regions
+                    .iter()
+                    .any(|reserved| contains(*reserved, range))
+                {
+                    bail!("default TSM staging range is not reserved");
+                }
+            }
         }
 
         let mut boot_domain_id = None;
@@ -152,6 +180,7 @@ impl PlatformConfig {
         let domains = parsed.into_iter().map(|(_, config)| config).collect();
         Ok(Self {
             dice_input_addr,
+            default_tsm,
             boot_domain_id,
             domains,
         })

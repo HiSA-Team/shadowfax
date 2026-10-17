@@ -57,6 +57,7 @@ mod opensbi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+mod boot;
 mod context;
 mod domain;
 mod error;
@@ -90,9 +91,6 @@ unsafe extern "C" {
 
     // Stack
     static _stack_top: u8;
-
-    // Start of the TEE Scratch Stack
-    pub static _tee_stack_top: u8;
 
 }
 
@@ -313,6 +311,11 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     // initialize shadowfax state which will be used to handle the CoVE SBI
     let next_stage_address = state::init(fdt_addr, boot_hartid).unwrap();
     print_raw!("State initialized correctly\r\n");
+    print_raw!(
+        "{:<40} : {:#018x}\n",
+        "TEE Stack Top",
+        state::tee_stack_top()
+    );
     //
     /*
      * This code initializes the scratch space, which is a per-HART data structure
@@ -526,11 +529,6 @@ fn dump_linker_symbols(fdt_addr: usize) {
             "{:<40} : {:#018x}\n",
             "Boot Stack Top",
             &_stack_top as *const u8 as usize
-        );
-        print_raw!(
-            "{:<40} : {:#018x}\n",
-            "TEE Stack Top",
-            &_tee_stack_top as *const u8 as usize
         );
     }
 

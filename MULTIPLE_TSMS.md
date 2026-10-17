@@ -9,9 +9,14 @@ The example in `test/multiple-supervisor-domains/` creates this layout:
 
 | Domain ID | Role | TSM source | Address range |
 | --- | --- | --- | --- |
-| 1 | Trusted | Built into Shadowfax | `0x90000000-0x92000000` |
-| 2 | Untrusted boot domain | None | `0x8a000000-0x90000000` |
-| 3 | Trusted | Raw-staged by QEMU | `0x92000000-0x94000000` |
+| 1 | Trusted | Built into Shadowfax | `0x80800000-0x81000000` |
+| 2 | Untrusted boot domain | None | `0x81000000-0x82000000` |
+| 3 | Trusted | Raw-staged by QEMU | `0x82000000-0x82800000` |
+
+Domains 1 and 2 come from `platform/generic/device-tree.dts`; domain 3 and the
+larger `/memory` node are added by `test/multiple-supervisor-domains/device-tree.dts`,
+which `/include/`s the platform tree. Do not copy these addresses anywhere else:
+`scripts/layout.py` exports them from the compiled blob (see [BUILD.md](BUILD.md)).
 
 OpenSBI assigns supervisor-domain IDs in device-tree order, with domain zero
 reserved for the root domain. CoVE-H function IDs encode the destination domain
@@ -24,20 +29,22 @@ Initialize submodules and generate the development signing and DICE keys once:
 
 ```sh
 git submodule update --init --recursive
-make PYTHON='uv run --with cbor2' generate-keys
+uv venv && uv pip install -r requirements.txt && source .venv/bin/activate
+make generate-keys
 ```
 
 Build the position-independent TSM, firmware, signatures, DICE input, and
 platform artifacts, then run the custom launcher:
 
 ```sh
-make -B PYTHON='uv run --with cbor2' PLATFORM=generic firmware
-make -C test/multiple-supervisor-domains all
+make PLATFORM=generic firmware
 make -C test/multiple-supervisor-domains run
 ```
 
-The launcher generates its custom DTB and supplies QEMU loader devices for the
-external TSM ELF and signature. A successful run ends with:
+The launcher builds its own device tree through `scripts/layout.py`, which also
+writes the staged TSM's size into `shadowfax,tsm-image` and exports the staging
+addresses; the `run` recipe reads those back to place the QEMU loader devices
+for the external TSM ELF and signature. A successful run ends with:
 
 ```text
 [TVM] Hello world from trusted domain 1
@@ -77,7 +84,7 @@ embedded in the firmware with `shadowfax,load-tsm`:
 trusted-domain {
     compatible = "opensbi,domain,instance";
     regions = <&trusted_memory 0x3f>, <&trusted_devices 0x3f>;
-    next-addr = <0x0 0x90000000>;
+    next-addr = <0x0 0x80800000>;
     next-mode = <0x1>;
     shadowfax,tsm;
     shadowfax,load-tsm;
@@ -139,7 +146,7 @@ zeros the segment BSS, and applies `.rela.dyn` entries.
 
 The loader deliberately accepts only `R_RISCV_RELATIVE` relocations with symbol
 index zero. Relocation targets must fall inside a writable loaded segment, and
-the ELF entry and `_secure_init` must fall inside executable loaded segments.
+the ELF entry must fall inside an executable loaded segment.
 All loaded ranges must fit inside non-MMIO memory assigned to the destination
 domain with the requested ELF permissions.
 
@@ -161,29 +168,36 @@ already equals the domain's `next-addr`, but it cannot be reused at different
 domain start addresses. New external implementations should use the relocatable
 `ET_DYN` format.
 
-## Secure initialization ABI
+## TSM initialization
 
-An external ELF must retain `_secure_init` in its static symbol table and place
-it in an executable load segment. Shadowfax calls it after authentication,
-measurement, loading, and relocation:
+Shadowfax authenticates and loads the image, applies its PMP map, and places
+`TsmBootInfo` followed by the serialized attestation context in the final 32 KiB
+of the TSM's configured RAM region. The TSM must reserve this space separately
+from its stack and loaded segments.
 
-```c
-intptr_t _secure_init(uintptr_t boot_info_addr);
+Shadowfax enters the ELF `e_entry` address in S-mode with the boot record
+address in `a0` and an initialization marker in `a6/a7`. Interrupts are already
+disabled and paging is off. The entry sets up its own stack before calling Rust
+or C code. The same entry is used later for normal TSM startup; the marker
+selects initialization only during the first transfer.
+
+The boot record includes the domain ID, load base, measurement, and attestation
+context address and size.
+The context contains three little-endian `u32` length-prefixed byte strings:
+the CDI, platform token, and TSM token.
+
+Initialization checks that the TSM is not already initialized, copies the context
+into its own heap, and zeroizes the original serialized context. It then issues
+`ecall` with `a7=0x08000000`, `a6=0` (`INIT_DONE`), `a0` containing an SBI error
+code, and `a1` containing a reason from the shared header. Success is `(0, 0)`.
+Shadowfax's temporary trap handler restores its saved M-mode stack and returns
+to `boot_tsm()`. Unexpected traps fail initialization. OpenSBI services are not
+available during this sequence. Runtime CoVE calls still enter `_start`.
+
+Build and test through the root Makefile:
+
+```sh
+source .venv/bin/activate     # and the RISC-V toolchain on PATH
+make firmware
+make test
 ```
-
-The versioned C structure is defined in
-[`common/include/shadowfax_tsm.h`](common/include/shadowfax_tsm.h). It supplies:
-
-- the ABI magic, version, and structure size;
-- the destination supervisor-domain ID;
-- the ELF load base;
-- the SHA-512 image measurement;
-- the physical address and size of the serialized DICE context.
-
-The DICE context contains three length-prefixed byte strings: a little-endian
-`u32` CDI length and CDI, a little-endian `u32` platform-token length and CBOR
-token, then a little-endian `u32` TSM-token length and CBOR token.
-
-`_secure_init` must validate the versioned record, copy any referenced data it
-needs before returning, initialize its private state, and return zero. A
-nonzero result aborts Shadowfax domain initialization.

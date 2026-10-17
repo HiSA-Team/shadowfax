@@ -6,9 +6,24 @@ set pagination off
 # Connect to the target
 target remote localhost:1234
 
-# load firwmare and tsm debug symbols
+# Firmware symbols are linked at their run address.
 add-symbol-file target/riscv64imac-unknown-none-elf/debug/shadowfax
-add-symbol-file target/riscv64imac-unknown-none-elf/debug/tsm
+
+# The TSM is a position-independent ELF that Shadowfax relocates to the base of
+# its supervisor domain, so its symbols only resolve when offset by that base.
+# TSM_LOAD_ADDRESS comes from layout.sh (SHADOWFAX_REGION_TMEM_BASE).
+python
+import os
+
+tsm = "target/riscv64imac-unknown-none-elf/debug/tsm"
+base = os.environ.get("TSM_LOAD_ADDRESS")
+if base:
+    gdb.execute(f"add-symbol-file {tsm} -o {base}")
+else:
+    print("TSM_LOAD_ADDRESS is unset; TSM symbols will resolve at the wrong "
+          "addresses. See test/debug/README.md.")
+    gdb.execute(f"add-symbol-file {tsm}")
+end
 
 break tsm::main
 

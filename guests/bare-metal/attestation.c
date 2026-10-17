@@ -53,7 +53,6 @@ void sbi_putc(char c) {
     // Ideally DBCN write takes (num_bytes, addr_low, addr_high).
     // For single char, simple wrappers often exist.
     // Adapting to your previous snippet's style:
-    unsigned long base_addr = (unsigned long)&c;
     sbi_call(SBI_EXT_DBCN, 2, (unsigned long)c, 0, 0, 0, 0, 0);
 }
 

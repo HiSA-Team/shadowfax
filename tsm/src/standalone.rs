@@ -3,7 +3,7 @@ use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
 use crate::{
     hyper::{HypervisorState, LazySegment, LazyState},
-    println, TsmState, _secure_init, STATE,
+    println, TsmState, STATE,
 };
 
 /* Guest */
@@ -35,12 +35,12 @@ static GUEST_INITRD: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/guest.initrd
 pub fn test_tvm_bootstrap() -> ! {
     println!("[OLORIN] Starting Mapping TVM from ELF");
     // We'll simulate a dummy attestation context for testing.
-    let _ = _secure_init(0);
+    crate::boot::initialize(0).unwrap();
 
     let mut lock = STATE.lock();
     let state = lock.as_mut().expect("State not initialized");
 
-    // Assuming TSM is at 0x90000000-0x93FFFFFFFF, put TVM structures higher up.
+    // Assuming TSM is at 0x90000000-0x91FFFFFF, put TVM structures higher up.
     let tvm_page_table_addr = CONFIDENTIAL_MEMORY_START;
     let tvm_gpt_pages = GPT_SIZE / PAGE_SIZE;
     let tvm_state_addr = CONFIDENTIAL_MEMORY_START + GPT_SIZE;

@@ -31,15 +31,16 @@ a launcher:
 
 ```sh
 make guests
-make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
+make PLATFORM=generic firmware
 ```
 
 The fragment also supports an externally built `GUEST_ELF`, an optional
 `GUEST_DTB`, custom metadata size, split or contiguous guest memory, and the
 existing firmware, DTB, QEMU, build-directory, and load-address overrides.
 `GUEST_RAM_SIZE` selects the per-TVM guest RAM size in bytes and defaults to
-4 MiB. Tests hosting multiple TVMs set `GUEST_MEMORY_COUNT` so the linker
-reserves the total, while the latency test explicitly retains 256 MiB. The
+2 MiB. Tests hosting multiple TVMs set `GUEST_MEMORY_COUNT` so the linker
+reserves the total; a test needing a larger confidential region carries its own
+device tree instead, as `test/tvm-launch-latency/` does. The
 requested total must fit within the guest region described by the DTB. The
 size is part of a build stamp, so changing it rebuilds the affected launcher
 without requiring `make clean`.
