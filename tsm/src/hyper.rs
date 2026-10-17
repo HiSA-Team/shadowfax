@@ -738,7 +738,6 @@ impl HypervisorState {
             .position(|pm| {
                 pm.base_address == base_page_address
                     && (pm.size / PAGE_SIZE) == num_pages
-                    && pm.owner_id == owner
                     && pm.guest_id.is_none()
             })
             .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;

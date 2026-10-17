@@ -18,6 +18,6 @@ make -C test/security/converted-memory-isolation run
 A successful run ends with:
 
 ```text
-[ATTACK] load from 0x000000008c000000 raised an access fault
-[ATTACK] PASS: converted memory is not accessible
+[ATTACK] load from 0x0000000081800000 raised an access fault
+[HOST] PASS: converted memory is not accessible
 ```

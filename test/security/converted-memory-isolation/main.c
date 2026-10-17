@@ -6,7 +6,7 @@
 
 #define PAGE_SIZE               4096UL
 #define PAGE_DIRECTORY_SIZE     (64UL * PAGE_SIZE)
-#define SEGMENT_STAGING_SIZE    (2UL * 1024UL * 1024UL)
+#define SEGMENT_STAGING_SIZE    (64UL * 1024UL)
 #define SECRET_WORD             0xa5a5a5a5a5a5a5a5UL
 
 extern const unsigned char __guest_elf[];
@@ -129,7 +129,7 @@ static void read_converted_memory(void)
             puts("[ATTACK] load from ");
             puthex(address);
             puts(" raised an access fault\n");
-            puts("[ATTACK] PASS: converted memory is not accessible\n");
+            puts("[HOST] PASS: converted memory is not accessible\n");
             return;
         }
         if (value == SECRET_WORD) {

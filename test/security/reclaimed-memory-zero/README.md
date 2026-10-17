@@ -24,7 +24,7 @@ Expected final output:
 [ATTACK] PASS: no reclaimed TVM data is visible
 ```
 
-The test reads the 512 KiB metadata region and the 4 MiB guest RAM
+The test reads the 512 KiB metadata region and the 2 MiB guest RAM
 (`GUEST_RAM_SIZE` from the shared launcher). Reclaimed memory is cleared
 twice: once by the TSM when the TVM is destroyed, and once by Shadowfax when
 the pages return to the supervisor domain.

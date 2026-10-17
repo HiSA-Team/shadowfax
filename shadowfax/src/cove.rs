@@ -24,12 +24,11 @@ use heapless::Vec;
 use zeroize::Zeroize;
 
 use crate::{
-    _tee_stack_top,
     context::Context,
     domain::MemoryRegion,
     opensbi,
     platform::MAX_MEMORY_REGIONS,
-    state::{Allocation, BorrowKind, State, STATE},
+    state::{tee_stack_top, Allocation, BorrowKind, State, STATE},
 };
 
 macro_rules! cove_unpack_fid {
@@ -50,7 +49,8 @@ pub fn tee_handler_entry() -> ! {
     // - a7 as base pointer as we assume it as CoVE ID
     // - t0 as arithemtic register to calculate the offset
     "
-        la a7, {tee_stack}
+        la a7, {tee_stack_top}
+        ld a7, 0(a7)
         li t0, {scratch_size}
         add t0, t0, {context_size}
         sub a7, a7, t0
@@ -118,7 +118,8 @@ pub fn tee_handler_entry() -> ! {
     ",
     "
         // call tee handler
-        la sp, {tee_stack}
+        la sp, {tee_stack_top}
+        ld sp, 0(sp)
         add a0, a6, zero
         call {tee_handler}
 
@@ -126,7 +127,7 @@ pub fn tee_handler_entry() -> ! {
         add sp, a0, zero
         j {tee_handler_exit}
         ",
-        tee_stack = sym _tee_stack_top,
+        tee_stack_top = sym crate::state::TEE_STACK_TOP,
         covh_ext_id = const SBI_COVH_EXT_ID,
         context_size= const size_of::<Context>(),
         scratch_size = const TEE_SCRATCH_SIZE,
@@ -160,7 +161,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     let (dst_id, fid) = cove_unpack_fid!(fid);
 
     // Scratch space
-    let scratch_start = &raw const _tee_stack_top as *const u8 as usize;
+    let scratch_start = tee_stack_top();
     let base_ctx = scratch_start - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let scratch_ctx = base_ctx as *mut Context;
 
@@ -468,7 +469,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
 pub fn supd_handler_entry() -> ! {
     core::arch::naked_asm!(
     "
-        la a7, {tee_stack}
+        la a7, {tee_stack_top}
+        ld a7, 0(a7)
         li t0, {scratch_size}
         add t0, t0, {context_size}
         sub a7, a7, t0
@@ -535,14 +537,15 @@ pub fn supd_handler_entry() -> ! {
         sd t0, 40*8(sp)
     ",
     "
-        la sp, {tee_stack}
+        la sp, {tee_stack_top}
+        ld sp, 0(sp)
         add a0, a6, zero
         call {handler}
 
         add sp, a0, zero
         j {tee_handler_exit}
     ",
-        tee_stack = sym _tee_stack_top,
+        tee_stack_top = sym crate::state::TEE_STACK_TOP,
         supd_ext_id = const SBI_SUPD_EXT_ID,
         context_size= const size_of::<Context>(),
         scratch_size = const TEE_SCRATCH_SIZE,
@@ -555,7 +558,7 @@ pub fn supd_handler_entry() -> ! {
 fn supd_handler(fid: usize) -> usize {
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
-    let scratch_addr = &raw const _tee_stack_top as *const u8 as usize;
+    let scratch_addr = tee_stack_top();
     let dst_addr = scratch_addr - (TEE_SCRATCH_SIZE + size_of::<Context>());
     let dst_ctx = dst_addr as *mut Context;
     let src_id = unsafe {
@@ -679,7 +682,7 @@ fn program_domain_pmp(state: &State, domain_id: usize) {
     program_pmp_from_regions(&regions);
 }
 
-fn program_pmp_from_regions(regions: &[MemoryRegion]) {
+pub(crate) fn program_pmp_from_regions(regions: &[MemoryRegion]) {
     // Disable all managed entries first: no stale bootstrap access.
     for index in 0..MAX_MEMORY_REGIONS {
         write_pmpcfg(index, 0);

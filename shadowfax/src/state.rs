@@ -315,7 +315,6 @@ impl State {
             .any(|allocation| {
                 allocation.base_address == base_address
                     && allocation.num_pages == num_pages
-                    && allocation.owner_id == owner_id
                     && allocation.tsm_id == tsm_id
             })
             .then_some(())
@@ -404,7 +403,6 @@ impl State {
                     .position(|(_, allocation)| {
                         allocation.base_address == base_address
                             && allocation.num_pages == num_pages
-                            && allocation.owner_id == owner_id
                             && allocation.tsm_id == tsm_id
                     })
                     .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;

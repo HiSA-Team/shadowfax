@@ -3,7 +3,9 @@
 
 #include <stdint.h>
 
-#define COORDINATION_ADDRESS 0x96000000UL
+#include "layout.h"
+
+#define COORDINATION_ADDRESS SHADOWFAX_REGION_COORDINATION_MEMORY_BASE
 #define COORDINATION_MAGIC   0x5245434c41494d53UL
 
 enum test_status {
