@@ -129,7 +129,8 @@ __attribute__((noreturn)) void fail(const char *operation, long error)
     puts(" returned ");
     puthex((uintptr_t)error);
     puts("\n");
-    halt();
+    /* Power off so a failing test ends now instead of at the runner timeout. */
+    shutdown();
 }
 
 long require_ok(const char *operation, struct sbiret result)

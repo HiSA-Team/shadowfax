@@ -149,7 +149,7 @@ $(FDT_IMAGE): $(FDT_SOURCE) $(TSM_IMAGE) $(TSM_SIG) $(LAYOUT_PY)
 -include $(FW_ELF).d $(TSM_ELF).d $(LAYOUT_DIR)/layout.d
 
 ## test: build the firmware and run every QEMU test
-test: firmware
+test: firmware guests
 	scripts/run-tests.sh
 
 ## generate-keys: generate ed25519 signing keys and DICE initial keys in shadowfax/keys/

@@ -28,8 +28,8 @@ $(GUEST_LIB): $(LIB_OBJ)
 %.bin: %.out
 	$(OBJCOPY) -O binary $^ $@
 
-%.out: %.o vmstartup.o $(GUEST_LIB)
-	$(CC) $(LDFLAGS) -Tlinker.ld $^ -o $@
+%.out: %.o vmstartup.o $(GUEST_LIB) linker.ld
+	$(CC) $(LDFLAGS) -Tlinker.ld $(filter %.o %.a,$^) -o $@
 
 vmstartup.o: vmstartup.S
 	$(AS) $(ASFLAGS) -c $< -o $@

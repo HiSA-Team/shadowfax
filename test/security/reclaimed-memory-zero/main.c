@@ -8,9 +8,9 @@
 #define PAGE_DIRECTORY_SIZE     (64UL *  PAGE_SIZE)
 #define TVM_STATE_SIZE          PAGE_SIZE
 #ifndef GUEST_RAM_SIZE
-#define GUEST_RAM_SIZE          (64UL * 1024UL * 1024UL)
+#define GUEST_RAM_SIZE          (2UL * 1024UL * 1024UL)
 #endif
-#define SEGMENT_STAGING_SIZE    (2UL  *  1024UL * 1024UL)
+#define SEGMENT_STAGING_SIZE    (64UL * 1024UL)
 
 extern const unsigned char __guest_elf[];
 extern const char __guest_elf_size[];
@@ -50,8 +50,7 @@ static void assert_zeroed(const char *name, uintptr_t start, uintptr_t end)
             puts(": ");
             puthex(value);
             putchar('\n');
-            puts("halting");
-            halt();
+            fail("reclaimed TVM memory is not zeroed", -1);
         }
     }
 

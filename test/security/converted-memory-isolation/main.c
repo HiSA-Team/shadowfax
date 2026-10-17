@@ -136,7 +136,7 @@ static void read_converted_memory(void)
             puts("[ATTACK] FAIL: read TVM secret at ");
             puthex(address);
             putchar('\n');
-            halt();
+            fail("TVM secret was readable", -1);
         }
     }
     fail("converted memory was readable", -1);

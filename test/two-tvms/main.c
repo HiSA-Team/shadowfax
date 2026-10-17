@@ -8,9 +8,9 @@
 #define PAGE_DIRECTORY_SIZE        (16UL * PAGE_SIZE)
 #define TVM_METADATA_STRIDE        (2UL * PAGE_DIRECTORY_SIZE)
 #ifndef GUEST_RAM_SIZE
-#define GUEST_RAM_SIZE             (16UL * 1024UL * 1024UL)
+#define GUEST_RAM_SIZE             (2UL * 1024UL * 1024UL)
 #endif
-#define SEGMENT_STAGING_SIZE       (2UL * 1024UL * 1024UL)
+#define SEGMENT_STAGING_SIZE       (64UL * 1024UL)
 
 extern const unsigned char __guest_elf[];
 extern const char __guest_elf_size[];

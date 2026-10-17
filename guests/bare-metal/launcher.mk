@@ -138,6 +138,17 @@ $(GUEST_ELF): $(PAYLOAD_OBJECT) $(BUILD_DIR)/guest_startup.o \
 		$(BUILD_DIR)/guest_startup.o $(PAYLOAD_OBJECT) $(GUEST_LDFLAGS) -o $@
 endif
 
+# A prebuilt guest from guests/bare-metal (e.g. attestation.out) is relinked
+# by its own Makefile, so a linker-script or library change cannot leave the
+# embedded image stale.
+ifeq ($(strip $(PAYLOAD_SRC)),)
+ifneq ($(filter $(abspath $(GUEST_DIR))/%.out,$(abspath $(GUEST_ELF))),)
+$(GUEST_ELF): $(GUEST_DIR)/$(notdir $(GUEST_ELF:.out=.c)) $(GUEST_DIR)/linker.ld \
+		$(GUEST_DIR)/vmstartup.S $(GUEST_LIB)
+	$(MAKE) -C $(GUEST_DIR) $(notdir $(GUEST_ELF))
+endif
+endif
+
 $(ELF): $(OBJECTS) $(GUEST_DIR)/launcher.ld $(LAYOUT_MK) $(GUEST_LIB)
 	@mkdir -p $(@D)
 	@test -n '$(LAUNCHER_LOAD_ADDR)' -a -n '$(LAUNCHER_RAM_BASE)' -a -n '$(GUEST_REGION_BASE)' || { \
