@@ -589,6 +589,7 @@ dependencies = [
  "riscv",
  "sha2",
  "spin",
+ "zeroize",
 ]
 
 [[package]]

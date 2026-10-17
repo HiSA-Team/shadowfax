@@ -1,25 +1,41 @@
-include $(ROOT)/config.mk
-
 LAUNCHER_NAME       ?= launcher
 BUILD_DIR           ?= $(ROOT)/target/$(LAUNCHER_NAME)
+LAYOUT_DIR          ?= $(BUILD_DIR)
+
+include $(ROOT)/config.mk
+
 FIRMWARE            ?= $(ROOT)/target/$(TARGET_TRIPLET)/$(PROFILE)/shadowfax
-DICE_INPUT          ?= $(ROOT)/bin/shadowfax.dice.bin
-DTB                 ?= $(FDT_IMAGE)
-DTB_GENERATED       ?= 0
+DICE_INPUT          ?= $(BIN_DIR)/shadowfax.dice.bin
+TSM_IMAGE           ?= $(BIN_DIR)/tsm.elf
+TSM_SIG             ?= $(BIN_DIR)/tsm.bin.signature
+DTB                 ?= $(LAYOUT_DIR)/device-tree.dtb
+LAUNCHER_DTS        ?= device-tree.dts
 LAUNCHER_MAIN       ?= main.c
 LAUNCHER_METADATA   ?= 512K
-GUEST_RAM_SIZE      ?= 4194304
+GUEST_RAM_SIZE      ?= 2097152
 GUEST_MEMORY_COUNT  ?= 1
-GUEST_IN_RAM        ?= 1
 LAUNCHER_EXTRA_CFLAGS ?=
 LAUNCHER_EXTRA_CFLAGS += -DGUEST_RAM_SIZE=$(GUEST_RAM_SIZE)
 LAUNCHER_EXTRA_LDFLAGS ?=
 RUN_QEMU_FLAGS      ?= $(QEMU_FLAGS)
 LOAD_ADDR           ?=
 
+# Selectors are DTS node names in export form: uppercase, with '-' changed to '_'.
+LAUNCHER_RAM_BASE    = $(SHADOWFAX_REGION_$(LAUNCHER_RAM_REGION)_BASE)
+LAUNCHER_RAM_SIZE    = $(SHADOWFAX_REGION_$(LAUNCHER_RAM_REGION)_SIZE)
+LAUNCHER_LOAD_ADDR   = $(if $(LOAD_ADDR),$(LOAD_ADDR),$(SHADOWFAX_DOMAIN_$(LAUNCHER_DOMAIN)_ENTRY))
+GUEST_REGION_BASE    = $(SHADOWFAX_REGION_$(GUEST_RAM_REGION)_BASE)
+GUEST_REGION_SIZE    = $(SHADOWFAX_REGION_$(GUEST_RAM_REGION)_SIZE)
+
+SHADOWFAX_LOADERS    = \
+	-device loader,file=$(DICE_INPUT),addr=$(SHADOWFAX_DICE_ADDR),force-raw=on \
+	-device loader,file=$(TSM_IMAGE),addr=$(SHADOWFAX_TSM_IMAGE_ADDR),force-raw=on \
+	-device loader,file=$(TSM_SIG),addr=$(SHADOWFAX_TSM_SIGNATURE_ADDR),force-raw=on
+
 ELF                 ?= $(BUILD_DIR)/$(LAUNCHER_NAME)
 BIN                 ?= $(ELF).bin
 OBJECTS             := $(BUILD_DIR)/startup.o $(BUILD_DIR)/main.o
+DEPFLAGS            := -MMD -MP
 GUEST_CONFIG_STAMP  := $(BUILD_DIR)/.guest-memory
 GUEST_LIB_INPUTS    := $(GUEST_DIR)/lib/baremetal.c \
 	$(GUEST_DIR)/lib/baremetal_elf.c \
@@ -46,28 +62,51 @@ endif
 
 all: $(BIN)
 
-$(BUILD_DIR):
-	mkdir -p $@
+# Every example owns its device tree and the matching layout exports.
+$(LAYOUT_MK): $(LAUNCHER_DTS) $(TSM_IMAGE) $(TSM_SIG) $(LAYOUT_PY)
+	@mkdir -p $(@D)
+	$(PYTHON3) $(LAYOUT_PY) $(LAUNCHER_DTS) $(LAYOUT_DIR) --include $(ROOT) --artifacts $(BIN_DIR)
+$(DTB): $(LAYOUT_MK)
 
-$(FIRMWARE) $(DICE_INPUT):
-	@test -f $@ || { \
-		echo "missing staged platform artifact: $@" >&2; \
-		echo "run: make -C $(ROOT) PYTHON='uv run --with cbor2' PLATFORM=$(PLATFORM) firmware" >&2; \
-		exit 1; \
-	}
+# make remakes every included file before running any goal, so an unguarded
+# include would compile the tree just to delete it again -- and fail outright
+# when the staged artifacts the layout rule needs are absent. `clean` needs
+# nothing from the exports, so only include them when something else is asked.
+LAYOUT_NEEDED := $(filter-out clean,$(if $(MAKECMDGOALS),$(MAKECMDGOALS),all))
+ifneq (,$(LAYOUT_NEEDED))
+-include $(LAYOUT_DIR)/layout.d
+include $(LAYOUT_MK)
 
-ifeq ($(DTB_GENERATED),0)
-$(DTB):
-	@test -f $@ || { \
-		echo "missing staged platform artifact: $@" >&2; \
-		echo "run: make -C $(ROOT) PYTHON='uv run --with cbor2' PLATFORM=$(PLATFORM) firmware" >&2; \
-		exit 1; \
-	}
+# The DTS node names are this fragment's API: LAUNCHER_RAM_REGION := UMEM
+# resolves to $(SHADOWFAX_REGION_UMEM_BASE). A misspelled selector used to reach
+# the linker as an empty --defsym, so check each one against the names the tree
+# declares and say what those are.
+#
+# SHADOWFAX_REGIONS is empty on the pass that generates layout.mk: make reads
+# the makefiles, remakes the include, then restarts. Only check once the
+# exports are actually in hand, which is the restart pass.
+check-selector = $(if $(filter $(2),$(3)),,$(error $(LAUNCHER_NAME): \
+$(1)='$(2)' is not $(4) declared by $(LAUNCHER_DTS); available: $(3)))
+ifneq (,$(SHADOWFAX_RAM_REGIONS))
+$(call check-selector,LAUNCHER_RAM_REGION,$(LAUNCHER_RAM_REGION),$(SHADOWFAX_RAM_REGIONS),a RAM region)
+$(call check-selector,GUEST_RAM_REGION,$(GUEST_RAM_REGION),$(SHADOWFAX_RAM_REGIONS),a RAM region)
+ifeq (,$(strip $(LOAD_ADDR)))
+$(call check-selector,LAUNCHER_DOMAIN,$(LAUNCHER_DOMAIN),$(SHADOWFAX_DOMAINS),a domain)
 endif
+endif
+endif
+
+$(FIRMWARE) $(DICE_INPUT) $(TSM_IMAGE) $(TSM_SIG):
+	@test -f $@ || { \
+		echo "missing staged platform artifact: $@" >&2; \
+		echo "run: make -C $(ROOT) PLATFORM=$(PLATFORM) firmware" >&2; \
+		exit 1; \
+	}
 
 FORCE:
 
-$(GUEST_CONFIG_STAMP): FORCE | $(BUILD_DIR)
+$(GUEST_CONFIG_STAMP): FORCE
+	@mkdir -p $(@D)
 	@expected='$(GUEST_RAM_SIZE) $(GUEST_MEMORY_COUNT)'; \
 	actual=''; test ! -f $@ || read -r actual < $@; \
 	test "$$actual" = "$$expected" || printf '%s\n' "$$expected" > $@
@@ -75,71 +114,59 @@ $(GUEST_CONFIG_STAMP): FORCE | $(BUILD_DIR)
 $(GUEST_LIB): $(GUEST_LIB_INPUTS)
 	$(MAKE) -C $(GUEST_DIR) $(GUEST_LIB)
 
-$(BUILD_DIR)/startup.o: $(GUEST_DIR)/startup.S $(EMBED_INPUTS) | $(BUILD_DIR)
+$(BUILD_DIR)/startup.o: $(GUEST_DIR)/startup.S $(EMBED_INPUTS)
+	@mkdir -p $(@D)
 	$(CC) $(ASFLAGS) $(GUEST_ASFLAGS) $(EMBED_FLAGS) -c $< -o $@
 
-$(BUILD_DIR)/main.o: $(LAUNCHER_MAIN) $(GUEST_LIB) $(GUEST_CONFIG_STAMP) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(GUEST_CFLAGS) $(LAUNCHER_EXTRA_CFLAGS) -c $< -o $@
+$(BUILD_DIR)/main.o: $(LAUNCHER_MAIN) $(LAYOUT_MK) $(GUEST_LIB) $(GUEST_CONFIG_STAMP)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(GUEST_CFLAGS) $(LAUNCHER_EXTRA_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 ifneq ($(strip $(PAYLOAD_SRC)),)
-$(PAYLOAD_OBJECT): $(PAYLOAD_SRC) $(GUEST_LIB) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(GUEST_CFLAGS) $(PAYLOAD_CFLAGS) -c $< -o $@
+$(PAYLOAD_OBJECT): $(PAYLOAD_SRC) $(GUEST_LIB)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(GUEST_CFLAGS) $(PAYLOAD_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/guest_startup.o: $(GUEST_DIR)/vmstartup.S | $(BUILD_DIR)
+$(BUILD_DIR)/guest_startup.o: $(GUEST_DIR)/vmstartup.S
+	@mkdir -p $(@D)
 	$(CC) $(ASFLAGS) $(GUEST_ASFLAGS) -c $< -o $@
 
 $(GUEST_ELF): $(PAYLOAD_OBJECT) $(BUILD_DIR)/guest_startup.o \
 		$(GUEST_DIR)/linker.ld $(GUEST_LIB)
+	@mkdir -p $(@D)
 	$(CC) $(LDFLAGS) -T$(GUEST_DIR)/linker.ld \
 		$(BUILD_DIR)/guest_startup.o $(PAYLOAD_OBJECT) $(GUEST_LDFLAGS) -o $@
 endif
 
-$(ELF): $(OBJECTS) $(GUEST_DIR)/launcher.ld $(DTB) $(GUEST_LIB)
-	@set -- $$(fdtget -t x $(DTB) /chosen/shadowfax host-fdt); \
-	host_fdt_addr=$$((0x$$1 << 32 | 0x$$2)); \
-	set -- $$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem base); \
-	ram_base=$$((0x$$1 << 32 | 0x$$2)); \
-	ram_low_order=$$((0x$$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem order))); \
-	set -- $$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem-high base); \
-	guest_base=$$((0x$$1 << 32 | 0x$$2)); \
-	guest_order=$$((0x$$(fdtget -t x $(DTB) /chosen/opensbi-domains/umem-high order))); \
-	guest_region_size=$$((1 << guest_order)); \
-	if test "$(GUEST_IN_RAM)" = 1; then \
-		ram_low_end=$$((ram_base + (1 << ram_low_order))); \
-		test $$ram_low_end -eq $$guest_base || { \
-			echo "$(LAUNCHER_NAME) requires contiguous untrusted memory regions" >&2; \
-			exit 1; \
-		}; \
-		ram_size=$$((guest_base + guest_region_size - ram_base)); \
-	else \
-		ram_size=$$((1 << ram_low_order)); \
-	fi; \
+$(ELF): $(OBJECTS) $(GUEST_DIR)/launcher.ld $(LAYOUT_MK) $(GUEST_LIB)
+	@mkdir -p $(@D)
+	@test -n '$(LAUNCHER_LOAD_ADDR)' -a -n '$(LAUNCHER_RAM_BASE)' -a -n '$(GUEST_REGION_BASE)' || { \
+		echo "$(LAUNCHER_NAME): select a domain, launcher RAM region and guest RAM region from the DTS" >&2; \
+		exit 1; \
+	}
 	$(CC) $(LDFLAGS) $(LAUNCHER_EXTRA_LDFLAGS) \
-		-Wl,--defsym=SHADOWFAX_RAM_BASE=$$ram_base \
-		-Wl,--defsym=SHADOWFAX_RAM_SIZE=$$ram_size \
-		-Wl,--defsym=SHADOWFAX_HOST_FDT_ADDR=$$host_fdt_addr \
-		-Wl,--defsym=SHADOWFAX_GUEST_BASE=$$guest_base \
+		-Wl,--defsym=SHADOWFAX_RAM_BASE=$(LAUNCHER_RAM_BASE) \
+		-Wl,--defsym=SHADOWFAX_RAM_SIZE=$(LAUNCHER_RAM_SIZE) \
+		-Wl,--defsym=SHADOWFAX_FDT_ADDR=$(SHADOWFAX_FDT_ADDR) \
+		-Wl,--defsym=SHADOWFAX_GUEST_BASE=$(GUEST_REGION_BASE) \
 		-Wl,--defsym=SHADOWFAX_GUEST_UNIT_SIZE=$(GUEST_RAM_SIZE) \
 		-Wl,--defsym=SHADOWFAX_GUEST_SIZE=$(GUEST_RAM_SIZE)*$(GUEST_MEMORY_COUNT) \
-		-Wl,--defsym=SHADOWFAX_GUEST_REGION_SIZE=$$guest_region_size \
+		-Wl,--defsym=SHADOWFAX_GUEST_REGION_SIZE=$(GUEST_REGION_SIZE) \
 		-Wl,--defsym=SHADOWFAX_METADATA_SIZE=$(LAUNCHER_METADATA) \
-		-Wl,--defsym=SHADOWFAX_GUEST_IN_RAM=$(GUEST_IN_RAM) \
 		-T$(GUEST_DIR)/launcher.ld $(OBJECTS) $(GUEST_LDFLAGS) -o $@
 
 $(BIN): $(ELF)
+	@mkdir -p $(@D)
 	$(OBJCOPY) -O binary $< $@
 
-run: $(BIN) $(FIRMWARE) $(DICE_INPUT) $(DTB)
-	@set -- $$(fdtget -t x $(DTB) /chosen/shadowfax dice-input); \
-	dice_input_addr=$$((0x$$1 << 32 | 0x$$2)); \
-	set -- $$(fdtget -t x $(DTB) /chosen/opensbi-domains/untrusted-domain next-addr); \
-	boot_domain_address=$$((0x$$1 << 32 | 0x$$2)); \
-	load_addr='$(LOAD_ADDR)'; test -n "$$load_addr" || load_addr="$$boot_domain_address"; \
+run: $(BIN) $(FIRMWARE) $(DICE_INPUT) $(TSM_IMAGE) $(TSM_SIG) $(DTB) $(LAYOUT_MK)
 	$(QEMU) $(RUN_QEMU_FLAGS) \
 		-bios $(FIRMWARE) \
 		-dtb $(DTB) \
-		-device loader,file=$(DICE_INPUT),addr=$$dice_input_addr,force-raw=on \
-		-device loader,file=$(BIN),addr=$$load_addr,force-raw=on
+		$(SHADOWFAX_LOADERS) \
+		-device loader,file=$(BIN),addr=$(LAUNCHER_LOAD_ADDR),force-raw=on
 
 clean:
 	$(RM) -r $(BUILD_DIR)
+
+-include $(OBJECTS:.o=.d) $(PAYLOAD_OBJECT:.o=.d)

@@ -4,6 +4,7 @@ ENTRY(_start)
 MEMORY
 {
     RAM (rwx) : ORIGIN = SHADOWFAX_RAM_BASE, LENGTH = SHADOWFAX_RAM_SIZE
+    GUEST (rw) : ORIGIN = SHADOWFAX_GUEST_BASE, LENGTH = SHADOWFAX_GUEST_REGION_SIZE
 }
 
 SECTIONS
@@ -45,11 +46,11 @@ SECTIONS
         __confidential_metadata_end = .;
     } > RAM
 
-    .confidential_guest SHADOWFAX_GUEST_BASE (NOLOAD) : {
+    .confidential_guest (NOLOAD) : {
         __confidential_guest_start = .;
         . += SHADOWFAX_GUEST_SIZE;
         __confidential_guest_end = .;
-    }
+    } > GUEST
 
     __image_end = .;
 
@@ -59,9 +60,17 @@ SECTIONS
     }
 }
 
-ASSERT(__confidential_metadata_end <= SHADOWFAX_HOST_FDT_ADDR,
+/* The launcher writes its own RAM and hands GUEST to the TSM, so the two must
+   be disjoint. layout.py rejects overlapping DTS memregions, but nothing stops
+   a launcher naming one region for both, and ld does not check MEMORY regions
+   against each other. State it here rather than inferring it from the FDT
+   asserts below. */
+ASSERT(ORIGIN(GUEST) >= ORIGIN(RAM) + LENGTH(RAM) ||
+       ORIGIN(RAM) >= ORIGIN(GUEST) + LENGTH(GUEST),
+       "launcher RAM region and confidential guest region overlap")
+ASSERT(__confidential_metadata_end <= SHADOWFAX_FDT_ADDR,
        "launcher overlaps the device tree")
-ASSERT(!SHADOWFAX_GUEST_IN_RAM || SHADOWFAX_HOST_FDT_ADDR < SHADOWFAX_GUEST_BASE,
+ASSERT(SHADOWFAX_FDT_ADDR < SHADOWFAX_GUEST_BASE,
        "device tree must precede confidential guest RAM")
 ASSERT(__confidential_guest_start == SHADOWFAX_GUEST_BASE,
        "guest confidential RAM starts at the wrong address")
@@ -73,8 +82,3 @@ ASSERT(SHADOWFAX_GUEST_UNIT_SIZE > 0 &&
 ASSERT(SHADOWFAX_METADATA_SIZE > 0 &&
        (SHADOWFAX_METADATA_SIZE & (SHADOWFAX_METADATA_SIZE - 1)) == 0,
        "launcher metadata size must be a power of two")
-ASSERT(SHADOWFAX_GUEST_SIZE <= SHADOWFAX_GUEST_REGION_SIZE,
-       "requested guest RAM exceeds the DTB guest region")
-ASSERT(!SHADOWFAX_GUEST_IN_RAM ||
-       __confidential_guest_end <= ORIGIN(RAM) + LENGTH(RAM),
-       "launcher exceeds untrusted-domain RAM")

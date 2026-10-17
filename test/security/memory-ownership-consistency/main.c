@@ -32,7 +32,7 @@ static uintptr_t create_tvm_with_owned_metadata(void)
     ret = sbi_call(SBI_EXT_SUPD, SBI_SUPD_GET_ACTIVE,
                    0, 0, 0, 0, 0, 0);
     require_ok("GET_ACTIVE_DOMAINS", ret);
-    if (((uintptr_t)ret.value & 0x3) != 0x3)
+    if (((uintptr_t)ret.value & 0x2) == 0)
         fail("TSM domain is not active", -1);
 
     clear_bytes(__confidential_metadata_start,

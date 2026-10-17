@@ -1,18 +1,20 @@
-/include/ "platform/generic/device-tree.dts"
+/dts-v1/;
 
-/* The generic TSM remains domain 1 and is reduced to its own 32 MiB. */
-&tmem {
-	base = <0x0 0x90000000>;
-	order = <25>;
-};
+/include/ "platform/generic/base.dtsi"
+/include/ "platform/generic/default-domains.dtsi"
 
 &tdomain {
 	shadowfax,tsm;
 };
 
+/* The second trusted domain and its staging live above the generic map. */
+&{/memory@80000000} {
+	reg = <0x00 0x80000000 0x00 0x04000000>;
+};
+
 &{/reserved-memory} {
-	tsm_staging: tsm-images@94000000 {
-		reg = <0x0 0x94000000 0x0 0x02000000>;
+	tsm_staging: tsm-images@82900000 {
+		reg = <0x0 0x82900000 0x0 0x00220000>;
 		no-map;
 	};
 };
@@ -24,8 +26,8 @@
 &{/chosen/opensbi-domains} {
 	tmem_secondary: tmem-secondary {
 		compatible = "opensbi,domain,memregion";
-		base = <0x0 0x92000000>;
-		order = <25>;
+		base = <0x0 0x82000000>;
+		order = <23>;
 	};
 
 	tdomain_secondary: trusted-domain-secondary {
@@ -33,11 +35,11 @@
 		possible-harts = <&cpu0>;
 		regions = <&tmem_secondary 0x3f>, <&tdevices 0x3f>;
 		next-arg1 = <0x0 0x0>;
-		next-addr = <0x0 0x92000000>;
+		next-addr = <0x0 0x82000000>;
 		next-mode = <0x1>;
 		shadowfax,tsm;
-		shadowfax,tsm-image = <0x0 EXTERNAL_TSM_ADDR 0x0 EXTERNAL_TSM_SIZE>;
-		shadowfax,tsm-signature = <0x0 EXTERNAL_TSM_SIGNATURE_ADDR 0x0 EXTERNAL_TSM_SIGNATURE_SIZE>;
+		shadowfax,tsm-image = <0x0 0x82900000 0x0 0x0>;
+		shadowfax,tsm-signature = <0x0 0x82b1f000 0x0 0x0>;
 		shadowfax,trusts = <&udomain>;
 	};
 };

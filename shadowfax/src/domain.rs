@@ -1,7 +1,7 @@
 use alloc::string::String;
 use common::{
     attestation::{DiceLayer, TsmAttestationContext},
-    tsm_abi::{TsmBootInfo, TSM_BOOT_ABI_VERSION, TSM_BOOT_MAGIC},
+    tsm_abi::{TsmBootInfo, TSM_BOOT_ABI_VERSION, TSM_BOOT_BUFFER_SIZE, TSM_BOOT_MAGIC},
 };
 use ed25519_compact::Signature;
 use elf::{
@@ -20,18 +20,31 @@ use crate::{
 };
 
 mod tsm {
-    #[link_section = ".rodata"]
-    pub static DEFAULT_TSM: &[u8] = include_bytes!("../../bin/tsm.elf");
-
-    #[link_section = ".rodata"]
-    pub static DEFAULT_TSM_SIGN: &[u8] = include_bytes!("../../bin/tsm.bin.signature");
-
-    #[link_section = ".rodata"]
     pub static DEFAULT_TSM_PUBKEY: &[u8] = include_bytes!("../keys/publickey.pem");
+
+    static mut DEFAULT_TSM: &[u8] = &[];
+    static mut DEFAULT_TSM_SIGN: &[u8] = &[];
+
+    pub unsafe fn initialize(image: &'static [u8], signature: &'static [u8]) {
+        DEFAULT_TSM = image;
+        DEFAULT_TSM_SIGN = signature;
+    }
+
+    pub fn image() -> (&'static [u8], &'static [u8]) {
+        unsafe { (DEFAULT_TSM, DEFAULT_TSM_SIGN) }
+    }
 }
 
-pub fn default_tsm_measurement() -> [u8; 64] {
-    Sha512::digest(tsm::DEFAULT_TSM).into()
+pub fn initialize_default_tsm(
+    image: crate::platform::AddressRange,
+    signature: crate::platform::AddressRange,
+) {
+    unsafe {
+        tsm::initialize(
+            core::slice::from_raw_parts(image.base as *const u8, image.size),
+            core::slice::from_raw_parts(signature.base as *const u8, signature.size),
+        );
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -65,7 +78,7 @@ pub fn create_confidential_domain(
     platform_attestation: &common::attestation::PlatformAttestationContext,
 ) -> anyhow::Result<Domain> {
     let (image, signature) = match config.tsm_source {
-        TsmSource::Builtin => (tsm::DEFAULT_TSM, tsm::DEFAULT_TSM_SIGN),
+        TsmSource::Builtin => tsm::image(),
         TsmSource::External { image, signature } => unsafe {
             (
                 core::slice::from_raw_parts(image.base as *const u8, image.size),
@@ -100,14 +113,18 @@ pub fn create_confidential_domain(
 
     let load_bias = load_tsm_elf(image, domain.next_addr, &domain.memory_regions)?;
 
-    // Boot and initialize secure_init safely
-    boot_tsm(
+    // Initialize the authenticated image in S-mode before publishing the domain.
+    let sscratch = boot_tsm(
         image,
         load_bias,
         config.id,
+        &domain.memory_regions,
         measurement,
         attestation_context,
     )?;
+    unsafe {
+        (*tsm_ctx).sscratch = sscratch;
+    }
 
     Ok(domain)
 }
@@ -235,82 +252,95 @@ fn range_allowed(start: usize, end: usize, permissions: u8, regions: &[MemoryReg
     })
 }
 
-/// Resolve the verified secure-init symbol and invoke its versioned C ABI.
+/// Initialize the loaded TSM in S-mode and wait for its INIT_DONE ECALL.
 fn boot_tsm(
     data: &[u8],
     load_bias: usize,
     domain_id: usize,
+    regions: &[MemoryRegion],
     measurement: [u8; 64],
     attestation_context: TsmAttestationContext,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<usize> {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(data)
         .map_err(|error| anyhow::anyhow!("cannot parse TSM ELF: {error:?}"))?;
 
-    // get static symbol table instead of dynsym
-    let (symtab, strtab) = elf
-        .symbol_table()
-        .map_err(|error| anyhow::anyhow!("cannot inspect TSM symbols: {error:?}"))?
-        .ok_or_else(|| anyhow::anyhow!("TSM ELF has no symbol table"))?;
+    let entry = load_bias
+        .checked_add(elf.ehdr.e_entry as usize)
+        .ok_or_else(|| anyhow::anyhow!("TSM init address overflows"))?;
 
-    // find symbol by iterating static symbols
-    let name = b"_secure_init";
-
-    let mut found = None;
-    for sym in symtab {
-        if let Ok(a) = strtab.get(sym.st_name as usize) {
-            if a.as_bytes() == name {
-                found = Some(sym);
-                break;
-            }
-        }
+    // The TSM reserves the last 32 KiB of its RAM region for the boot record.
+    let region = regions
+        .iter()
+        .find(|region| {
+            !region.mmio
+                && entry >= region.base_address
+                && (entry - region.base_address) < (1usize << region.order)
+        })
+        .ok_or_else(|| anyhow::anyhow!("TSM init has no RAM region"))?;
+    let region_end = region
+        .base_address
+        .checked_add(1usize << region.order)
+        .ok_or_else(|| anyhow::anyhow!("TSM RAM range overflows"))?;
+    let buffer = region_end
+        .checked_sub(TSM_BOOT_BUFFER_SIZE)
+        .ok_or_else(|| anyhow::anyhow!("TSM RAM too small for boot record"))?;
+    anyhow::ensure!(
+        buffer >= region.base_address && region.permissions & 6 == 6,
+        "TSM boot buffer must be in writable RAM"
+    );
+    let segments = elf
+        .segments()
+        .ok_or_else(|| anyhow::anyhow!("TSM ELF has no segments"))?;
+    for ph in segments
+        .iter()
+        .filter(|ph| ph.p_type == PT_LOAD && ph.p_memsz != 0)
+    {
+        let start = load_bias + ph.p_vaddr as usize;
+        let end = start + ph.p_memsz as usize;
+        anyhow::ensure!(
+            end <= buffer || start >= region_end,
+            "TSM boot buffer overlaps loaded image"
+        );
     }
 
-    let sym = found.ok_or_else(|| anyhow::anyhow!("cannot find _secure_init"))?;
-
-    let mut encoded_context = attestation_context.to_raw_bytes();
-    let boot_info = TsmBootInfo {
+    let mut bytes = attestation_context.to_raw_bytes();
+    if bytes.len() > TSM_BOOT_BUFFER_SIZE - size_of::<TsmBootInfo>() {
+        bytes.zeroize();
+        anyhow::bail!("TSM attestation context exceeds boot buffer");
+    }
+    let info = TsmBootInfo {
         magic: TSM_BOOT_MAGIC,
         abi_version: TSM_BOOT_ABI_VERSION,
         struct_size: size_of::<TsmBootInfo>() as u32,
         domain_id: domain_id as u64,
         load_base: load_bias as u64,
         measurement,
-        dice_context_addr: encoded_context.as_ptr() as u64,
-        dice_context_size: encoded_context.len() as u64,
+        dice_context_addr: (buffer + size_of::<TsmBootInfo>()) as u64,
+        dice_context_size: bytes.len() as u64,
     };
-    let init_address = load_bias
-        .checked_add(sym.st_value as usize)
-        .ok_or_else(|| anyhow::anyhow!("secure-init address overflows"))?;
-    let init_is_executable = elf
-        .segments()
-        .ok_or_else(|| anyhow::anyhow!("TSM ELF has no program headers"))?
-        .iter()
-        .filter(|ph| ph.p_type == PT_LOAD && ph.p_flags & PF_X != 0)
-        .any(|ph| {
-            let Some(start) = load_bias.checked_add(ph.p_vaddr as usize) else {
-                return false;
-            };
-            let Some(end) = start.checked_add(ph.p_memsz as usize) else {
-                return false;
-            };
-            init_address >= start && init_address < end
-        });
-    if !init_is_executable {
-        encoded_context.zeroize();
-        return Err(anyhow::anyhow!(
-            "_secure_init is not in an executable segment"
-        ));
-    }
-    unsafe {
-        let secure_init_fn =
-            core::mem::transmute::<usize, extern "C" fn(usize) -> isize>(init_address);
-        if secure_init_fn(&boot_info as *const TsmBootInfo as usize) != 0 {
-            encoded_context.zeroize();
-            return Err(anyhow::anyhow!("TSM secure initialization failed"));
-        }
-    }
-    encoded_context.zeroize();
-    Ok(())
+    crate::cove::program_pmp_from_regions(regions);
+    let mut sscratch = 0;
+    let result = unsafe {
+        (buffer as *mut TsmBootInfo).write(info);
+        core::ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            info.dice_context_addr as *mut u8,
+            bytes.len(),
+        );
+        bytes.zeroize();
+        core::arch::asm!("sfence.vma", "fence rw, rw");
+        let result = crate::boot::enter(entry, buffer, &mut sscratch);
+        // No PMP mappings existed before early boot. OpenSBI sets them up later.
+        core::arch::asm!("csrw pmpcfg0, zero", "csrw pmpcfg2, zero", "sfence.vma");
+        result
+    };
+    anyhow::ensure!(
+        result.a0 == 0,
+        "TSM initialization failed: error {}, reason {}",
+        result.a0,
+        result.a1
+    );
+    Ok(sscratch)
 }
 
 /// THIS FUNCTION SHOULD NOT EXISTS. IT IS A TEMPORARY FIX SINCE THE ED25519 LIBRARY DEPENDS ON

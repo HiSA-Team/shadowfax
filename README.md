@@ -44,17 +44,24 @@ Generate development keys once, build the guest workload, stage the firmware art
 the launcher:
 
 ```sh
-make PYTHON='uv run --with cbor2' generate-keys
+uv venv && uv pip install -r requirements.txt && source .venv/bin/activate
+make generate-keys
 make guests
-make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
+make PLATFORM=generic firmware
 make -C test/standalone-tvm-launcher run
 ```
 
 The last command starts QEMU. It prints the TVM attestation evidence and finishes with
 `[HOST] Program completed. Halting`; stop QEMU with <kbd>Ctrl</kbd>+<kbd>C</kbd> afterwards.
 `firmware` deliberately stages the TSM, firmware, signature, DICE input, and
-`bin/generic/device-tree.dtb` before the launcher is built. Test launchers consume those artifacts
-instead of rebuilding them implicitly.
+`target/platform/generic/device-tree.dtb` before the launcher is built. Test launchers consume those
+artifacts instead of rebuilding them implicitly.
+
+Every platform address is written once, in the device tree source. `scripts/layout.py` compiles
+that tree, fills in the size of the signed TSM image, checks the memory map, and exports the
+addresses as `layout.mk`, `layout.sh`, `layout.h` and `layout.json` beside the blob. Makefiles,
+linker scripts, C headers and QEMU flags read those instead of re-deriving anything with
+`fdtget`. See [BUILD.md](BUILD.md).
 
 ## Repository structure
 
@@ -64,8 +71,10 @@ instead of rebuilding them implicitly.
 - `guests/bare-metal/`: freestanding TVM workloads, including the attestation guest.
 - `guests/linux/`: Linux TVM kernel, BusyBox, and device-tree source configurations.
 - `test/`: standalone launchers, functional tests, GDB scripts, and security scenarios.
-- `scripts/`: host setup, DICE tooling, and the Linux/QEMU launcher.
-- `bin/` and `target/`: generated firmware, signatures, payloads, and build artifacts.
+- `scripts/`: host setup, DICE tooling, `layout.py`, and the Linux/QEMU launcher.
+- `target/`: all generated output. `target/artifacts/` holds the firmware, TSM image and
+  signature, and DICE input; `target/platform/<name>/` holds the compiled device tree and the
+  `layout.{mk,sh,h,json}` exports generated from it by `scripts/layout.py`.
 
 ## Architecture
 
@@ -122,9 +131,9 @@ Build those artifacts using the committed configurations and instructions in
 [`guests/linux/README.md`](guests/linux/README.md), then run:
 
 ```sh
-make -B tsm CARGO_FLAGS="--features standalone"
+make tsm-standalone
 qemu-system-riscv64 -M virt -nographic -smp 1 -m 1G \
-    -kernel target/riscv64imac-unknown-none-elf/debug/tsm
+    -kernel target/standalone/riscv64imac-unknown-none-elf/debug/tsm
 ```
 
 The `standalone` feature is needed because, normally, the TSM behaves like a `trap-handler`
@@ -157,14 +166,29 @@ ssh -p 2222 root@127.0.0.1
 ## Common commands
 
 ```sh
-make help                                      # list supported targets
-make build-info                                # show detected build settings
-make PYTHON='uv run --with cbor2' firmware      # stage firmware and the platform DTB
-make PYTHON='uv run --with cbor2' test          # run the QEMU boot integration test
-make PYTHON='uv run --with cbor2' qemu-run      # boot the firmware directly
+make help                                   # list supported targets
+make build-info                             # show detected build settings
+make firmware                               # stage firmware, TSM, DICE input and the platform DTB
+make test                                   # run every QEMU test (scripts/run-tests.sh)
+make -C test/standalone-tvm-launcher run    # boot the platform through a launcher
 ```
 
-See [DEBUG.md](DEBUG.md) for GDB-driven CoVE scenarios.
+The root Makefile stages artifacts; it does not run them. Every QEMU invocation lives under
+`test/`, which reads the addresses it needs from the generated `layout.mk`.
+
+### Further reading
+
+- [BUILD.md](BUILD.md): how the device tree, `scripts/layout.py` and the generated
+  `layout.{mk,sh,h,json}` exports fit together, plus the platform memory map and the rules it
+  must satisfy.
+- [DEBUG.md](DEBUG.md):  the two-terminal QEMU + GDB workflow.
+- [test/debug/README.md](test/debug/README.md): the GDB CoVE scenarios: how a scenario is
+  built from `Domain`/`Step`/`Runner`, which addresses they need, and how to write your own.
+- [MULTIPLE_TSMS.md](MULTIPLE_TSMS.md): running a separate TSM per trusted supervisor domain.
+
+`make test` builds the firmware and runs every scenario that boots QEMU and shuts itself down,
+including the functional boot test; `scripts/run-tests.sh <pattern>` runs a subset. Logs land in
+`target/test-logs/`.
 
 ## Contributing and references
 

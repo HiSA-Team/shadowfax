@@ -66,8 +66,20 @@ pub mod tsm_abi {
     pub const TSM_BOOT_MAGIC: u64 = 0x5348_4457_5453_4d31; // "SHDWTSM1"
     pub const TSM_BOOT_ABI_VERSION: u32 = 1;
     pub const TSM_MEASUREMENT_SIZE: usize = 64;
+    pub const TSM_BOOT_BUFFER_SIZE: usize = 32 * 1024;
+
+    // Project-private experimental SBI extension, used only during early boot.
+    pub const SBI_SHADOWFAX_BOOT_EXT_ID: usize = 0x0800_0000;
+    pub const SBI_SHADOWFAX_INIT_DONE: usize = 0;
+
+    // a0 contains a standard SBI error; a1 contains one of these reason codes.
+    pub const BOOT_ALREADY_INITIALIZED: isize = 1;
+    pub const BOOT_INVALID_INFO: isize = 2;
+    pub const BOOT_INVALID_CONTEXT: isize = 3;
+    pub const BOOT_UNEXPECTED_TRAP: isize = 5;
 
     #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct TsmBootInfo {
         pub magic: u64,
         pub abi_version: u32,

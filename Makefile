@@ -4,16 +4,15 @@
 #
 # - RV_PREFIX:           specify with the path to the target riscv toolchain prefix
 # - PLATFORM:            target platform, this is used for OpenSBI initialization
-# - GDB_COVE_SCRIPT:     path to the example to run
-# - QEMU_DEVICES:        additional QEMU device/loader arguments
+#
+# This Makefile stages artifacts; it does not run them. Launch the platform
+# through a launcher under test/, for example `make -C test/standalone-tvm-launcher run`.
 #
 # Usage:
 #   make help # discover available targets
-#   make qemu-run # runs the system on qemu (DEBUG=1 to start gdb server and wait)
 #
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 
-PYTHON            ?= python
 RUSTFLAGS         ?= -C target-feature=+h
 HOST_ARCHITECTURE := $(shell uname -m)
 HOST_TRIPLET      := $(shell rustc -vV | awk '/^host:/ { print $$2 }')
@@ -22,15 +21,18 @@ RV_PREFIX         ?= riscv64-unknown-linux-$(HOST_LIBC)-
 
 include config.mk
 
+# Every launcher under test/ owns a Makefile that includes launcher.mk; each
+# one knows how to remove its own build directory.
+LAUNCHER_DIRS              := $(patsubst %/,%,$(sort $(dir $(wildcard test/*/Makefile test/*/*/Makefile))))
+LAUNCHER_CLEAN             := $(addsuffix .clean,$(LAUNCHER_DIRS))
+
 OPENSBI_VERSION            := $(shell git -C shadowfax/opensbi describe)
 OPENSBI_PATCH              := shadowfax/opensbi-sbi-domain-change-active.diff
-QEMU_DEVICES               ?=
 
 # Files and Directories
-BIN_DIR                     = bin
-TARGET_DIR                  = target/$(TARGET_TRIPLET)/$(PROFILE)
+BIN_DIR                     = target/artifacts
+TARGET_DIR                  = $(CURDIR)/target/$(TARGET_TRIPLET)/$(PROFILE)
 KEYS_DIR                    = shadowfax/keys
-TEST_DIR                    = test/functional/
 CARGO_FLAGS                 =
 
 FW_ELF                      = $(TARGET_DIR)/shadowfax
@@ -39,6 +41,8 @@ TSM_ELF                     = $(TARGET_DIR)/tsm
 TSM_IMAGE                   = $(BIN_DIR)/tsm.elf
 TSM_SIG                     = $(BIN_DIR)/tsm.bin.signature
 TSM_RUSTFLAGS               = $(RUSTFLAGS) -C relocation-model=pic -C link-arg=-pie
+TSM_STANDALONE_DIR          = $(CURDIR)/target/standalone
+TSM_STANDALONE              = $(TSM_STANDALONE_DIR)/$(TARGET_TRIPLET)/$(PROFILE)/tsm
 
 # Keys and Dice files
 DICE_INPUT                  = $(BIN_DIR)/shadowfax.dice.bin
@@ -49,8 +53,6 @@ DICE_PLATFORM_PUBLIC_KEY    = $(KEYS_DIR)/root_of_trust_pub.bin
 DICE_PLATFORM_PRIVATE_KEY   = $(KEYS_DIR)/root_of_trust_priv.bin
 
 # Debug variables for QEMU
-GDB_SETTINGS_SCRIPT         := test/debug/gdbinit
-GDB_COVE_SCRIPT             ?= test/debug/gdb_covh_get_tsm_info.py
 
 # Needed for OpenSBI
 export RV_PREFIX
@@ -72,7 +74,8 @@ endif
 export LLVM_CONFIG_PATH     := $(CURDIR)/scripts/llvm-config.sh
 endif
 
-.PHONY: all clean firmware tsm test generate-keys guests help opensbi-patch
+.PHONY: all clean firmware tsm tsm-standalone test generate-keys guests help opensbi-patch \
+	$(LAUNCHER_CLEAN)
 
 ## all: build tsm, firmware, attestation payload, and platform DTB
 all: guests firmware build-info
@@ -82,7 +85,8 @@ guests:
 	$(MAKE) -C guests/
 
 ## firmware: builds the firmware, TSM, DICE input, and platform DTB
-firmware: opensbi-patch $(DICE_INPUT) $(FDT_IMAGE)
+firmware: opensbi-patch $(PRIVATE_KEY) $(DICE_PLATFORM_PRIVATE_KEY) \
+	$(DICE_PLATFORM_PUBLIC_KEY) $(TSM_SIG) $(DICE_INPUT) $(FDT_IMAGE)
 
 opensbi-patch: $(OPENSBI_PATCH)
 	@patch=$$(realpath $<); \
@@ -102,61 +106,70 @@ opensbi-patch: $(OPENSBI_PATCH)
 ## tsm: build the TSM and signs it
 tsm: $(TSM_SIG)
 
-# create attestation input (CDI_ID and Certificate) according to DICE specification
-$(DICE_INPUT): $(FW_BIN) | $(BIN_DIR)
-	$(PYTHON) scripts/dice_tool.py generate-platform-token \
-		--uds-private-key $(DICE_PLATFORM_PRIVATE_KEY) \
-		--uds-public-key $(DICE_PLATFORM_PUBLIC_KEY) \
-		$< $@
+## tsm-standalone: build the TSM as a self-booting QEMU payload
+# Built into its own target directory so the `standalone` feature can never
+# reach the signed image that `firmware` stages.
+tsm-standalone:
+	RUSTFLAGS='$(TSM_RUSTFLAGS)' cargo -Z build-std=core,alloc build \
+		--target $(TARGET_TRIPLET) --target-dir $(TSM_STANDALONE_DIR) \
+		-p tsm --features standalone
+	@echo "standalone TSM: $(TSM_STANDALONE)"
 
-$(FDT_IMAGE): $(FDT_SOURCE)
-	mkdir -p $(dir $@)
-	dtc -I dts -O dtb -o $@ $<
+# Shadowfax: ELF -> flat image -> DICE measurement input.
+# Cargo emits make-compatible dep-info beside each binary; including it below
+# gives these rules the real Rust source list, so nothing needs `make -B`.
+$(FW_ELF): Cargo.lock shadowfax/Cargo.toml shadowfax/memory.x
+	cargo build --target $(TARGET_TRIPLET) -p shadowfax $(CARGO_FLAGS)
 
 $(FW_BIN): $(FW_ELF) | $(BIN_DIR)
 	$(OBJCOPY) -O binary $< $@
 
-$(FW_ELF): $(TSM_IMAGE) $(TSM_SIG)
-	cargo build --target $(TARGET_TRIPLET) -p shadowfax $(CARGO_FLAGS)
+$(DICE_INPUT): $(FW_BIN) $(DICE_PLATFORM_PRIVATE_KEY) $(DICE_PLATFORM_PUBLIC_KEY) | $(BIN_DIR)
+	$(PYTHON3) scripts/dice_tool.py generate-platform-token \
+		--uds-private-key $(DICE_PLATFORM_PRIVATE_KEY) \
+		--uds-public-key $(DICE_PLATFORM_PUBLIC_KEY) \
+		$< $@
 
-$(TSM_IMAGE): $(TSM_ELF) | $(BIN_DIR)
-	cp $< $@
-
-$(TSM_SIG): $(TSM_IMAGE)
-	openssl pkeyutl -sign -inkey $(PRIVATE_KEY) -in $< -out $@
-
-$(TSM_ELF):
+# TSM: position-independent ELF -> stripped image -> detached signature.
+$(TSM_ELF): Cargo.lock tsm/Cargo.toml tsm/memory.x
 	RUSTFLAGS='$(TSM_RUSTFLAGS)' cargo -Z build-std=core,alloc build \
 		--target $(TARGET_TRIPLET) -p tsm $(CARGO_FLAGS)
 
-## test: build and run the tests
+$(TSM_IMAGE): $(TSM_ELF) | $(BIN_DIR)
+	$(OBJCOPY) --strip-all $< $@
+
+$(TSM_SIG): $(TSM_IMAGE) $(PRIVATE_KEY)
+	openssl pkeyutl -sign -inkey $(PRIVATE_KEY) -in $< -out $@
+
+# Platform: layout.py compiles the tree, writes the staged artifact sizes into
+# it, checks the memory map, and emits layout.{mk,sh,h,json} beside the blob.
+$(FDT_IMAGE): $(FDT_SOURCE) $(TSM_IMAGE) $(TSM_SIG) $(LAYOUT_PY)
+	$(PYTHON3) $(LAYOUT_PY) $(FDT_SOURCE) $(LAYOUT_DIR) --artifacts $(BIN_DIR)
+
+-include $(FW_ELF).d $(TSM_ELF).d $(LAYOUT_DIR)/layout.d
+
+## test: build the firmware and run every QEMU test
 test: firmware
-	cargo test --manifest-path $(TEST_DIR)/Cargo.toml --target $(HOST_TRIPLET)
+	scripts/run-tests.sh
 
 ## generate-keys: generate ed25519 signing keys and DICE initial keys in shadowfax/keys/
 generate-keys:
 	mkdir -p $(KEYS_DIR)
 	openssl genpkey -algorithm ed25519 -out $(PRIVATE_KEY)
 	openssl pkey -in $(PRIVATE_KEY) -pubout -out $(PUBLIC_KEY)
-	$(PYTHON) scripts/dice_tool.py generate-uds-keys $(DICE_PLATFORM_PRIVATE_KEY) $(DICE_PLATFORM_PUBLIC_KEY)
+	$(PYTHON3) scripts/dice_tool.py generate-uds-keys $(DICE_PLATFORM_PRIVATE_KEY) $(DICE_PLATFORM_PUBLIC_KEY)
 
-## qemu-run: runs the script on qemu
-qemu-run: firmware
-	@set -- $$(fdtget -t x $(FDT_IMAGE) /chosen/shadowfax dice-input); \
-	dice_input_addr=$$((0x$$1 << 32 | 0x$$2)); \
-	$(QEMU) $(QEMU_FLAGS) -bios $(FW_ELF) \
-		-dtb $(FDT_IMAGE) \
-		-device loader,file=$(DICE_INPUT),addr=$$dice_input_addr,force-raw=on $(QEMU_DEVICES)
-
-## debug: attach to a gdb server and load $(GDB_COVE_SCRIPT)
-debug:
-	@set -- $$(fdtget -t x $(FDT_IMAGE) /chosen/opensbi-domains/untrusted-domain next-addr); \
-	export BOOT_DOMAIN_ADDRESS=$$(printf '0x%x' $$((0x$$1 << 32 | 0x$$2))); \
-	$(GDB) -x $(GDB_SETTINGS_SCRIPT) -x $(GDB_COVE_SCRIPT) $(FW_ELF)
-
-# Ensure bin directory exists
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
+
+# The keys are development material and are gitignored, so a fresh clone has
+# none. Without these rules make reports "No rule to make target" against a
+# path the reader has no reason to recognise -- and only after cargo has spent
+# a minute building the TSM it is about to fail to sign.
+$(PRIVATE_KEY) $(PUBLIC_KEY) $(DICE_PLATFORM_PRIVATE_KEY) $(DICE_PLATFORM_PUBLIC_KEY):
+	@echo "missing signing key: $@" >&2
+	@echo "run: make generate-keys" >&2
+	@exit 1
 
 ## build-info: display build configuration
 build-info:
@@ -166,6 +179,7 @@ build-info:
 	@echo "  HOST_TARGET_TRIPLET:       $(HOST_TRIPLET)"
 	@echo "  TARGET_TRIPLET:            $(TARGET_TRIPLET)"
 	@echo "  RV_PREFIX:                 $(RV_PREFIX)"
+	@echo "  PYTHON3:                   $(PYTHON3)"
 	@echo "  ARCH/ABI:                  $(ARCH)/$(ABI)"
 	@echo "  PROFILE:                   $(PROFILE)"
 	@echo "  DEBUG:                     $(DEBUG)"
@@ -179,18 +193,18 @@ build-info:
 	@echo "  LDFLAGS:                   $(LDFLAGS)"
 	@echo "  GUEST_LDFLAGS:             $(GUEST_LDFLAGS)"
 	@echo "  RUSTFLAGS:                 $(RUSTFLAGS)"
-	@echo "  QEMU_FLAGS:                $(QEMU_FLAGS)"
 	@echo "  OPENSBI_VERSION:           $(OPENSBI_VERSION)"
 ifeq ($(HOST_LIBC), musl)
 	@echo "  LLVM_CONFIG_PATH:          $(LLVM_CONFIG_PATH)"
 	@echo "  LIBCLANG_STATIC_PATH:      $(LIBCLANG_STATIC_PATH)"
 endif
 
-## clean: remove all build artifacts
-clean:
+$(LAUNCHER_CLEAN):
+	$(MAKE) -C $(@:.clean=) clean
+
+## clean: remove all build artifacts, including every launcher under test/
+clean: $(LAUNCHER_CLEAN)
 	cargo clean
-	$(RM) $(BIN_DIR)/*.bin $(BIN_DIR)/*.elf $(BIN_DIR)/*.signature $(BIN_DIR)/*.sig
-	$(RM) $(FDT_IMAGE)
 	$(MAKE) -C shadowfax/opensbi clean distclean
 	$(MAKE) -C guests clean
 
@@ -206,4 +220,4 @@ help:
 	@echo "  make firmware                  # Build debug firmware"
 	@echo "  make test                      # Build and test"
 	@echo "  make generate-keys             # Generate signing keys"
-	@echo "  make debug GDB_COVE_SCRIPT=... # Debug using GDB_COVE_SCRIPT"
+	@echo "  make -C test/standalone-tvm-launcher run  # Run a launcher"

@@ -22,6 +22,8 @@ EID_SUPD_ID: int = 0x53555044
 EID_COVH_ID: int = 0x434F5648
 
 SUPD_GET_ACTIVE_DOMAINS: int = 0
+TSM_DOMAIN_ID: int = 1
+ACTIVE_TSM_DOMAINS: int = 1 << TSM_DOMAIN_ID
 COVH_GET_TSM_INFO: int = 0
 COVH_CONVERT_PAGES: int = 1
 COVH_CREATE_TVM: int = 5
@@ -50,8 +52,8 @@ def assert_get_active_domains(prev: Optional[Dict], curr: Dict) -> None:
     a0 = regs["a0"]
     a1 = regs["a1"]
     assert a0 == 0, f"ecall returned non-zero in a0 ({a0})"
-    assert a1 & 0x3 == 3, (
-        f"a1 must be contains tsm (id=1) and the root domain (id=0) bit set (0x3) (current {a1})"
+    assert a1 == ACTIVE_TSM_DOMAINS, (
+        f"a1 must contain only TSM domain {TSM_DOMAIN_ID} (current {a1})"
     )
 
 

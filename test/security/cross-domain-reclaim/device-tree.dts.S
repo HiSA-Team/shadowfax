@@ -1,6 +1,6 @@
 /include/ "platform/generic/device-tree.dts"
 
-/* Test-local two-hart extension; the generic platform remains unchanged. */
+/* Add a second untrusted supervisor domain on a second hart. */
 &{/cpus} {
 	cpu1: cpu@1 {
 		device_type = "cpu";
@@ -52,7 +52,8 @@
 		compatible = "opensbi,domain,instance";
 		possible-harts = <&cpu1>;
 		boot-hart = <&cpu1>;
-		regions = <&attacker_mem 0x3f>, <&coord_mem 0x3f>, <&tdevices 0x3f>;
+		regions = <&attacker_mem 0x3f>, <&coord_mem 0x3f>,
+			  <&tdevices 0x3f>;
 		next-arg1 = <0x0 0x0>;
 		next-addr = <0x0 ATTACKER_ADDRESS>;
 		next-mode = <0x1>;
@@ -74,4 +75,13 @@
 	interrupts-extended = <&{/cpus/cpu@0/interrupt-controller} 0x03
 			       &{/cpus/cpu@0/interrupt-controller} 0x07
 			       &cpu1_intc 0x03 &cpu1_intc 0x07>;
+};
+
+/*
+ * Unlike trust-map-enforcement, the attacker is a legitimate TSM client: it is
+ * in the TSM trust map and may enter the TSM from its own hart.
+ */
+&tdomain {
+	possible-harts = <&cpu0 &cpu1>;
+	shadowfax,trusts = <&udomain &attacker_domain>;
 };

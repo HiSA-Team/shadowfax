@@ -122,7 +122,7 @@ static void create_and_run_tvm() {
     ret = sbi_call(SBI_EXT_SUPD, SBI_SUPD_GET_ACTIVE,
                    0, 0, 0, 0, 0, 0);
     require_ok("GET_ACTIVE_DOMAINS", ret);
-    if (((uintptr_t)ret.value & 0x3) != 0x3)
+    if (((uintptr_t)ret.value & 0x2) == 0)
         fail("TSM domain is not active", -1);
 
     /* ADD_ZERO_PAGES maps without clearing; initialize pages before donation. */

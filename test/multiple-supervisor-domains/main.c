@@ -129,12 +129,10 @@ int main(void)
     ret = sbi_call(SBI_EXT_SUPD, SBI_SUPD_GET_ACTIVE,
                    0, 0, 0, 0, 0, 0);
     require_ok_silent("GET_ACTIVE_DOMAINS", ret);
-    if (((uintptr_t)ret.value &
-         (DOMAIN_BIT(0) | DOMAIN_BIT(PRIMARY_TSM_DOMAIN) |
-          DOMAIN_BIT(UNTRUSTED_DOMAIN) | DOMAIN_BIT(SECONDARY_TSM_DOMAIN))) !=
-        (DOMAIN_BIT(0) | DOMAIN_BIT(PRIMARY_TSM_DOMAIN) |
-         DOMAIN_BIT(UNTRUSTED_DOMAIN) | DOMAIN_BIT(SECONDARY_TSM_DOMAIN)))
-        fail("not all supervisor domains are active", -1);
+    /* SUPD reports exactly the TSM domains that trust this domain. */
+    if ((uintptr_t)ret.value !=
+        (DOMAIN_BIT(PRIMARY_TSM_DOMAIN) | DOMAIN_BIT(SECONDARY_TSM_DOMAIN)))
+        fail("not all TSM domains are active", -1);
 
     clear_bytes(__confidential_metadata_start,
                 (size_t)(__confidential_metadata_end -

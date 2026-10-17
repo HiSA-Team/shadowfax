@@ -26,7 +26,8 @@ sudo ./scripts/setup.sh
 ```
 
 Other systems need equivalent packages for OpenSSL development files, libclang, Make, Git, QEMU
-RISC-V, a device-tree compiler (`dtc` and `fdtput`), and standard C build tools. The Linux launcher
+RISC-V, a device-tree compiler (`dtc`), and standard C build tools. The benchmark and Linux
+scripts additionally use `fdtget`/`fdtput`. The Linux launcher
 also expects `od`, `stat`, and Bash.
 
 The pinned Rust nightly and bare-metal target are declared in `rust-toolchain.toml`; `rustup` selects
@@ -66,21 +67,33 @@ to the commands that use them.
 
 ## Python and attestation tooling
 
-Measured firmware builds use `scripts/dice_tool.py`, which requires `cbor2`. Either install it in a
-virtual environment or use an ephemeral `uv` environment:
+Measured firmware builds use `scripts/dice_tool.py`, which requires `cbor2`, `cryptography`, and
+`pycose`, and `scripts/layout.py`, which requires `pylibfdt`. All of them are pinned in
+`requirements.txt`:
 
 ```sh
-python -m venv .venv
+uv venv
+uv pip install -r requirements.txt
 source .venv/bin/activate
-pip install cbor2
 ```
+
+`python -m venv .venv` with `pip install -r requirements.txt` works the same way.
+
+Every Python helper the build invokes runs through a single variable, `PYTHON3`, which defaults to
+a plain `python3`. With the environment above active, `make firmware` needs no overrides. To keep
+the dependencies out of `PATH` instead, point `PYTHON3` at an interpreter that has them:
 
 ```sh
-make PYTHON='uv run --with cbor2' firmware
+make PYTHON3='uv run --with cbor2 --with cryptography --with pycose --with pylibfdt python3' \
+     firmware
 ```
 
-Use `make -B ... firmware` after changing firmware or measurement inputs when a forced regeneration
-of signatures and DICE attestation input is required.
+`PYTHON3` is read from the environment too, so exporting it once covers `make` and the scripts
+under `scripts/` that call back into it.
+
+`make firmware` is incremental: the Rust binaries carry cargo's own dep-info, so touching any
+source rebuilds exactly what depends on it and re-signs and re-measures accordingly. No `-B` is
+needed.
 
 ## Keys and firmware build
 
@@ -88,13 +101,18 @@ Generate local ED25519 signing keys and DICE root-of-trust keys once, then build
 guest used by the first example and stage the firmware artifacts:
 
 ```sh
-make PYTHON='uv run --with cbor2' generate-keys
+make generate-keys
 make guests
-make PYTHON='uv run --with cbor2' PLATFORM=generic firmware
+make PLATFORM=generic firmware
 ```
 
-`firmware` produces the TSM, firmware, signature, DICE input, and
-`bin/generic/device-tree.dtb`. Test launchers consume these staged artifacts; they do not rebuild
+`firmware` produces the TSM, firmware, signature, and DICE input under `target/artifacts/`,
+then runs `scripts/layout.py` to compile `target/platform/generic/device-tree.dtb` and export
+the addresses it contains as `layout.{mk,sh,h,json}` beside it. That script checks the memory
+map (region alignment, overlap, PMP budget) and fails the build on a bad layout. It needs the
+`pylibfdt` binding from `requirements.txt`, so it runs through `PYTHON3` like every other helper.
+
+Test launchers consume these staged artifacts; they do not rebuild
 the firmware stack automatically. Run the example from the [README](README.md#run-the-attestation-example).
 
 Generated keys are development material under `shadowfax/keys/`; do not treat them as production

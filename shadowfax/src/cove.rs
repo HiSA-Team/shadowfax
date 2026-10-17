@@ -566,14 +566,12 @@ fn supd_handler(fid: usize) -> usize {
     };
 
     if fid == SBI_EXT_SUPD_GET_ACTIVE_DOMAINS {
+        // Report every TSM domain that trusts the caller.
         let mut ret: usize = 0;
-        let mut tmp = state
-            .domains
-            .iter()
-            .position(|d| d.has_tsm && d.is_trusted(src_id))
-            .into_iter();
-        while let Some(i) = tmp.next() {
-            ret |= 1 << i;
+        for (i, d) in state.domains.iter().enumerate() {
+            if d.has_tsm && d.is_trusted(src_id) {
+                ret |= 1 << i;
+            }
         }
 
         unsafe {

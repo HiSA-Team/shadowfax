@@ -7,19 +7,24 @@ OUT=${2:-"$ROOT/experiments/tvm-launch-latency/run-$(date -u +%Y%m%dT%H%M%SZ)"}
 TARGET=riscv64imac-unknown-none-elf
 PLATFORM_NAME=${PLATFORM:-generic}
 FW="$ROOT/target/$TARGET/debug/shadowfax"
-DICE="$ROOT/bin/shadowfax.dice.bin"
-BASE_DTB="$ROOT/bin/$PLATFORM_NAME/device-tree.dtb"
+DICE="$ROOT/target/artifacts/shadowfax.dice.bin"
+TSM="$ROOT/target/artifacts/tsm.elf"
+TSM_SIGNATURE="$ROOT/target/artifacts/tsm.bin.signature"
 QEMU_TIMEOUT=${QEMU_TIMEOUT:-900}
-WORK=$(mktemp -d /tmp/shadowfax-tvm-launch-latency.XXXXXX)
-trap 'rm -rf "$WORK"' EXIT
+LATENCY_DTB="$ROOT/target/tvm-launch-latency/device-tree.dtb"
+# The experiment measures how long zeroing the guest region takes, so the guest
+# size is the independent variable. It must still fit the guest region declared
+# by test/tvm-launch-latency/device-tree.dts; ld fails the link if it does not.
+GUEST_RAM_SIZE=${GUEST_RAM_SIZE:-33554432}
 
 [[ $RUNS =~ ^[1-9][0-9]*$ ]] || {
     echo "usage: $0 [runs] [output-directory]" >&2
+    echo "  GUEST_RAM_SIZE=<bytes>  guest RAM to create and zero (default 32 MiB)" >&2
     exit 2
 }
 [[ ! -e "$OUT" ]] || { echo "output already exists: $OUT" >&2; exit 1; }
 
-for tool in fdtget fdtput make qemu-system-riscv64 taskset timeout; do
+for tool in make qemu-system-riscv64 taskset timeout; do
     command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 for file in "$ROOT/shadowfax/keys/privatekey.pem" \
@@ -31,22 +36,17 @@ done
 mkdir -p "$OUT/logs"
 
 echo "Building firmware with the COVH TSM entry point"
-make -B -C "$ROOT" firmware PLATFORM="$PLATFORM_NAME" PYTHON="uv run --with cbor2"
+make -C "$ROOT" firmware PLATFORM="$PLATFORM_NAME"
 
-cp "$BASE_DTB" "$WORK/platform.dtb"
-fdtput -t x "$WORK/platform.dtb" /chosen/opensbi-domains/umem-high base 0 0xa0000000
-fdtput -t x "$WORK/platform.dtb" /chosen/opensbi-domains/umem-high order 0x1c
+make -C "$ROOT/test/tvm-launch-latency" GUEST_RAM_SIZE="$GUEST_RAM_SIZE" all
 
-# make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=16777216 all #16
-# make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=33554432 all #32
-# make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=67108864 all #64
-# make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=134217728 all #128
-make -C "$ROOT/test/tvm-launch-latency" DTB="$WORK/platform.dtb" GUEST_RAM_SIZE=268435456 all #256
-
-read -r dice_hi dice_lo < <(fdtget -t x "$WORK/platform.dtb" /chosen/shadowfax dice-input)
-DICE_ADDR=$((16#$dice_hi << 32 | 16#$dice_lo))
-read -r load_hi load_lo < <(fdtget -t x "$WORK/platform.dtb" /chosen/opensbi-domains/untrusted-domain next-addr)
-LOAD_ADDR=$((16#$load_hi << 32 | 16#$load_lo))
+# scripts/layout.py emits these next to the blob it produced.
+# shellcheck source=/dev/null
+source "$ROOT/target/tvm-launch-latency/layout.sh"
+DICE_ADDR=$SHADOWFAX_DICE_ADDR
+TSM_ADDR=$SHADOWFAX_TSM_IMAGE_ADDR
+TSM_SIGNATURE_ADDR=$SHADOWFAX_TSM_SIGNATURE_ADDR
+LOAD_ADDR=$SHADOWFAX_DOMAIN_UNTRUSTED_DOMAIN_ENTRY
 LAUNCHER="$ROOT/target/tvm-launch-latency/tvm-launch-latency.bin"
 
 RESULTS="$OUT/results.csv"
@@ -56,10 +56,12 @@ for run in $(seq 1 "$RUNS"); do
     log="$OUT/logs/run-$run.log"
     echo "[run $run/$RUNS]"
     set +e
-    taskset -c 0 qemu-system-riscv64 \
-        -M virt -m 1G -smp 1 -nographic \
-        -bios "$FW" -dtb "$WORK/platform.dtb" \
+    timeout "$QEMU_TIMEOUT" taskset -c 0 qemu-system-riscv64 \
+        -M virt -m "$SHADOWFAX_QEMU_MEM" -smp "$SHADOWFAX_SMP" -nographic \
+        -bios "$FW" -dtb "$LATENCY_DTB" \
         -device loader,file="$DICE",addr="$DICE_ADDR",force-raw=on \
+        -device loader,file="$TSM",addr="$TSM_ADDR",force-raw=on \
+        -device loader,file="$TSM_SIGNATURE",addr="$TSM_SIGNATURE_ADDR",force-raw=on \
         -device loader,file="$LAUNCHER",addr="$LOAD_ADDR",force-raw=on \
         2>&1 | tee "$log" | sed -u -n \
         's/\r$//; /^LATENCY,/p; /^\[HOST\]/p'

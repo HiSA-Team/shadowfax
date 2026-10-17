@@ -1,4 +1,7 @@
-/include/ "platform/generic/device-tree.dts"
+/dts-v1/;
+
+/include/ "platform/generic/base.dtsi"
+/include/ "platform/generic/default-domains.dtsi"
 
 /* Add a third supervisor domain on a second hart. */
 &{/cpus} {
@@ -35,16 +38,21 @@
 	};
 };
 
+/* The attacker domain lives above the generic map. */
+&{/memory@80000000} {
+	reg = <0x00 0x80000000 0x00 0x04000000>;
+};
+
 &{/chosen/opensbi-domains} {
 	attacker_mem: attacker-memory {
 		compatible = "opensbi,domain,memregion";
-		base = <0x0 0x94000000>;
-		order = <25>;
+		base = <0x0 0x82000000>;
+		order = <22>;
 	};
 
 	coord_mem: coordination-memory {
 		compatible = "opensbi,domain,memregion";
-		base = <0x0 COORDINATION_ADDRESS>;
+		base = <0x0 0x82800000>;
 		order = <12>;
 	};
 
@@ -55,7 +63,7 @@
 		regions = <&attacker_mem 0x3f>, <&coord_mem 0x3f>,
 			  <&tdevices 0x3f>;
 		next-arg1 = <0x0 0x0>;
-		next-addr = <0x0 ATTACKER_ADDRESS>;
+		next-addr = <0x0 0x82000000>;
 		next-mode = <0x1>;
 	};
 };

@@ -15,6 +15,8 @@
 #define MEASURED_CHUNK_PAGES   (SEGMENT_STAGING_SIZE /  PAGE_SIZE)
 #define MEASURED_CHUNKS        (PAYLOAD_SIZE         /  SEGMENT_STAGING_SIZE)
 #define COVH_CALL_COUNT        (MEASURED_CHUNKS + 7)
+#define TSM_DOMAIN_ID          1UL
+#define ACTIVE_TSM_DOMAINS     (1UL << TSM_DOMAIN_ID)
 
 #define COVH_ADD_MEASURED      11UL
 #define COVH_ADD_ZERO          12UL
@@ -127,7 +129,7 @@ int main(void)
     initialize_segment_staging();
     ret = sbi_call(SBI_EXT_SUPD, SBI_SUPD_GET_ACTIVE,
                    0, 0, 0, 0, 0, 0);
-    if (ret.error != 0 || ((uintptr_t)ret.value & 0x3) != 0x3)
+    if (ret.error != 0 || (uintptr_t)ret.value != ACTIVE_TSM_DOMAINS)
         fail("GET_ACTIVE_DOMAINS", ret.error != 0 ? ret.error : -1);
 
     measured_covh(&latencies[latency_count++], "CONVERT_META_PAGES", COVH_CONVERT_PAGES,

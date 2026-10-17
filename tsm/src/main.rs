@@ -13,13 +13,13 @@ use common::{
         SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM,
         SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES, SBI_COVH_RUN_TVM_VCPU,
     },
-    tsm_abi::{TsmBootInfo, TSM_BOOT_ABI_VERSION, TSM_BOOT_MAGIC},
 };
 use linked_list_allocator::LockedHeap;
 use spin::Mutex;
 
 use crate::{constants::TVM_MAX_VCPUS, hyper::HypervisorState};
 
+mod boot;
 mod constants;
 mod gpt;
 mod h_extension;
@@ -50,11 +50,6 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
-// Give each hart 32K stack
-const STACK_SIZE_PER_HART: usize = 1024 * 32;
-// The project TSM PIE is linked at offset zero in a 32 MiB supervisor domain.
-const TSM_REGION_SIZE: usize = 32 * 1024 * 1024;
-
 #[no_mangle]
 #[unsafe(naked)]
 #[link_section = "._start"]
@@ -68,19 +63,25 @@ extern "C" fn _start() -> ! {
         r#"
         .attribute arch, "rv64imac"
 
-        // _start is at PIE offset zero, so this AUIPC recovers the runtime load base
-        // without relying on an absolute linker symbol or a dynamic relocation.
-        auipc sp, 0
-        li t1, {tsm_region_size}
-        add sp, sp, t1
-        li t1, {stack_size_per_hart}
-        sub sp, sp, t1
+        // Initialization uses the linker-reserved boot stack.
+        li t0, {boot_extension}
+        bne a7, t0, 1f
+        li t0, {boot_function}
+        bne a6, t0, 1f
+        mv sp, a0
+        j 2f
 
+        // Later entries use the runtime state created during initialization.
+        1:
+        csrr t0, sscratch
+        ld sp, 0(t0)
+
+        2:
         call {main}
         "#,
 
-        stack_size_per_hart = const STACK_SIZE_PER_HART,
-        tsm_region_size = const TSM_REGION_SIZE,
+        boot_extension = const common::tsm_abi::SBI_SHADOWFAX_BOOT_EXT_ID,
+        boot_function = const common::tsm_abi::SBI_SHADOWFAX_INIT_DONE,
         main = sym tsm_entry,
     )
 }
@@ -102,7 +103,14 @@ extern "C" fn tsm_entry(
     }
 
     #[cfg(not(feature = "standalone"))]
-    main(a0, a1, a2, a3, a4, a5, a6, a7)
+    {
+        if a6 == common::tsm_abi::SBI_SHADOWFAX_INIT_DONE
+            && a7 == common::tsm_abi::SBI_SHADOWFAX_BOOT_EXT_ID
+        {
+            boot::initialize_and_return(a0)
+        }
+        main(a0, a1, a2, a3, a4, a5, a6, a7)
+    }
 }
 
 const TSM_IMPL_ID: u32 = 0x45;
@@ -119,13 +127,6 @@ struct TsmInfo {
     tvm_state_pages: usize,
     tvm_max_vcpus: usize,
     tvm_vcpu_state_pages: usize,
-}
-
-enum TsmPageType {
-    Page4k = 0,
-    Page2mb = 1,
-    Page1gb = 2,
-    Page512gb = 3,
 }
 
 #[derive(Clone, Debug)]
@@ -161,57 +162,6 @@ impl TsmState {
 }
 
 static STATE: Mutex<Option<TsmState>> = Mutex::new(None);
-
-#[no_mangle]
-#[allow(dead_code)]
-#[inline(never)]
-#[link_section = "._secure_init"]
-/// This function will be called by the TSM-driver to initialize securely the TSM after the
-/// signature has bee authenticated.
-extern "C" fn _secure_init(addr: usize) -> isize {
-    // Initialize heap
-    unsafe {
-        let heap_start = (&raw const _heap_start as *const u8) as usize;
-        let heap_size = ((&raw const _heap_end as *const u8) as usize) - heap_start;
-
-        ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
-    }
-    // 2. Prepare the Initial Context
-    // If addr is 0 (Testing), create a fresh default context ON THE HEAP.
-    // If addr != 0 (Production), we assume it points to valid ROM/Flash/Pre-loaded RAM
-    // that is NOT overlapping with our new Heap.
-    let initial_context = if addr == 0 {
-        TsmAttestationContext::default()
-    } else {
-        let boot = unsafe { &*(addr as *const TsmBootInfo) };
-        if boot.magic != TSM_BOOT_MAGIC
-            || boot.abi_version != TSM_BOOT_ABI_VERSION
-            || boot.struct_size as usize != size_of::<TsmBootInfo>()
-            || boot.dice_context_size > usize::MAX as u64
-        {
-            return -1;
-        }
-        let bytes = unsafe {
-            core::slice::from_raw_parts(
-                boot.dice_context_addr as *const u8,
-                boot.dice_context_size as usize,
-            )
-        };
-        match TsmAttestationContext::from_slice(bytes) {
-            Ok(context) => context,
-            Err(_) => return -1,
-        }
-    };
-
-    // 3. Update Global State
-    // We clone into State and Attestation Context.
-    // Since heap is Init, these clones allocate safely.
-    let mut state = STATE.lock();
-    state.replace(TsmState::new(initial_context));
-
-    drop(state);
-    0
-}
 
 // Since this is a TSM with non reentrant model, an ECALL should be a TEERET
 fn main(

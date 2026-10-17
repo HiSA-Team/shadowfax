@@ -6,10 +6,14 @@ This QEMU example runs three OpenSBI supervisor domains on two harts:
 - domain 2 is the host on hart 0;
 - domain 3 is an untrusted attacker on hart 1.
 
-The test uses its own device-tree extension, `device-tree.dts.S`. It includes
-the generic single-hart platform and adds CPU 1, the corresponding interrupt
+The test uses its own device tree, `device-tree.dts`. It `/include/`s the
+generic single-hart platform and adds CPU 1, the corresponding interrupt
 bindings, and the attacker domain. The generic platform device tree is not
-modified. The test runs the raw `bin/shadowfax.bin` firmware image with
+modified. The attacker's base address and the coordination page are declared
+only there; the Makefile, `attacker.ld` and `coordination.h` read them back
+from the `layout.*` files that `scripts/layout.py` generates next to the blob
+(see [BUILD.md](../../../BUILD.md)). The test runs the raw
+`target/artifacts/shadowfax.bin` firmware image with
 QEMU's ordinary `-smp 2 -bios` boot flow: QEMU releases both harts at the
 firmware reset entry, and OpenSBI starts the attacker supervisor domain on
 hart 1.
