@@ -104,8 +104,9 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
-// Stack size per HART: 8K
-const STACK_SIZE_PER_HART: usize = 1024 * 8;
+// Stack size per HART: 64K. Boot builds sizeable Rust values (e.g. State::new) on the stack
+// before moving them into statics; the stacks sit at the top of the 4 MiB firmware region.
+const STACK_SIZE_PER_HART: usize = 1024 * 64;
 const SECONDARY_WAITING: usize = 0x5348_4457;
 const SECONDARY_READY_VALUE: usize = 0x5348_5244;
 

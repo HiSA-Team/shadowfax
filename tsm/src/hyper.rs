@@ -29,7 +29,6 @@ use crate::{
 struct PhysicalMemory {
     base_address: usize,
     size: usize,
-    owner_id: usize,
     guest_id: Option<usize>,
 }
 
@@ -145,7 +144,6 @@ impl HypervisorState {
     }
     pub fn add_confidential_pages(
         &mut self,
-        owner_id: usize,
         base_address: usize,
         num_pages: usize,
     ) -> anyhow::Result<()> {
@@ -168,7 +166,6 @@ impl HypervisorState {
             .push(PhysicalMemory {
                 base_address,
                 size,
-                owner_id,
                 guest_id: None,
             })
             .map_err(|_| anyhow::anyhow!("too many memory regions"))
@@ -176,7 +173,6 @@ impl HypervisorState {
 
     pub fn create_tvm(
         &mut self,
-        owner: usize,
         attestation_context: TvmAttestationContext,
         page_table_addr: usize,
         state_addr: usize,
@@ -202,10 +198,9 @@ impl HypervisorState {
             &mut updated_memory,
             page_table_addr,
             page_table_size,
-            owner,
             tvmid,
         )?;
-        Self::claim_confidential_range(&mut updated_memory, state_addr, PAGE_SIZE, owner, tvmid)?;
+        Self::claim_confidential_range(&mut updated_memory, state_addr, PAGE_SIZE, tvmid)?;
 
         unsafe {
             let ptr = page_table_addr as *mut u8;
@@ -214,7 +209,6 @@ impl HypervisorState {
 
         self.confidential_memory = updated_memory;
         self.tvms[tvmid] = Some(Tvm::new(
-            owner,
             attestation_context,
             page_table_addr,
             page_table_size,
@@ -226,7 +220,6 @@ impl HypervisorState {
 
     pub fn finalize_tvm(
         &mut self,
-        owner: usize,
         tvmid: usize,
         entry_sepc: usize,
         entry_arg: usize,
@@ -235,9 +228,6 @@ impl HypervisorState {
     ) -> anyhow::Result<()> {
         match self.tvms.get_mut(tvmid).and_then(|tvm| tvm.as_mut()) {
             Some(tvm) => {
-                if tvm.owner != owner {
-                    return Err(anyhow::anyhow!("TVM is owned by another domain"));
-                }
                 if !matches!(tvm.state_enum, TvmState::TvmInitializing) {
                     return Err(anyhow::anyhow!("TVM is already finalized"));
                 }
@@ -248,10 +238,10 @@ impl HypervisorState {
         }
     }
 
-    pub fn destroy_tvm(&mut self, owner: usize, tvmid: usize) -> anyhow::Result<()> {
+    pub fn destroy_tvm(&mut self, tvmid: usize) -> anyhow::Result<()> {
         match self.tvms.get(tvmid).and_then(|tvm| tvm.as_ref()) {
             Some(tvm) => match tvm.state_enum {
-                TvmState::TvmStopped if tvm.owner == owner => {
+                TvmState::TvmStopped => {
                     self.tvms[tvmid] = None;
                     for region in self.confidential_memory.iter_mut() {
                         if let Some(guest) = region.guest_id {
@@ -270,7 +260,6 @@ impl HypervisorState {
                     self.coalesce_confidential_blocks();
                     Ok(())
                 }
-                _ if tvm.owner != owner => Err(anyhow::anyhow!("TVM is owned by another domain")),
                 _ => Err(anyhow::anyhow!("tvm is not stopped")),
             },
             None => Err(anyhow::anyhow!("no tvm available")),
@@ -279,16 +268,12 @@ impl HypervisorState {
 
     pub fn add_tvm_memory_region(
         &mut self,
-        owner: usize,
         tvmid: usize,
         tvm_gpa_addr: usize,
         region_len_bytes: usize,
     ) -> anyhow::Result<()> {
         match self.tvms.get_mut(tvmid).and_then(|tvm| tvm.as_mut()) {
             Some(tvm) => {
-                if tvm.owner != owner {
-                    return Err(anyhow::anyhow!("TVM is owned by another domain"));
-                }
                 match tvm.state_enum {
                     TvmState::TvmInitializing => {}
                     _ => {
@@ -338,7 +323,6 @@ impl HypervisorState {
 
     pub fn add_tvm_mmio_region(
         &mut self,
-        owner: usize,
         tvmid: usize,
         guest_gpa: usize,
         host_pa: usize,
@@ -356,9 +340,6 @@ impl HypervisorState {
 
         match self.tvms.get_mut(tvmid).and_then(|tvm| tvm.as_mut()) {
             Some(tvm) => {
-                if tvm.owner != owner {
-                    return Err(anyhow::anyhow!("TVM is owned by another domain"));
-                }
                 match tvm.state_enum {
                     TvmState::TvmInitializing => {}
                     _ => return Err(anyhow::anyhow!("cannot add MMIO after finalization")),
@@ -396,7 +377,6 @@ impl HypervisorState {
 
     pub fn add_tvm_measured_pages(
         &mut self,
-        owner: usize,
         tvmid: usize,
         source_addr: usize,
         dest_addr: usize,
@@ -430,10 +410,6 @@ impl HypervisorState {
                 .and_then(|tvm| tvm.as_ref())
                 .ok_or_else(|| anyhow::anyhow!("invalid TVMID"))?;
 
-            if tvm.owner != owner {
-                return Err(anyhow::anyhow!("TVM is owned by another domain"));
-            }
-
             if !matches!(tvm.state_enum, TvmState::TvmInitializing) {
                 return Err(anyhow::anyhow!(
                     "cannot add measured pages after finalization"
@@ -457,7 +433,7 @@ impl HypervisorState {
 
         // Validate ownership on a copy so errors cannot partially mutate state.
         let mut updated_memory = self.confidential_memory.clone();
-        Self::claim_confidential_range(&mut updated_memory, dest_addr, bytes, owner, tvmid)?;
+        Self::claim_confidential_range(&mut updated_memory, dest_addr, bytes, tvmid)?;
 
         // Reborrow the TVM after the previous immutable borrow ended.
         let tvm = self
@@ -502,7 +478,6 @@ impl HypervisorState {
 
     pub fn add_tvm_zero_pages(
         &mut self,
-        owner: usize,
         tvmid: usize,
         base_page_address: usize,
         tsm_page_type: usize,
@@ -523,9 +498,6 @@ impl HypervisorState {
             .ok_or_else(|| anyhow::anyhow!("page range overflow"))?;
         match self.tvms.get_mut(tvmid).and_then(|tvm| tvm.as_mut()) {
             Some(tvm) => {
-                if tvm.owner != owner {
-                    return Err(anyhow::anyhow!("TVM is owned by another domain"));
-                }
                 if !matches!(tvm.state_enum, TvmState::TvmInitializing) {
                     return Err(anyhow::anyhow!("cannot add zero pages after finalization"));
                 }
@@ -558,7 +530,6 @@ impl HypervisorState {
                     &mut updated_memory,
                     base_page_address,
                     bytes,
-                    owner,
                     tvmid,
                 )?;
 
@@ -592,16 +563,12 @@ impl HypervisorState {
 
     pub fn create_tvm_vcpu(
         &mut self,
-        owner: usize,
         tvmid: usize,
         vcpuid: usize,
         _tvm_state_page_addr: usize,
     ) -> anyhow::Result<()> {
         match self.tvms.get_mut(tvmid).and_then(|tvm| tvm.as_mut()) {
             Some(tvm) => {
-                if tvm.owner != owner {
-                    return Err(anyhow::anyhow!("TVM is owned by another domain"));
-                }
                 if !matches!(tvm.state_enum, TvmState::TvmInitializing) {
                     return Err(anyhow::anyhow!("cannot create a vCPU after finalization"));
                 }
@@ -621,7 +588,6 @@ impl HypervisorState {
 
     pub fn prepare_tvm_vcpu(
         &mut self,
-        owner: usize,
         tvmid: usize,
         vcpuid: usize,
     ) -> anyhow::Result<(usize, usize, usize, bool)> {
@@ -637,10 +603,6 @@ impl HypervisorState {
             .get(tvmid)
             .and_then(|tvm| tvm.as_ref())
             .ok_or_else(|| anyhow::anyhow!("invalid TVMID"))?;
-
-        if tvm.owner != owner {
-            return Err(anyhow::anyhow!("TVM is owned by another domain"));
-        }
 
         if !matches!(
             tvm.state_enum,
@@ -689,7 +651,7 @@ impl HypervisorState {
         (*(vcpu_addr as *const TvmVcpuState)).enter(entry_sepc, entry_arg, resume)
     }
 
-    pub fn suspend_tvm(&mut self, tvmid: usize) -> anyhow::Result<usize> {
+    pub fn suspend_tvm(&mut self, tvmid: usize) -> anyhow::Result<()> {
         let current = self
             .current_vcpu()
             .ok_or_else(|| anyhow::anyhow!("no running vCPU"))?;
@@ -706,19 +668,18 @@ impl HypervisorState {
             return Err(anyhow::anyhow!("TVM is not runnable"));
         }
         tvm.state_enum = TvmState::TvmSuspended;
-        let owner = tvm.owner;
         self.harts[current_hartid()].current = None;
 
-        Ok(owner)
+        Ok(())
     }
 
-    pub fn tvm_shutdown(&mut self, tvmid: usize) -> anyhow::Result<usize> {
+    pub fn tvm_shutdown(&mut self, tvmid: usize) -> anyhow::Result<()> {
         match self.tvms.get_mut(tvmid).and_then(|tvm| tvm.as_mut()) {
             Some(tvm) => match tvm.state_enum {
                 TvmState::TvmRunnable => {
                     tvm.state_enum = TvmState::TvmStopped;
                     self.harts[current_hartid()].current = None;
-                    Ok(tvm.owner)
+                    Ok(())
                 }
                 _ => Err(anyhow::anyhow!("TVM is not running")),
             },
@@ -728,7 +689,6 @@ impl HypervisorState {
 
     pub fn reclaim_pages(
         &mut self,
-        owner: usize,
         base_page_address: usize,
         num_pages: usize,
     ) -> anyhow::Result<()> {
@@ -738,7 +698,6 @@ impl HypervisorState {
             .position(|pm| {
                 pm.base_address == base_page_address
                     && (pm.size / PAGE_SIZE) == num_pages
-                    && pm.owner_id == owner
                     && pm.guest_id.is_none()
             })
             .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
@@ -779,7 +738,6 @@ impl HypervisorState {
         blocks: &mut Vec<PhysicalMemory, MAX_TVM_MEMORY_REGIONS>,
         address: usize,
         size: usize,
-        owner_id: usize,
         tvmid: usize,
     ) -> anyhow::Result<()> {
         let end = address
@@ -796,7 +754,6 @@ impl HypervisorState {
                     .push(PhysicalMemory {
                         base_address: block.base_address,
                         size: block.size,
-                        owner_id: block.owner_id,
                         guest_id: block.guest_id,
                     })
                     .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
@@ -804,11 +761,6 @@ impl HypervisorState {
             }
 
             claimed = true;
-            if block.owner_id != owner_id {
-                return Err(anyhow::anyhow!(
-                    "confidential memory belongs to another domain"
-                ));
-            }
             if let Some(owner) = block.guest_id {
                 if owner != tvmid {
                     return Err(anyhow::anyhow!(
@@ -820,7 +772,6 @@ impl HypervisorState {
                     .push(PhysicalMemory {
                         base_address: block.base_address,
                         size: block.size,
-                        owner_id: block.owner_id,
                         guest_id: block.guest_id,
                     })
                     .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
@@ -832,7 +783,6 @@ impl HypervisorState {
                     .push(PhysicalMemory {
                         base_address: block.base_address,
                         size: address - block.base_address,
-                        owner_id: block.owner_id,
                         guest_id: None,
                     })
                     .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
@@ -841,7 +791,6 @@ impl HypervisorState {
                 .push(PhysicalMemory {
                     base_address: address,
                     size,
-                    owner_id: block.owner_id,
                     guest_id: Some(tvmid),
                 })
                 .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
@@ -850,7 +799,6 @@ impl HypervisorState {
                     .push(PhysicalMemory {
                         base_address: end,
                         size: block_end - end,
-                        owner_id: block.owner_id,
                         guest_id: None,
                     })
                     .map_err(|_| anyhow::anyhow!("too many confidential memory regions"))?;
@@ -871,10 +819,7 @@ impl HypervisorState {
         for block in self.confidential_memory.iter() {
             if let Some(previous) = merged.last_mut() {
                 let previous_end = previous.base_address + previous.size;
-                if previous_end == block.base_address
-                    && previous.owner_id == block.owner_id
-                    && previous.guest_id == block.guest_id
-                {
+                if previous_end == block.base_address && previous.guest_id == block.guest_id {
                     previous.size += block.size;
                     continue;
                 }
@@ -884,7 +829,6 @@ impl HypervisorState {
                 .push(PhysicalMemory {
                     base_address: block.base_address,
                     size: block.size,
-                    owner_id: block.owner_id,
                     guest_id: block.guest_id,
                 })
                 .is_err()
@@ -899,7 +843,6 @@ impl HypervisorState {
 
 #[repr(C)]
 pub struct Tvm {
-    owner: usize,
     page_table_addr: usize,
     page_table_size: usize,
     state_addr: usize,
@@ -917,14 +860,12 @@ pub struct Tvm {
 
 impl Tvm {
     fn new(
-        owner: usize,
         attestation_context: TvmAttestationContext,
         page_table_addr: usize,
         page_table_size: usize,
         state_addr: usize,
     ) -> Self {
         Self {
-            owner,
             page_table_addr,
             page_table_size,
             state_addr,

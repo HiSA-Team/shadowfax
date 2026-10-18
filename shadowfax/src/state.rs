@@ -84,9 +84,24 @@ use crate::{
  * */
 const TICKET_BITS: usize = 10;
 const TICKET_MASK: usize = (1 << TICKET_BITS) - 1; // 0x3ff
-const MAX_TICKET: usize = TICKET_MASK; // 1023
+                                                   /*
+                                                    * Fixed limits sized for small platforms (a few supervisor domains). They can
+                                                    * later be derived from the device tree and allocated on the heap.
+                                                    */
+const MAX_TICKET: usize = 63; // tickets 1..=63 in flight; must fit in TICKET_BITS
 const TICKET_SLOTS: usize = MAX_TICKET + 1; // includes unused slot 0
-const TEE_STACK_SIZE: usize = 64 * 1024;
+const _: () = assert!(MAX_TICKET <= TICKET_MASK);
+/*
+ * TEE stack layout, top down: the handlers' call stack (TEE_SCRATCH_SIZE), the
+ * scratch context, then one saved Context per domain id (see init()).
+ */
+const TEE_STACK_SIZE: usize = 32 * 1024;
+const _: () = assert!(
+    TEE_STACK_SIZE >= TEE_SCRATCH_SIZE + (MAX_SUPERVISOR_DOMAINS + 1) * size_of::<Context>()
+);
+const MAX_ALLOCATIONS: usize = 64; // committed confidential allocations
+const MAX_TVMS_PER_TSM: usize = 2; // TVM ids a TSM may hand out: 0..MAX_TVMS_PER_TSM
+const MAX_HARTS: usize = 2;
 
 #[link_section = ".rodata"]
 static DICE_PLATFORM_PUBLIC_KEY: &[u8; 32] = include_bytes!("../keys/root_of_trust_pub.bin");
@@ -100,86 +115,33 @@ pub fn tee_stack_top() -> usize {
     unsafe { TEE_STACK_TOP }
 }
 
-pub enum BorrowKind {
-    Convert {
-        base_address: usize,
-        num_pages: usize,
-        owner_id: usize,
-        tsm_id: usize,
-    },
-    Reclaim {
-        base_address: usize,
-        num_pages: usize,
-        owner_id: usize,
-        tsm_id: usize,
-    },
-}
-
-impl BorrowKind {
-    pub fn new_alloc(
-        owner_id: usize,
-        tsm_id: usize,
-        base_address: usize,
-        num_pages: usize,
-    ) -> Self {
-        Self::Convert {
-            base_address,
-            num_pages,
-            owner_id,
-            tsm_id,
-        }
-    }
-    pub fn new_reclaim(
-        owner_id: usize,
-        tsm_id: usize,
-        base_address: usize,
-        num_pages: usize,
-    ) -> Self {
-        Self::Reclaim {
-            base_address,
-            num_pages,
-            owner_id,
-            tsm_id,
-        }
-    }
-
-    fn belongs_to(&self, owner_id: usize, tsm_id: usize) -> bool {
-        match self {
-            Self::Convert {
-                owner_id: expected_owner_id,
-                tsm_id: expected_tsm_id,
-                ..
-            }
-            | Self::Reclaim {
-                owner_id: expected_owner_id,
-                tsm_id: expected_tsm_id,
-                ..
-            } => owner_id == *expected_owner_id && tsm_id == *expected_tsm_id,
-        }
-    }
-
-    fn range(&self) -> (usize, usize) {
-        match self {
-            Self::Convert {
-                base_address,
-                num_pages,
-                ..
-            }
-            | Self::Reclaim {
-                base_address,
-                num_pages,
-                ..
-            } => (*base_address, *num_pages),
-        }
-    }
-}
-
 #[derive(Clone)]
-pub struct Allocation {
+pub struct PhysicalMemoryBlock {
     pub base_address: usize,
     pub num_pages: usize,
     pub owner_id: usize,
     pub tsm_id: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BorrowKind {
+    Convert,
+    Reclaim,
+}
+
+/* A pending transaction: what is being borrowed, and how. */
+pub struct Borrow {
+    pub kind: BorrowKind,
+    pub block: PhysicalMemoryBlock,
+}
+
+impl PhysicalMemoryBlock {
+    fn belongs_to(&self, owner_id: usize, tsm_id: usize) -> bool {
+        self.owner_id == owner_id && self.tsm_id == tsm_id
+    }
+    fn range(&self) -> (usize, usize) {
+        (self.base_address, self.num_pages)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -195,11 +157,15 @@ pub struct State {
     pub boot_domain_id: usize,
     pub attestation_context: PlatformAttestationContext,
     /* Pending trusted memory: base_address, num_pages, original owner */
-    pending_memory_allocations: [Option<BorrowKind>; TICKET_SLOTS],
+    pending_memory_allocations: [Option<Borrow>; TICKET_SLOTS],
     next_ticket: usize,
     /* Real memory allocations */
-    memory_allocations: Vec<Allocation, MAX_TICKET>,
+    memory_allocations: Vec<PhysicalMemoryBlock, MAX_ALLOCATIONS>,
     bootstrap_grant: Option<BootstrapGrant>,
+    /* TVM ownership: tvm_owner[tsm_id][tvm_id] = owner domain */
+    tvm_owner: [[Option<u8>; MAX_TVMS_PER_TSM]; MAX_SUPERVISOR_DOMAINS],
+    /* Keep track of long running calls */
+    pub outstanding_calls: [Option<usize>; MAX_HARTS],
 }
 
 impl State {
@@ -213,6 +179,8 @@ impl State {
             next_ticket: 1,
             memory_allocations: Vec::new(),
             bootstrap_grant: None,
+            tvm_owner: [[None; MAX_TVMS_PER_TSM]; MAX_SUPERVISOR_DOMAINS],
+            outstanding_calls: [None; MAX_HARTS],
         }
     }
 
@@ -277,7 +245,7 @@ impl State {
                 .iter()
                 .flatten()
                 .any(|pending| {
-                    let (pending_base, pending_pages) = pending.range();
+                    let (pending_base, pending_pages) = pending.block.range();
                     overlaps(pending_base, pending_pages)
                 })
         {
@@ -293,14 +261,32 @@ impl State {
         let Some(domain) = self.domains.get(owner_id) else {
             return false;
         };
-        size != 0
-            && domain.memory_regions.iter().any(|region| {
+        if size == 0 {
+            return false;
+        }
+        /*
+         * Converting pages splits a domain's RAM into power-of-two regions, so a
+         * buffer the domain owns may span several adjacent ones. Walk them: each
+         * step must start inside a region and moves to that region's end.
+         */
+        let mut cursor = base_address;
+        for _ in 0..=domain.memory_regions.len() {
+            if cursor >= end {
+                return true;
+            }
+            let next = domain.memory_regions.iter().find_map(|region| {
                 if region.mmio || region.order >= usize::BITS {
-                    return false;
+                    return None;
                 }
                 let region_end = region.base_address.saturating_add(1usize << region.order);
-                base_address >= region.base_address && end <= region_end
-            })
+                (cursor >= region.base_address && cursor < region_end).then_some(region_end)
+            });
+            match next {
+                Some(region_end) => cursor = region_end,
+                None => return false,
+            }
+        }
+        cursor >= end
     }
 
     pub fn validate_reclaim_range(
@@ -322,8 +308,91 @@ impl State {
             .ok_or_else(|| anyhow::anyhow!("no matching confidential allocation"))
     }
 
+    /* True if [base, base + num_pages) lies inside one allocation that owner_id converted for tsm_id. */
+    pub fn owns_confidential_range(
+        &self,
+        owner_id: usize,
+        tsm_id: usize,
+        base: usize,
+        num_pages: usize,
+    ) -> bool {
+        let Some(end) = num_pages
+            .checked_mul(common::sbi::PAGE_SIZE)
+            .and_then(|size| base.checked_add(size))
+        else {
+            return false;
+        };
+        num_pages != 0
+            && self.memory_allocations.iter().any(|a| {
+                a.owner_id == owner_id
+                    && a.tsm_id == tsm_id
+                    && base >= a.base_address
+                    && end <= a.base_address + a.num_pages * common::sbi::PAGE_SIZE
+            })
+    }
+
+    /* The TVM id comes from the TSM, so bound both indices before use. */
+    fn tvm_slot(&mut self, tsm_id: usize, tvm_id: usize) -> anyhow::Result<&mut Option<u8>> {
+        self.tvm_owner
+            .get_mut(tsm_id)
+            .and_then(|tvms| tvms.get_mut(tvm_id))
+            .ok_or_else(|| anyhow::anyhow!("bad tsm_id {} or tvm_id {}", tsm_id, tvm_id))
+    }
+
+    /* Record the creator of a TVM. A TSM must not hand out an id already in use. */
+    pub fn assign_tvm(
+        &mut self,
+        tsm_id: usize,
+        tvm_id: usize,
+        owner_id: usize,
+    ) -> anyhow::Result<()> {
+        /* Domain ids index a MAX_SUPERVISOR_DOMAINS (64) table, so they fit in a u8. */
+        let owner = u8::try_from(owner_id)?;
+        let slot = self.tvm_slot(tsm_id, tvm_id)?;
+        if let Some(owner) = *slot {
+            anyhow::bail!(
+                "tvm {} of tsm {} already owned by domain {}",
+                tvm_id,
+                tsm_id,
+                owner
+            );
+        }
+        *slot = Some(owner);
+        Ok(())
+    }
+
+    /* Forget a destroyed TVM; only its owner can have destroyed it. */
+    pub fn remove_tvm(
+        &mut self,
+        tsm_id: usize,
+        tvm_id: usize,
+        owner_id: usize,
+    ) -> anyhow::Result<()> {
+        let slot = self.tvm_slot(tsm_id, tvm_id)?;
+        if *slot != u8::try_from(owner_id).ok() {
+            anyhow::bail!(
+                "tvm {} of tsm {} is not owned by domain {}",
+                tvm_id,
+                tsm_id,
+                owner_id
+            );
+        }
+        *slot = None;
+        Ok(())
+    }
+
+    pub fn is_tvm_owned_by(&self, tsm_id: usize, tvm_id: usize, owner_id: usize) -> bool {
+        self.tvm_owner
+            .get(tsm_id)
+            .and_then(|tvms| tvms.get(tvm_id))
+            .is_some_and(|owner| owner.is_some_and(|owner| usize::from(owner) == owner_id))
+    }
+}
+
+/* Impl for memory tracking system */
+impl State {
     /* This does not start borrowing, but returns a ticket to the transaction */
-    pub fn request_borrow(&mut self, req: BorrowKind) -> anyhow::Result<usize> {
+    pub fn request_borrow(&mut self, req: Borrow) -> anyhow::Result<usize> {
         for _ in 0..MAX_TICKET {
             self.next_ticket = if self.next_ticket == MAX_TICKET {
                 1
@@ -342,78 +411,57 @@ impl State {
 
     /*
      * Confirm a transaction only when it is returned by the same owner/TSM
-     * pair that created it. The caller identities come from the active
-     * OpenSBI domains, not TSM-controlled registers.
+     * pair that created it, and as the same kind of operation. The caller
+     * identities come from the active OpenSBI domains, not TSM-controlled
+     * registers. Every check runs before any state changes.
      */
     pub fn take_borrow(
         &mut self,
         ticket: usize,
         owner_id: usize,
         tsm_id: usize,
-    ) -> anyhow::Result<Allocation> {
+        kind: BorrowKind,
+    ) -> anyhow::Result<PhysicalMemoryBlock> {
         if !(1..=MAX_TICKET).contains(&ticket) {
             return Err(anyhow::anyhow!("invalid ticket"));
         }
         let borrow = self.pending_memory_allocations[ticket]
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("invalid ticket"))?;
-        let (base_address, num_pages) = match borrow {
-            BorrowKind::Convert {
-                base_address,
-                num_pages,
-                owner_id: _,
-                tsm_id: _,
-            }
-            | BorrowKind::Reclaim {
-                base_address,
-                num_pages,
-                owner_id: _,
-                tsm_id: _,
-            } => (*base_address, *num_pages),
-        };
 
-        if !borrow.belongs_to(owner_id, tsm_id) {
+        if !borrow.block.belongs_to(owner_id, tsm_id) {
             return Err(anyhow::anyhow!(
                 "borrow returned by an unexpected domain pair"
             ));
         }
+        if borrow.kind != kind {
+            return Err(anyhow::anyhow!("borrow returned by a different operation"));
+        }
 
-        match borrow {
-            BorrowKind::Convert { .. } => {
-                if self.memory_allocations.len() == MAX_TICKET {
-                    return Err(anyhow::anyhow!("cannot confirm borrow"));
-                }
-
-                let allocation = Allocation {
-                    base_address,
-                    num_pages,
-                    owner_id,
-                    tsm_id,
-                };
+        let block = &borrow.block;
+        let allocation = match borrow.kind {
+            BorrowKind::Convert => {
                 self.memory_allocations
-                    .push(allocation.clone())
+                    .push(block.clone())
                     .map_err(|_| anyhow::anyhow!("cannot confirm borrow"))?;
-                self.pending_memory_allocations[ticket] = None;
-                Ok(allocation)
+                block.clone()
             }
-            BorrowKind::Reclaim { .. } => {
+            BorrowKind::Reclaim => {
                 let idx = self
                     .memory_allocations
                     .iter()
-                    .enumerate()
-                    .position(|(_, allocation)| {
-                        allocation.base_address == base_address
-                            && allocation.num_pages == num_pages
-                            && allocation.owner_id == owner_id
-                            && allocation.tsm_id == tsm_id
+                    .position(|allocation| {
+                        allocation.base_address == block.base_address
+                            && allocation.num_pages == block.num_pages
+                            && allocation.owner_id == block.owner_id
+                            && allocation.tsm_id == block.tsm_id
                     })
                     .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
-
-                let allocation = self.memory_allocations.remove(idx);
-                self.pending_memory_allocations[ticket] = None;
-                Ok(allocation)
+                self.memory_allocations.remove(idx)
             }
-        }
+        };
+        self.pending_memory_allocations[ticket] = None;
+        Ok(allocation)
     }
 
     /* Delete a transaction only for its original owner/TSM pair. */
@@ -429,7 +477,7 @@ impl State {
         let borrow = self.pending_memory_allocations[ticket]
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("invalid ticket"))?;
-        if !borrow.belongs_to(owner_id, tsm_id) {
+        if !borrow.block.belongs_to(owner_id, tsm_id) {
             return Err(anyhow::anyhow!(
                 "borrow returned by an unexpected domain pair"
             ));

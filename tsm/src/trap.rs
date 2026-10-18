@@ -198,19 +198,18 @@ fn handle_guest_hsm(ctx: *mut VmTrapContext, fid: usize, args: &[usize; 6]) -> S
 }
 
 fn guest_shutdown_to_host() -> ! {
-    let _owner = {
-        let mut state_lock = crate::STATE.lock();
-        let state = state_lock.as_mut().expect("TSM state not initialized");
-        let tvmid = state
-            .hypervisor
-            .current_vcpu()
-            .expect("trap with no running TVM")
-            .tvmid;
-        state
-            .hypervisor
-            .tvm_shutdown(tvmid)
-            .expect("TVM is not running")
-    };
+    let mut state_lock = crate::STATE.lock();
+    let state = state_lock.as_mut().expect("TSM state not initialized");
+    let tvmid = state
+        .hypervisor
+        .current_vcpu()
+        .expect("trap with no running TVM")
+        .tvmid;
+    state
+        .hypervisor
+        .tvm_shutdown(tvmid)
+        .expect("TVM is not running");
+    drop(state_lock);
 
     #[cfg(feature = "standalone")]
     {
@@ -231,15 +230,22 @@ fn guest_shutdown_to_host() -> ! {
     }
 
     #[cfg(not(feature = "standalone"))]
-    return_to_host(_owner)
+    return_to_host()
 }
 
-fn hyper_exit_to_host(state: &mut crate::TsmState, tvmid: usize) -> ! {
-    let owner = state
+fn hyper_exit_to_host(
+    mut state_lock: spin::MutexGuard<'_, Option<crate::TsmState>>,
+    tvmid: usize,
+) -> ! {
+    state_lock
+        .as_mut()
+        .expect("TSM state not initialized")
         .hypervisor
         .tvm_shutdown(tvmid)
         .expect("TVM is not running");
-    return_to_host(owner)
+    // return_to_host never returns, so the lock must be released here.
+    drop(state_lock);
+    return_to_host()
 }
 
 fn guest_suspend(ctx: *mut VmTrapContext) -> ! {
@@ -254,17 +260,17 @@ fn guest_suspend(ctx: *mut VmTrapContext) -> ! {
         .current_vcpu()
         .expect("suspend with no running TVM")
         .tvmid;
-    let owner = state
+    state
         .hypervisor
         .suspend_tvm(tvmid)
         .expect("failed to suspend TVM");
     drop(state_lock);
 
-    return_to_host(owner)
+    return_to_host()
 }
 
-fn return_to_host(owner: usize) -> ! {
-    let return_fid = ((owner & 0x3F) << 26) | SBI_COVH_RUN_TVM_VCPU;
+fn return_to_host() -> ! {
+    let return_fid = SBI_COVH_RUN_TVM_VCPU;
 
     unsafe {
         core::arch::asm!(
@@ -328,7 +334,7 @@ fn handle_page_fault(htval: usize, stval: usize) {
             "[OLORIN] Guest page fault outside TVM memory regions: GPA=0x{:x}",
             gpa
         );
-        hyper_exit_to_host(state, tvmid);
+        hyper_exit_to_host(state_lock, tvmid);
     }
 
     let (page_table_addr, page_table_size) = state
@@ -345,12 +351,12 @@ fn handle_page_fault(htval: usize, stval: usize) {
                     "[OLORIN] Guest page fault with no lazy state: GPA=0x{:x}",
                     gpa
                 );
-                hyper_exit_to_host(state, tvmid);
+                hyper_exit_to_host(state_lock, tvmid);
             }
         },
         None => {
             println!("[OLORIN] Page fault with no running TVM: GPA=0x{:x}", gpa);
-            hyper_exit_to_host(state, tvmid);
+            hyper_exit_to_host(state_lock, tvmid);
         }
     };
     // Allocate a physical page (simple bump allocation)

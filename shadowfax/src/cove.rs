@@ -16,8 +16,10 @@
 use core::mem::offset_of;
 
 use common::sbi::{
-    COVH_DEFAULT_PAGE_SIZE, PAGE_SIZE, SBI_COVH_CONVERT_PAGES, SBI_COVH_CREATE_TVM,
-    SBI_COVH_EXT_ID, SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES,
+    COVH_DEFAULT_PAGE_SIZE, PAGE_SIZE, SBI_COVH_ADD_TVM_MEASURED_PAGES,
+    SBI_COVH_ADD_TVM_MEMORY_REGION, SBI_COVH_ADD_ZERO_PAGES, SBI_COVH_CONVERT_PAGES,
+    SBI_COVH_CREATE_TVM, SBI_COVH_CREATE_TVM_VCPU, SBI_COVH_DESTROY_TVM, SBI_COVH_EXT_ID,
+    SBI_COVH_FINALIZE_TVM, SBI_COVH_GET_TSM_INFO, SBI_COVH_RECLAIM_PAGES, SBI_COVH_RUN_TVM_VCPU,
     SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
 use heapless::Vec;
@@ -28,7 +30,7 @@ use crate::{
     domain::MemoryRegion,
     opensbi,
     platform::MAX_MEMORY_REGIONS,
-    state::{tee_stack_top, Allocation, BorrowKind, State, STATE},
+    state::{tee_stack_top, Borrow, BorrowKind, PhysicalMemoryBlock, State, STATE},
 };
 
 macro_rules! cove_unpack_fid {
@@ -151,8 +153,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // unlock the state
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
+    let hart_id = unsafe { riscv::register::mhartid::read() };
     let src_id = unsafe {
-        let hart_id = riscv::register::mhartid::read();
         let hart_index = opensbi::sbi_hartid_to_hartindex(hart_id as u32);
         let domain = opensbi::sbi_hartindex_to_domain(hart_index);
         (*domain).index as usize
@@ -169,8 +171,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
         return unsafe { return_error(base_ctx, -1) };
     }
 
-    // TEECALL
-    if state.domains[dst_id].has_tsm {
+    // TEECALL: switch to the TSM. TEERET: switch back to the recorded caller.
+    let dst_id = if state.domains[dst_id].has_tsm {
         let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
         // check if the domain is trusted. If not just return an error to the caller
         if !state.domains[dst_id].is_trusted(src_id) {
@@ -203,17 +205,6 @@ extern "C" fn covh_handler(fid: usize) -> usize {
 
         // Perform operations to allow the specific functionality
         match fid {
-            SBI_COVH_CREATE_TVM => {
-                let params_addr = unsafe { (*domain_ctx).regs[10] };
-                let params_size = unsafe { (*domain_ctx).regs[11] };
-                if params_size != 2 * size_of::<usize>()
-                    || params_addr % align_of::<usize>() != 0
-                    || !state.domain_owns_ram_range(src_id, params_addr, params_size)
-                    || state.start_bootstrap(src_id, dst_id).is_err()
-                {
-                    return unsafe { return_error(base_ctx, -1) };
-                }
-            }
             // For sbi_covh_get_domain_info we need to give the TSM access to the memory space
             // where he will write the domain_info struct (a0) for the necessary size (a1).
             SBI_COVH_GET_TSM_INFO => {
@@ -269,12 +260,15 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 }
 
                 let ticket = state
-                    .request_borrow(BorrowKind::new_alloc(
-                        src_id,
-                        dst_id,
-                        base_address,
-                        num_pages,
-                    ))
+                    .request_borrow(Borrow {
+                        kind: BorrowKind::Convert,
+                        block: PhysicalMemoryBlock {
+                            base_address,
+                            num_pages,
+                            owner_id: src_id,
+                            tsm_id: dst_id,
+                        },
+                    })
                     .unwrap();
 
                 /* Store the ticket in a6 register */
@@ -295,12 +289,15 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 }
 
                 let ticket = state
-                    .request_borrow(BorrowKind::new_reclaim(
-                        src_id,
-                        dst_id,
-                        base_address,
-                        num_pages,
-                    ))
+                    .request_borrow(Borrow {
+                        kind: BorrowKind::Reclaim,
+                        block: PhysicalMemoryBlock {
+                            base_address,
+                            num_pages,
+                            owner_id: src_id,
+                            tsm_id: dst_id,
+                        },
+                    })
                     .unwrap();
 
                 /* Store the ticket in a6 register */
@@ -308,23 +305,89 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     (*domain_ctx).regs[16] |= (ticket & 0x3FF) << 16;
                 }
             }
+            SBI_COVH_CREATE_TVM => {
+                let params_addr = unsafe { (*domain_ctx).regs[10] };
+                let params_size = unsafe { (*domain_ctx).regs[11] };
+                if params_size != 2 * size_of::<usize>()
+                    || params_addr % align_of::<usize>() != 0
+                    || !state.domain_owns_ram_range(src_id, params_addr, params_size)
+                    || state.start_bootstrap(src_id, dst_id).is_err()
+                {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
+                let (page_table, state_page) = unsafe {
+                    (
+                        core::ptr::read(params_addr as *const usize),
+                        core::ptr::read((params_addr + 8) as *const usize),
+                    )
+                };
+                let pages = state_page
+                    .checked_sub(page_table)
+                    .map(|t| t / PAGE_SIZE + 1);
+                if !pages
+                    .is_some_and(|n| state.owns_confidential_range(src_id, dst_id, page_table, n))
+                {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
+            }
+
+            SBI_COVH_ADD_TVM_MEASURED_PAGES => {
+                let tvm_id = unsafe { (*domain_ctx).regs[10] };
+                let src_base_address = unsafe { (*domain_ctx).regs[11] };
+                let dst_base_address = unsafe { (*domain_ctx).regs[12] };
+                let num_pages = unsafe { (*domain_ctx).regs[14] };
+                let src_ok = num_pages.checked_mul(PAGE_SIZE).is_some_and(|size| {
+                    state.domain_owns_ram_range(src_id, src_base_address, size)
+                });
+                if !state.is_tvm_owned_by(dst_id, tvm_id, src_id)
+                    || !src_ok
+                    || !state.owns_confidential_range(src_id, dst_id, dst_base_address, num_pages)
+                {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
+            }
+            SBI_COVH_ADD_ZERO_PAGES => {
+                let tvm_id = unsafe { (*domain_ctx).regs[10] };
+                let base_address = unsafe { (*domain_ctx).regs[11] };
+                let num_pages = unsafe { (*domain_ctx).regs[13] };
+                if !state.is_tvm_owned_by(dst_id, tvm_id, src_id)
+                    || !state.owns_confidential_range(src_id, dst_id, base_address, num_pages)
+                {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
+            }
+            SBI_COVH_ADD_TVM_MEMORY_REGION
+            | SBI_COVH_FINALIZE_TVM
+            | SBI_COVH_RUN_TVM_VCPU
+            | SBI_COVH_CREATE_TVM_VCPU
+            | SBI_COVH_DESTROY_TVM => {
+                let tvm_id = unsafe { (*domain_ctx).regs[10] };
+                if !state.is_tvm_owned_by(dst_id, tvm_id, src_id) {
+                    return unsafe { return_error(base_ctx, -1) };
+                }
+            }
             _ => {}
         }
         unsafe {
+            state.outstanding_calls[hart_id] = Some(src_id);
             let ret = opensbi::sbi_domain_change_active(dst_id as u32);
             assert!(ret == 0);
         }
+        dst_id
     } else {
         // TEERET
         // We don't need to store the calling context since we are implementing the
         // non reentrant TSM. We need a0 and a1 registers to deliver the result
         //
         // dst_id is the untrusted domain
+        let dst_id = state.outstanding_calls[hart_id].unwrap();
 
         // Identify the TSM which accepted this caller according to the DT trust map.
 
-        let success = unsafe {
+        let (success, val, call_a0) = unsafe {
             let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
+            /* The caller's context still holds its TEECALL arguments until a0 is overwritten. */
+            let call_a0 = (*domain_ctx).regs[10];
             let eid = (*scratch_ctx).regs[16] & 0xFFFF;
             (*domain_ctx).regs[10] = (*scratch_ctx).regs[10];
             (*domain_ctx).regs[11] = (*scratch_ctx).regs[11];
@@ -333,7 +396,11 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             (*domain_ctx).mepc += 4;
 
             /* Based on a0 register we know if the TEECALL was successful */
-            (*domain_ctx).regs[10] as isize == 0
+            (
+                (*domain_ctx).regs[10] as isize == 0,
+                (*domain_ctx).regs[11],
+                call_a0,
+            )
         };
 
         match fid {
@@ -342,8 +409,21 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let _ = state.domains[src_id].memory_regions.pop();
             }
             SBI_COVH_CREATE_TVM => {
-                if !success {
+                /* src_id is the TSM, dst_id the creator, val the TVM id chosen by the TSM. */
+                if !success || state.assign_tvm(src_id, val, dst_id).is_err() {
                     let _ = state.finish_bootstrap(dst_id, src_id);
+                    /* The caller must not believe it holds a TVM it cannot use. */
+                    unsafe {
+                        let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
+                        (*domain_ctx).regs[10] = -1isize as usize;
+                        (*domain_ctx).regs[11] = 0;
+                    }
+                }
+            }
+            SBI_COVH_DESTROY_TVM => {
+                /* The TVM id is the caller's a0; forget it only once the TSM destroyed it. */
+                if success {
+                    let _ = state.remove_tvm(src_id, call_a0, dst_id);
                 }
             }
             SBI_COVH_CONVERT_PAGES => {
@@ -351,8 +431,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let a6 = unsafe { (*scratch_ctx).regs[16] };
                 let ticket = (a6 & (0x3FF << 16)) >> 16;
                 if success {
-                    match state.take_borrow(ticket, dst_id, src_id) {
-                        Ok(Allocation {
+                    match state.take_borrow(ticket, dst_id, src_id, BorrowKind::Convert) {
+                        Ok(PhysicalMemoryBlock {
                             base_address,
                             num_pages,
                             owner_id: _,
@@ -403,8 +483,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let a6 = unsafe { (*scratch_ctx).regs[16] };
                 let ticket = (a6 & (0x3FF << 16)) >> 16;
                 if success {
-                    match state.take_borrow(ticket, dst_id, src_id) {
-                        Ok(Allocation {
+                    match state.take_borrow(ticket, dst_id, src_id, BorrowKind::Reclaim) {
+                        Ok(PhysicalMemoryBlock {
                             base_address,
                             num_pages,
                             owner_id: _,
@@ -459,7 +539,8 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             let ret = opensbi::sbi_domain_change_active(dst_id as u32);
             assert!(ret == 0);
         }
-    }
+        dst_id
+    };
 
     program_domain_pmp(state, dst_id);
     return state.domains[dst_id].context_addr;
@@ -688,7 +769,7 @@ pub(crate) fn program_pmp_from_regions(regions: &[MemoryRegion]) {
         write_pmpcfg(index, 0);
     }
     for (i, r) in regions.iter().enumerate() {
-        let ones = (1 << (r.order - 3)) - 1;
+        let ones = (1usize << (r.order - 3)) - 1;
         let range = riscv::register::Range::NAPOT as usize;
         let permission = (r.permissions & 0x7) as usize;
 
