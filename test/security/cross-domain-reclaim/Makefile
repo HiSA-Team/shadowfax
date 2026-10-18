@@ -1,5 +1,6 @@
 ROOT                 := ../../..
 LAUNCHER_NAME        := cross-domain-reclaim
+PAYLOAD_SRC          := guest.c
 BUILD_DIR            ?= $(ROOT)/target/security/$(LAUNCHER_NAME)
 FIRMWARE              = $(BIN_DIR)/shadowfax.bin
 ATTACKER_ADDRESS      = $(SHADOWFAX_REGION_ATTACKER_MEMORY_BASE)
