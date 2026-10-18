@@ -94,7 +94,7 @@ opensbi-patch: $(OPENSBI_PATCH)
 		echo "OpenSBI submodule is not initialized; run: git submodule update --init shadowfax/opensbi" >&2; \
 		exit 1; \
 	}; \
-	if git -C shadowfax/opensbi apply --reverse --check "$$patch"; then \
+	if git -C shadowfax/opensbi apply --reverse --check "$$patch" 2>/dev/null; then \
 		:; \
 	elif git -C shadowfax/opensbi apply --check "$$patch"; then \
 		git -C shadowfax/opensbi apply "$$patch"; \
