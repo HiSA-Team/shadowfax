@@ -116,7 +116,7 @@ pub fn tee_stack_top() -> usize {
 }
 
 #[derive(Clone)]
-pub struct PhysicalMemoryBlock {
+pub struct PhysicalMemory {
     pub base_address: usize,
     pub num_pages: usize,
     pub owner_id: usize,
@@ -132,10 +132,10 @@ pub enum BorrowKind {
 /* A pending transaction: what is being borrowed, and how. */
 pub struct Borrow {
     pub kind: BorrowKind,
-    pub block: PhysicalMemoryBlock,
+    pub block: PhysicalMemory,
 }
 
-impl PhysicalMemoryBlock {
+impl PhysicalMemory {
     fn belongs_to(&self, owner_id: usize, tsm_id: usize) -> bool {
         self.owner_id == owner_id && self.tsm_id == tsm_id
     }
@@ -160,7 +160,7 @@ pub struct State {
     pending_memory_allocations: [Option<Borrow>; TICKET_SLOTS],
     next_ticket: usize,
     /* Real memory allocations */
-    memory_allocations: Vec<PhysicalMemoryBlock, MAX_ALLOCATIONS>,
+    memory_allocations: Vec<PhysicalMemory, MAX_ALLOCATIONS>,
     bootstrap_grant: Option<BootstrapGrant>,
     /* TVM ownership: tvm_owner[tsm_id][tvm_id] = owner domain */
     tvm_owner: [[Option<u8>; MAX_TVMS_PER_TSM]; MAX_SUPERVISOR_DOMAINS],
@@ -421,7 +421,7 @@ impl State {
         owner_id: usize,
         tsm_id: usize,
         kind: BorrowKind,
-    ) -> anyhow::Result<PhysicalMemoryBlock> {
+    ) -> anyhow::Result<PhysicalMemory> {
         if !(1..=MAX_TICKET).contains(&ticket) {
             return Err(anyhow::anyhow!("invalid ticket"));
         }

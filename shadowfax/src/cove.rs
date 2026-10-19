@@ -30,7 +30,7 @@ use crate::{
     domain::MemoryRegion,
     opensbi,
     platform::MAX_MEMORY_REGIONS,
-    state::{tee_stack_top, Borrow, BorrowKind, PhysicalMemoryBlock, State, STATE},
+    state::{tee_stack_top, Borrow, BorrowKind, PhysicalMemory, State, STATE},
 };
 
 macro_rules! cove_unpack_fid {
@@ -153,7 +153,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
     // unlock the state
     let mut guard = STATE.lock();
     let state = guard.get_mut().unwrap();
-    let hart_id = unsafe { riscv::register::mhartid::read() };
+    let hart_id = riscv::register::mhartid::read();
     let src_id = unsafe {
         let hart_index = opensbi::sbi_hartid_to_hartindex(hart_id as u32);
         let domain = opensbi::sbi_hartindex_to_domain(hart_index);
@@ -262,7 +262,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let ticket = state
                     .request_borrow(Borrow {
                         kind: BorrowKind::Convert,
-                        block: PhysicalMemoryBlock {
+                        block: PhysicalMemory {
                             base_address,
                             num_pages,
                             owner_id: src_id,
@@ -291,7 +291,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let ticket = state
                     .request_borrow(Borrow {
                         kind: BorrowKind::Reclaim,
-                        block: PhysicalMemoryBlock {
+                        block: PhysicalMemory {
                             base_address,
                             num_pages,
                             owner_id: src_id,
@@ -432,7 +432,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let ticket = (a6 & (0x3FF << 16)) >> 16;
                 if success {
                     match state.take_borrow(ticket, dst_id, src_id, BorrowKind::Convert) {
-                        Ok(PhysicalMemoryBlock {
+                        Ok(PhysicalMemory {
                             base_address,
                             num_pages,
                             owner_id: _,
@@ -484,7 +484,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let ticket = (a6 & (0x3FF << 16)) >> 16;
                 if success {
                     match state.take_borrow(ticket, dst_id, src_id, BorrowKind::Reclaim) {
-                        Ok(PhysicalMemoryBlock {
+                        Ok(PhysicalMemory {
                             base_address,
                             num_pages,
                             owner_id: _,
