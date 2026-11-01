@@ -21,6 +21,7 @@
 !/docs
 !/Dockerfile
 !/guests
+!/experiments/analyze.py,
 !/LICENSE
 !/Makefile
 !/MULTIPLE_TSMS.md

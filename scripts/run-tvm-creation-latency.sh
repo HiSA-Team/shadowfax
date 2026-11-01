@@ -50,21 +50,29 @@ LOAD_ADDR=$SHADOWFAX_DOMAIN_UNTRUSTED_DOMAIN_ENTRY
 LAUNCHER="$ROOT/target/tvm-launch-latency/tvm-launch-latency.bin"
 
 RESULTS="$OUT/results.csv"
-echo 'run,kind,operation,cycles,instructions,time_ticks' > "$RESULTS"
+echo 'run,guest_ram_size,kind,operation,cycles,instructions,time_ticks' > "$RESULTS"
 
 for run in $(seq 1 "$RUNS"); do
     log="$OUT/logs/run-$run.log"
     echo "[run $run/$RUNS]"
     set +e
+    # `timeout` runs QEMU in a background process group. With -nographic QEMU
+    # puts stdin into raw mode, and a background process that touches the
+    # terminal gets SIGTTOU/SIGTTIN and stops: the run hangs with an empty log.
+    # Detach stdin and drop the monitor so QEMU never touches the terminal.
     timeout "$QEMU_TIMEOUT" taskset -c 0 qemu-system-riscv64 \
         -M virt -m "$SHADOWFAX_QEMU_MEM" -smp "$SHADOWFAX_SMP" -nographic \
+        -monitor none -no-reboot \
         -bios "$FW" -dtb "$LATENCY_DTB" \
         -device loader,file="$DICE",addr="$DICE_ADDR",force-raw=on \
         -device loader,file="$TSM",addr="$TSM_ADDR",force-raw=on \
         -device loader,file="$TSM_SIGNATURE",addr="$TSM_SIGNATURE_ADDR",force-raw=on \
         -device loader,file="$LAUNCHER",addr="$LOAD_ADDR",force-raw=on \
-        2>&1 | tee "$log" | sed -u -n \
+        </dev/null 2>&1 | tee "$log" | sed -u -n \
         's/\r$//; /^LATENCY,/p; /^\[HOST\]/p'
+    status=${PIPESTATUS[0]}
+    set -e
+    [[ $status -ne 124 ]] || echo "run $run timed out after ${QEMU_TIMEOUT}s" >&2
 
     # The OpenSBI console emits \r\n; normalize before parsing numeric columns.
     tr -d '\r' <"$log" >"$log.tmp" && mv "$log.tmp" "$log"
@@ -73,7 +81,7 @@ for run in $(seq 1 "$RUNS"); do
         echo "run $run did not complete: $log" >&2
         exit 1
     }
-    sed -n 's/^LATENCY,//p' "$log" | sed "s/^/$run,/" >> "$RESULTS"
+    sed -n 's/^LATENCY,//p' "$log" | sed "s/^/$run,$GUEST_RAM_SIZE,/" >> "$RESULTS"
 done
 
 echo "Results: $RESULTS"
