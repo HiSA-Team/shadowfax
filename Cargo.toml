@@ -14,3 +14,9 @@ members = [
 
 [patch.crates-io]
 libfdt-sys = { path = "shadowfax/libfdt-sys" }
+
+# The TSM hashes every measured page with SHA-384; unoptimized, that dominates
+# TVM creation (~5x more instructions at opt-level 0). Optimize it even in
+# debug builds.
+[profile.dev.package.sha2]
+opt-level = 3

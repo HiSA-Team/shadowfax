@@ -23,7 +23,6 @@ use common::sbi::{
     SBI_EXT_SUPD_GET_ACTIVE_DOMAINS, SBI_SUPD_EXT_ID,
 };
 use heapless::Vec;
-use zeroize::Zeroize;
 
 use crate::{
     context::Context,
@@ -460,13 +459,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                                 })
                                 .unwrap();
                             /* Zero out the memory region */
-                            let vec = unsafe {
-                                core::slice::from_raw_parts_mut(
-                                    base_address as *mut u8,
-                                    num_pages * PAGE_SIZE,
-                                )
-                            };
-                            vec.zeroize();
+                            zeroize(base_address, num_pages);
                         }
                         Err(_) => unsafe {
                             let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
@@ -518,7 +511,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                                     num_pages * PAGE_SIZE,
                                 )
                             };
-                            vec.zeroize();
+                            zeroize(base_address, num_pages);
                         }
                         Err(_) => unsafe {
                             let domain_ctx = state.domains[dst_id].context_addr as *mut Context;
@@ -916,4 +909,37 @@ fn add_region_range(
     }
 
     Ok(())
+}
+
+fn zeroize(base_address: usize, num_pages: usize) {
+    let bytes = num_pages * PAGE_SIZE;
+    let base = base_address as *mut u8;
+    #[cfg(all(
+        any(target_arch = "riscv32", target_arch = "riscv64"),
+        target_feature = "zicboz"
+    ))]
+    {
+        use crate::print_raw;
+        const CBO_BLOCK: usize = 64;
+        debug_assert!(base_address % CBO_BLOCK == 0);
+        debug_assert!(bytes % CBO_BLOCK == 0);
+
+        for off in (0..bytes).step_by(CBO_BLOCK) {
+            unsafe {
+                core::arch::asm!(
+                    "cbo.zero ({0})",
+                    in(reg) base.add(off),
+                    options(nostack, preserves_flags),
+                );
+            }
+        }
+    }
+    #[cfg(not(all(
+        any(target_arch = "riscv32", target_arch = "riscv64"),
+        target_feature = "zicboz"
+    )))]
+    {
+        use zeroize::Zeroize;
+        unsafe { core::slice::from_raw_parts_mut(base, bytes) }.zeroize();
+    }
 }
