@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.24.0"
+__generated_with = "0.25.2"
 app = marimo.App(width="medium")
 
 
@@ -98,7 +98,7 @@ def _(pd):
 
     _frames = [
         pd.read_csv(path)
-        for path in sorted(Path("./tvm-launch-latency").glob("run-*/results.csv"))
+        for path in sorted(Path("./experiments/tvm-launch-latency").glob("run-*/results.csv"))
     ]
     latency = pd.concat([f for f in _frames if "guest_ram_size" in f.columns])
     latency["guest_mib"] = latency["guest_ram_size"] // 2**20
@@ -123,7 +123,7 @@ def _(latency, plt):
     _ax.set_title("TVM creation latency vs. guest size")
     _ax.grid(linestyle=":")
     _fig.tight_layout()
-    _fig.savefig("./tvm-launch-latency/creation-latency.pdf")
+    _fig.savefig("./experiments/tvm-launch-latency/creation-latency.pdf")
     _fig
     return
 
@@ -148,7 +148,7 @@ def _(latency, plt):
         ncol=3,
         fontsize="small",
     )
-    _fig.savefig("./tvm-launch-latency/operation-latency.pdf", bbox_inches="tight")
+    _fig.savefig("./experiments/tvm-launch-latency/operation-latency.pdf", bbox_inches="tight")
     _fig
     return
 
