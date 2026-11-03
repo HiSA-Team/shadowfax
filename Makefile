@@ -14,7 +14,7 @@
 #
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 
-RUSTFLAGS         ?= -C target-feature=+h,+zicboz
+RUSTFLAGS         ?= -C target-feature=+h,+zicboz,+zicbom
 HOST_ARCHITECTURE := $(shell uname -m)
 HOST_TRIPLET      := $(shell rustc -vV | awk '/^host:/ { print $$2 }')
 HOST_LIBC         := $(shell if ldd --version 2>&1 | grep -q musl; then echo musl; else echo gnu; fi)

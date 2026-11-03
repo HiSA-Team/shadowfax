@@ -917,9 +917,17 @@ fn add_region_range(
 /// size, so the first call measures it on the (page-aligned) target: fill its
 /// first page, zero one block and count the cleared bytes. Without Zicboz,
 /// fall back to `zeroize`.
+///
+/// Either way the zeros may sit dirty in the cache. With Zicbom, write them
+/// back with `cbo.clean` so agents that read DRAM without going through the
+/// coherent cache (non-coherent DMA, mismatched cacheability) also see zeros.
 fn zeroize(base_address: usize, num_pages: usize) {
     use core::sync::atomic::{AtomicUsize, Ordering};
     static CBO_BLOCK: AtomicUsize = AtomicUsize::new(0);
+    /// Zicbom block size. Unlike the Zicboz one it cannot be probed, so it
+    /// follows `riscv,cbom-block-size` in `platform/generic/base.dtsi`. It
+    /// must not exceed the real block size, or some lines are skipped.
+    const CBOM_BLOCK: usize = 64;
 
     let bytes = num_pages * PAGE_SIZE;
     if bytes == 0 {
@@ -948,6 +956,7 @@ fn zeroize(base_address: usize, num_pages: usize) {
                 .count();
             CBO_BLOCK.store(block, Ordering::Relaxed);
         }
+        debug_assert!(block > 0 && PAGE_SIZE % block == 0);
 
         for offset in (0..bytes).step_by(block) {
             cbo_zero(base_address + offset);
@@ -955,5 +964,22 @@ fn zeroize(base_address: usize, num_pages: usize) {
     } else {
         use zeroize::Zeroize;
         unsafe { core::slice::from_raw_parts_mut(base_address as *mut u8, bytes) }.zeroize();
+    }
+
+    if cfg!(target_feature = "zicbom") {
+        for offset in (0..bytes).step_by(CBOM_BLOCK) {
+            unsafe {
+                core::arch::asm!(
+                    ".option push",
+                    ".option arch, +zicbom",
+                    "cbo.clean ({0})",
+                    ".option pop",
+                    in(reg) base_address + offset,
+                    options(nostack, preserves_flags),
+                );
+            }
+        }
+        // Order the write-backs before the page is handed to its new owner.
+        unsafe { core::arch::asm!("fence iorw, iorw", options(nostack, preserves_flags)) };
     }
 }
