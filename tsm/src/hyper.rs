@@ -246,13 +246,6 @@ impl HypervisorState {
                     for region in self.confidential_memory.iter_mut() {
                         if let Some(guest) = region.guest_id {
                             if guest == tvmid {
-                                unsafe {
-                                    core::ptr::write_bytes(
-                                        region.base_address as *mut u8,
-                                        0,
-                                        region.size,
-                                    );
-                                }
                                 region.guest_id = None;
                             }
                         }
