@@ -471,6 +471,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                     let _ = state.cancel_borrow(ticket, dst_id, src_id);
                 }
             }
+
             SBI_COVH_RECLAIM_PAGES => {
                 /* Confirm the borrow */
                 let a6 = unsafe { (*scratch_ctx).regs[16] };
@@ -505,12 +506,6 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                                 })
                                 .unwrap();
                             /* Zero out the memory block */
-                            let vec = unsafe {
-                                core::slice::from_raw_parts_mut(
-                                    base_address as *mut u8,
-                                    num_pages * PAGE_SIZE,
-                                )
-                            };
                             zeroize(base_address, num_pages);
                         }
                         Err(_) => unsafe {
@@ -752,8 +747,13 @@ fn program_domain_pmp(state: &State, domain_id: usize) {
                 .expect("bootstrap PMP map exceeds available entries");
         }
     }
-
-    program_pmp_from_regions(&regions);
+    riscv::interrupt::free(|| {
+        unsafe {
+            program_pmp_from_regions(&regions);
+            // Required if S-mode paging is implemented
+            core::arch::asm!("sfence.vma x0, x0");
+        }
+    });
 }
 
 pub(crate) fn program_pmp_from_regions(regions: &[MemoryRegion]) {
@@ -854,7 +854,6 @@ fn compute_new_regions(
         // Case 2: Keep the fragment before the removed range
         if region_start < target_start {
             let before_end = target_start.min(region_end);
-
             add_region_range(
                 &mut new_regions,
                 region_start,
@@ -863,6 +862,7 @@ fn compute_new_regions(
                 region.permissions,
             )?;
         }
+
         // Case 3: Keep the fragment after the removed range
         if region_end > target_end {
             let after_start = target_end.max(region_start);
@@ -911,35 +911,49 @@ fn add_region_range(
     Ok(())
 }
 
+/// Zero `num_pages` pages starting at `base_address`.
+///
+/// With Zicboz, clear one cache block per `cbo.zero`. No CSR reports the block
+/// size, so the first call measures it on the (page-aligned) target: fill its
+/// first page, zero one block and count the cleared bytes. Without Zicboz,
+/// fall back to `zeroize`.
 fn zeroize(base_address: usize, num_pages: usize) {
-    let bytes = num_pages * PAGE_SIZE;
-    let base = base_address as *mut u8;
-    #[cfg(all(
-        any(target_arch = "riscv32", target_arch = "riscv64"),
-        target_feature = "zicboz"
-    ))]
-    {
-        use crate::print_raw;
-        const CBO_BLOCK: usize = 64;
-        debug_assert!(base_address % CBO_BLOCK == 0);
-        debug_assert!(bytes % CBO_BLOCK == 0);
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    static CBO_BLOCK: AtomicUsize = AtomicUsize::new(0);
 
-        for off in (0..bytes).step_by(CBO_BLOCK) {
-            unsafe {
-                core::arch::asm!(
-                    "cbo.zero ({0})",
-                    in(reg) base.add(off),
-                    options(nostack, preserves_flags),
-                );
-            }
-        }
+    let bytes = num_pages * PAGE_SIZE;
+    if bytes == 0 {
+        return;
     }
-    #[cfg(not(all(
-        any(target_arch = "riscv32", target_arch = "riscv64"),
-        target_feature = "zicboz"
-    )))]
-    {
+
+    if cfg!(target_feature = "zicboz") {
+        let cbo_zero = |address: usize| unsafe {
+            core::arch::asm!(
+                ".option push",
+                ".option arch, +zicboz",
+                "cbo.zero ({0})",
+                ".option pop",
+                in(reg) address,
+                options(nostack, preserves_flags),
+            );
+        };
+
+        let mut block = CBO_BLOCK.load(Ordering::Relaxed);
+        if block == 0 {
+            let page = base_address as *mut u8;
+            unsafe { core::ptr::write_bytes(page, 0xff, PAGE_SIZE) };
+            cbo_zero(base_address);
+            block = (0..PAGE_SIZE)
+                .take_while(|&i| unsafe { page.add(i).read_volatile() } == 0)
+                .count();
+            CBO_BLOCK.store(block, Ordering::Relaxed);
+        }
+
+        for offset in (0..bytes).step_by(block) {
+            cbo_zero(base_address + offset);
+        }
+    } else {
         use zeroize::Zeroize;
-        unsafe { core::slice::from_raw_parts_mut(base, bytes) }.zeroize();
+        unsafe { core::slice::from_raw_parts_mut(base_address as *mut u8, bytes) }.zeroize();
     }
 }
