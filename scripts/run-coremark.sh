@@ -5,6 +5,13 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUNS=${1:-3}
 OUT=${2:-"$ROOT/experiments/coremark/run-$(date -u +%Y%m%dT%H%M%SZ)"}
 TARGET=riscv64imac-unknown-none-elf
+# Build profile of the TSM under test: debug (default) or release.
+PROFILE=${PROFILE:-debug}
+case $PROFILE in
+    debug) CARGO_PROFILE=() ;;
+    release) CARGO_PROFILE=(--release) ;;
+    *) echo "PROFILE must be debug or release, got: $PROFILE" >&2; exit 2 ;;
+esac
 ITERATIONS=30000
 COREMARK="$ROOT/guests/bare-metal/coremark"
 BASE_INITRD="$ROOT/bin/linux-tvm-initramfs.cpio.gz"
@@ -38,7 +45,7 @@ TSM_GUEST_ELF="$WORK/s-mode/coremark.bin" \
     TSM_GUEST_DTB="$WORK/empty" TSM_GUEST_INITRD="$WORK/empty" \
     RUSTFLAGS='-C target-feature=+h' \
     cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
-    -p tsm --features standalone >"$OUT/logs/tsm-build.log" 2>&1
+    -p tsm "${CARGO_PROFILE[@]}" --features standalone >"$OUT/logs/tsm-build.log" 2>&1
 
 echo 'pair,mode,run,total_ticks,tick_hz,benchmark_seconds,iterations,iterations_per_second,verification_status' >"$OUT/results.csv"
 
@@ -52,7 +59,7 @@ for mode in m-mode s-mode-tvm; do
                 -monitor none -no-reboot -bios "$WORK/m-mode/coremark.bin" >"$log" 2>&1
         else
             taskset -c 0 qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
-                -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/debug/tsm" >"$log" 2>&1
+                -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" >"$log" 2>&1
         fi
 
         tr -d '\r' <"$log" >"$WORK/result.log"
@@ -135,12 +142,12 @@ echo "Embedding Linux CoreMark TVM"
 TSM_GUEST_ELF="$KERNEL_ELF" TSM_GUEST_DTB="$TVM_DTB" \
     TSM_GUEST_INITRD="$INITRD" RUSTFLAGS='-C target-feature=+h' \
     cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
-    -p tsm --features standalone >"$OUT/logs/linux-tsm-build.log" 2>&1
+    -p tsm "${CARGO_PROFILE[@]}" --features standalone >"$OUT/logs/linux-tsm-build.log" 2>&1
 
 TVM_LOG="$OUT/logs/linux-tvm.log"
 echo "[linux-tvm] $RUNS run(s)"
 taskset -c 0 qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
-    -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/debug/tsm" \
+    -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" \
     2>&1 | tee "$TVM_LOG" | sed -u -n 's/\r$//; /^COREMARK_RUN,/p; /^COREMARK_RESULT,/p'
 
 TVM_RESULTS=$(tr -d '\r' <"$TVM_LOG" | grep -c '^COREMARK_RESULT,' || true)

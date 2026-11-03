@@ -8,6 +8,13 @@ OUT=${2:-"$ROOT/experiments/rv8/run-$(date -u +%Y%m%dT%H%M%SZ)"}
 RV_PREFIX=${RV_PREFIX:-riscv64-unknown-linux-gnu-}
 RUSTFLAGS=${RUSTFLAGS:--C target-feature=+h}
 TARGET=riscv64imac-unknown-none-elf
+# Build profile of the TSM under test: debug (default) or release.
+PROFILE=${PROFILE:-debug}
+case $PROFILE in
+    debug) CARGO_PROFILE=() ;;
+    release) CARGO_PROFILE=(--release) ;;
+    *) echo "PROFILE must be debug or release, got: $PROFILE" >&2; exit 2 ;;
+esac
 BENCHMARKS=(aes bigint dhrystone miniz norx primes qsort sha512)
 
 [[ $RUNS =~ ^[1-9][0-9]*$ ]] || { echo "usage: $0 [runs] [output-directory]" >&2; exit 2; }
@@ -115,7 +122,7 @@ if ! TSM_GUEST_ELF="$KERNEL_ELF" \
     TSM_GUEST_INITRD="$INITRD" \
     RUSTFLAGS="$RUSTFLAGS" \
     cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
-        -p tsm --features standalone >"$WORK/tsm-build.log" 2>&1; then
+        -p tsm "${CARGO_PROFILE[@]}" --features standalone >"$WORK/tsm-build.log" 2>&1; then
     cat "$WORK/tsm-build.log" >&2
     exit 1
 fi
@@ -126,7 +133,7 @@ echo "===== TVM LINUX: QEMU -> TSM -> guest Linux, host CPU 0 =====" | tee "$TVM
 taskset -c 0 qemu-system-riscv64 \
     -M virt -m 1G -smp 1 -display none -monitor none \
     -chardev stdio,id=console,signal=on -serial chardev:console -no-reboot \
-    -kernel "$ROOT/target/$TARGET/debug/tsm" \
+    -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" \
     2>&1 | tee -a "$TVM_LOG" | sed -u -n 's/\r$//; /^RV8_RESULT,/p'
 
 TVM_RESULTS=$(tr -d '\r' <"$TVM_LOG" | grep -c '^RV8_RESULT,' || true)

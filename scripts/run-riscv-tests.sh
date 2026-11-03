@@ -5,6 +5,13 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUNS=${1:-3}
 OUT=${2:-"$ROOT/experiments/riscv-tests/run-$(date -u +%Y%m%dT%H%M%SZ)"}
 TARGET=riscv64imac-unknown-none-elf
+# Build profile of the TSM under test: debug (default) or release.
+PROFILE=${PROFILE:-debug}
+case $PROFILE in
+    debug) CARGO_PROFILE=() ;;
+    release) CARGO_PROFILE=(--release) ;;
+    *) echo "PROFILE must be debug or release, got: $PROFILE" >&2; exit 2 ;;
+esac
 BENCHMARKS=(median memcpy multiply qsort rsort)
 SUITE="$ROOT/guests/bare-metal/riscv-tests/benchmarks"
 BASE_INITRD="$ROOT/bin/linux-tvm-initramfs.cpio.gz"
@@ -70,13 +77,13 @@ for benchmark in "${BENCHMARKS[@]}"; do
         TSM_GUEST_DTB="$WORK/empty" TSM_GUEST_INITRD="$WORK/empty" \
         RUSTFLAGS='-C target-feature=+h' \
         cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
-        -p tsm --features standalone >"$OUT/logs/$benchmark-tsm-build.log" 2>&1
+        -p tsm "${CARGO_PROFILE[@]}" --features standalone >"$OUT/logs/$benchmark-tsm-build.log" 2>&1
 
     for run in $(seq 1 "$RUNS"); do
         echo "[s-mode-tvm] $benchmark run $run/$RUNS"
         log="$OUT/logs/s-mode-tvm-$benchmark-$run.log"
         taskset -c 0 qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
-            -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/debug/tsm" >"$log" 2>&1
+            -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" >"$log" 2>&1
 
         cycles=$(sed -n -E 's/^m?cycle = ([0-9]+).*/\1/p' "$log" | tail -1)
         instructions=$(sed -n -E 's/^m?instret = ([0-9]+).*/\1/p' "$log" | tail -1)
@@ -148,12 +155,12 @@ echo "Embedding Linux RISC-V tests TVM-STATIC"
 TSM_GUEST_ELF="$KERNEL_ELF" TSM_GUEST_DTB="$TVM_DTB" \
     TSM_GUEST_INITRD="$INITRD" RUSTFLAGS='-C target-feature=+h' \
     cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
-    -p tsm --features standalone >"$OUT/logs/linux-tsm-build-static.log" 2>&1
+    -p tsm "${CARGO_PROFILE[@]}" --features standalone >"$OUT/logs/linux-tsm-build-static.log" 2>&1
 
 TVM_STATIC_LOG="$OUT/logs/linux-tvm-static.log"
 echo "[linux-tvm-static] running all benchmarks"
 taskset -c 0 qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
-    -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/debug/tsm" \
+    -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" \
     2>&1 | tee "$TVM_STATIC_LOG" | sed -u -n 's/\r$//; /^RISCV_TEST_RUN,/p; /^RISCV_TEST_RESULT,/p'
 
 TVM_DTB="$WORK/linux-tvm-lazy.dtb"
@@ -168,12 +175,12 @@ echo "Embedding Linux RISC-V tests TVM-LAZY"
 TSM_GUEST_ELF="$KERNEL_ELF" TSM_GUEST_DTB="$TVM_DTB" \
     TSM_GUEST_INITRD="$INITRD" RUSTFLAGS='-C target-feature=+h' \
     cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
-    -p tsm --features standalone --features lazy >"$OUT/logs/linux-tsm-build-lazy.log" 2>&1
+    -p tsm "${CARGO_PROFILE[@]}" --features standalone --features lazy >"$OUT/logs/linux-tsm-build-lazy.log" 2>&1
 
 TVM_LAZY_LOG="$OUT/logs/linux-tvm-lazy.log"
 echo "[linux-tvm-lazy] running all benchmarks"
 taskset -c 0 qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
-    -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/debug/tsm" \
+    -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" \
     2>&1 | tee "$TVM_LAZY_LOG" | sed -u -n 's/\r$//; /^RISCV_TEST_RUN,/p; /^RISCV_TEST_RESULT,/p'
 
 for log in "$NATIVE_LOG" "$TVM_STATIC_LOG" "$TVM_LAZY_LOG"; do

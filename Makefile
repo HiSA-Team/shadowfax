@@ -4,6 +4,7 @@
 #
 # - RV_PREFIX:           specify with the path to the target riscv toolchain prefix
 # - PLATFORM:            target platform, this is used for OpenSBI initialization
+# - PROFILE:             debug (default) or release, e.g. `make firmware PROFILE=release`
 #
 # This Makefile stages artifacts; it does not run them. Launch the platform
 # through a launcher under test/, for example `make -C test/standalone-tvm-launcher run`.
@@ -13,7 +14,7 @@
 #
 # Author: Giuseppe Capasso <capassog97@gmail.com>
 
-RUSTFLAGS         ?= -C target-feature=+h
+RUSTFLAGS         ?= -C target-feature=+h,+zicboz
 HOST_ARCHITECTURE := $(shell uname -m)
 HOST_TRIPLET      := $(shell rustc -vV | awk '/^host:/ { print $$2 }')
 HOST_LIBC         := $(shell if ldd --version 2>&1 | grep -q musl; then echo musl; else echo gnu; fi)
@@ -33,7 +34,11 @@ OPENSBI_PATCH              := shadowfax/opensbi-sbi-domain-change-active.diff
 BIN_DIR                     = target/artifacts
 TARGET_DIR                  = $(CURDIR)/target/$(TARGET_TRIPLET)/$(PROFILE)
 KEYS_DIR                    = shadowfax/keys
-CARGO_FLAGS                 =
+CARGO_FLAGS                 = $(if $(filter release,$(PROFILE)),--release)
+# Both profiles stage into the same BIN_DIR, and make cannot see a PROFILE or
+# RUSTFLAGS change on its own. The stamp is rewritten only when they change,
+# which forces cargo and every staged artifact to follow.
+BUILD_STAMP                 = $(BIN_DIR)/.build-config
 
 FW_ELF                      = $(TARGET_DIR)/shadowfax
 FW_BIN                      = $(BIN_DIR)/shadowfax.bin
@@ -59,6 +64,8 @@ export RV_PREFIX
 
 # Needed to avoid passing manually to Cargo
 export RUSTFLAGS
+# Launchers under test/ pick their firmware by PROFILE
+export PROFILE
 
 export PLATFORM
 export FDT_IMAGE
@@ -75,7 +82,7 @@ export LLVM_CONFIG_PATH     := $(CURDIR)/scripts/llvm-config.sh
 endif
 
 .PHONY: all clean firmware tsm tsm-standalone test generate-keys guests help opensbi-patch \
-	$(LAUNCHER_CLEAN)
+	FORCE $(LAUNCHER_CLEAN)
 
 ## all: build tsm, firmware, attestation payload, and platform DTB
 all: guests firmware build-info
@@ -112,16 +119,22 @@ tsm: $(TSM_SIG)
 tsm-standalone:
 	RUSTFLAGS='$(TSM_RUSTFLAGS)' cargo -Z build-std=core,alloc build \
 		--target $(TARGET_TRIPLET) --target-dir $(TSM_STANDALONE_DIR) \
-		-p tsm --features standalone
+		-p tsm --features standalone $(CARGO_FLAGS)
 	@echo "standalone TSM: $(TSM_STANDALONE)"
 
 # Shadowfax: ELF -> flat image -> DICE measurement input.
 # Cargo emits make-compatible dep-info beside each binary; including it below
 # gives these rules the real Rust source list, so nothing needs `make -B`.
-$(FW_ELF): Cargo.lock shadowfax/Cargo.toml shadowfax/memory.x
-	cargo build --target $(TARGET_TRIPLET) -p shadowfax $(CARGO_FLAGS)
+$(BUILD_STAMP): FORCE | $(BIN_DIR)
+	@[ "$$(cat $@ 2>/dev/null)" = "$(PROFILE) $(RUSTFLAGS)" ] || echo "$(PROFILE) $(RUSTFLAGS)" > $@
 
-$(FW_BIN): $(FW_ELF) | $(BIN_DIR)
+# cargo leaves an up-to-date binary untouched; touch it so make sees it as
+# newer than the stamp and does not re-run cargo on every invocation.
+$(FW_ELF): Cargo.lock shadowfax/Cargo.toml shadowfax/memory.x $(BUILD_STAMP)
+	cargo build --target $(TARGET_TRIPLET) -p shadowfax $(CARGO_FLAGS)
+	@touch $@
+
+$(FW_BIN): $(FW_ELF) $(BUILD_STAMP) | $(BIN_DIR)
 	$(OBJCOPY) -O binary $< $@
 
 $(DICE_INPUT): $(FW_BIN) $(DICE_PLATFORM_PRIVATE_KEY) $(DICE_PLATFORM_PUBLIC_KEY) | $(BIN_DIR)
@@ -131,11 +144,12 @@ $(DICE_INPUT): $(FW_BIN) $(DICE_PLATFORM_PRIVATE_KEY) $(DICE_PLATFORM_PUBLIC_KEY
 		$< $@
 
 # TSM: position-independent ELF -> stripped image -> detached signature.
-$(TSM_ELF): Cargo.lock tsm/Cargo.toml tsm/memory.x
+$(TSM_ELF): Cargo.lock tsm/Cargo.toml tsm/memory.x $(BUILD_STAMP)
 	RUSTFLAGS='$(TSM_RUSTFLAGS)' cargo -Z build-std=core,alloc build \
 		--target $(TARGET_TRIPLET) -p tsm $(CARGO_FLAGS)
+	@touch $@
 
-$(TSM_IMAGE): $(TSM_ELF) | $(BIN_DIR)
+$(TSM_IMAGE): $(TSM_ELF) $(BUILD_STAMP) | $(BIN_DIR)
 	$(OBJCOPY) --strip-all $< $@
 
 $(TSM_SIG): $(TSM_IMAGE) $(PRIVATE_KEY)
@@ -218,6 +232,8 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make firmware                  # Build debug firmware"
+	@echo "  make firmware PROFILE=release  # Build release firmware"
+	@echo "  make test PROFILE=release      # Run every QEMU test on release firmware"
 	@echo "  make test                      # Build and test"
 	@echo "  make generate-keys             # Generate signing keys"
 	@echo "  make -C test/standalone-tvm-launcher run  # Run a launcher"

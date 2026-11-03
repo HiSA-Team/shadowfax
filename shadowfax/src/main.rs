@@ -177,6 +177,36 @@ extern "C" fn _start() -> ! {
         add a4, s4, zero
         // put the new fdt in a1
         add a1, t0, zero
+        // Clear the previous boot stage's state from every register except
+        // sp and the main arguments in a0/a1. This must happen here: Rust code
+        // may keep live values in any of these registers.
+        li gp, 0
+        li tp, 0
+        li t0, 0
+        li t1, 0
+        li t2, 0
+        li t3, 0
+        li t4, 0
+        li t5, 0
+        li t6, 0
+        li s0, 0
+        li s1, 0
+        li s2, 0
+        li s3, 0
+        li s4, 0
+        li s5, 0
+        li s6, 0
+        li s7, 0
+        li s8, 0
+        li s9, 0
+        li s10, 0
+        li s11, 0
+        li a2, 0
+        li a3, 0
+        li a4, 0
+        li a5, 0
+        li a6, 0
+        li a7, 0
         // Jump to our main function
         call {main}
         "#,
@@ -250,40 +280,6 @@ extern "C" fn main(boot_hartid: usize, fdt_addr: usize) -> ! {
     unsafe {
         // Ensure all previous instructions have been completed
         riscv::asm::fence_i();
-        core::arch::asm!(
-            // remove ra
-            "li ra, 0",
-            // Set general-purpose registers to zero
-            "li gp, 0",
-            "li tp, 0",
-            "li t0, 0",
-            "li t1, 0",
-            "li t2, 0",
-            "li s0, 0",
-            "li s1, 0",
-            "li a0, 0",
-            "li a1, 0",
-            "li a2, 0",
-            "li a3, 0",
-            "li a4, 0",
-            "li a5, 0",
-            "li a6, 0",
-            "li a7, 0",
-            "li s2, 0",
-            "li s3, 0",
-            "li s4, 0",
-            "li s5, 0",
-            "li s6, 0",
-            "li s7, 0",
-            "li s8, 0",
-            "li s9, 0",
-            "li s10, 0",
-            "li s11, 0",
-            "li t3, 0",
-            "li t4, 0",
-            "li t5, 0",
-            "li t6, 0",
-        );
         riscv::register::mscratch::write(0);
     }
 

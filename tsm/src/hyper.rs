@@ -246,13 +246,6 @@ impl HypervisorState {
                     for region in self.confidential_memory.iter_mut() {
                         if let Some(guest) = region.guest_id {
                             if guest == tvmid {
-                                unsafe {
-                                    core::ptr::write_bytes(
-                                        region.base_address as *mut u8,
-                                        0,
-                                        region.size,
-                                    );
-                                }
                                 region.guest_id = None;
                             }
                         }
@@ -648,7 +641,7 @@ impl HypervisorState {
         entry_arg: usize,
         resume: bool,
     ) -> ! {
-        (*(vcpu_addr as *const TvmVcpuState)).enter(entry_sepc, entry_arg, resume)
+        (*(vcpu_addr as *mut TvmVcpuState)).enter(entry_sepc, entry_arg, resume)
     }
 
     pub fn suspend_tvm(&mut self, tvmid: usize) -> anyhow::Result<()> {
@@ -971,8 +964,11 @@ impl TvmVcpuState {
         vcpu
     }
 
-    unsafe fn enter(&self, entry_sepc: usize, entry_arg: usize, resume: bool) -> ! {
-        let ctx = &self.trap_ctx as *const VmTrapContext as usize;
+    // Takes `&mut self`: it writes the trap context that the sret below loads.
+    // Writing it through a `&self`-derived pointer is UB, and in release builds
+    // the compiler drops those stores (the vCPU then enters with sepc = 0).
+    unsafe fn enter(&mut self, entry_sepc: usize, entry_arg: usize, resume: bool) -> ! {
+        let ctx = &raw mut self.trap_ctx as usize;
 
         // Calculate HS stack top (grows downward, so point to end of array)
         let hs_stack_top = self.hs_scratch_stack.as_ptr() as usize + self.hs_scratch_stack.len();
