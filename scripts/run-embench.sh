@@ -5,6 +5,13 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUNS=${1:-3}
 OUT=${2:-"$ROOT/experiments/embench/run-$(date -u +%Y%m%dT%H%M%SZ)"}
 TARGET=riscv64imac-unknown-none-elf
+# Build profile of the TSM under test: debug (default) or release.
+PROFILE=${PROFILE:-debug}
+case $PROFILE in
+    debug) CARGO_PROFILE=() ;;
+    release) CARGO_PROFILE=(--release) ;;
+    *) echo "PROFILE must be debug or release, got: $PROFILE" >&2; exit 2 ;;
+esac
 CPU=0
 
 EMBENCH="$ROOT/guests/bare-metal/embench-iot"
@@ -81,13 +88,13 @@ for benchmark in "${BENCHMARKS[@]}"; do
     TSM_GUEST_ELF="$WORK/s-mode/build/src/$benchmark/$benchmark" \
         TSM_GUEST_DTB="$WORK/empty" TSM_GUEST_INITRD="$WORK/empty" RUSTFLAGS='-C target-feature=+h' \
         cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
-        -p tsm --features standalone >"$OUT/logs/tsm-build-$benchmark.log" 2>&1
+        -p tsm "${CARGO_PROFILE[@]}" --features standalone >"$OUT/logs/tsm-build-$benchmark.log" 2>&1
 
     for run in $(seq 1 "$RUNS"); do
         echo "[S-mode] $benchmark $run/$RUNS"
         log="$OUT/logs/s-mode-$benchmark-$run.log"
         taskset -c "$CPU" qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
-            -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/debug/tsm" \
+            -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" \
             >"$log" 2>&1
         result=$(tr -d '\r' <"$log" | sed -n 's/^EMBENCH_RESULT,//p' | tail -1)
         [[ -n $result ]] || { echo "no result: $log"; exit 1; }

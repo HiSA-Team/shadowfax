@@ -10,14 +10,27 @@
  *
  * main.c measures a fixed 16 MiB payload and fills the rest with zero pages,
  * so GUEST_RAM_SIZE must exceed 16 MiB; 32 MiB is the smallest useful run.
- * Raise the region and GUEST_RAM_SIZE together, keeping the region aligned to
- * its own size, to measure a larger TVM.
+ * The region is 1 GiB, so any GUEST_RAM_SIZE up to 1 GiB fits. To measure
+ * a larger TVM, raise the region (keeping it aligned to its own size) and the
+ * memory node so it ends past the region: QEMU places the DTB at the top of RAM.
  */
 &{/memory@80000000} {
-	reg = <0x00 0x80000000 0x00 0x06000000>;
+	reg = <0x00 0x80000000 0x00 0x82000000>;
 };
 
 &umem_high {
-	base = <0x0 0x82000000>;
-	order = <25>;
+	base = <0x0 0xc0000000>;
+	order = <30>;
+};
+
+/*
+ * Room for the launcher's page directory, which grows with the guest; the
+ * host FDT moves to the top of the larger region.
+ */
+&umem {
+	order = <24>;
+};
+
+&{/chosen/shadowfax} {
+	host-fdt = <0x0 0x81ff0000>;
 };

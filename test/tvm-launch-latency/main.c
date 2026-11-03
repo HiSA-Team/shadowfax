@@ -4,12 +4,13 @@
 #include "baremetal.h"
 
 #define PAGE_SIZE              4096UL
-#define PAGE_DIRECTORY_SIZE    (160UL                *  PAGE_SIZE)
 #define TVM_STATE_SIZE         PAGE_SIZE
 #define METADATA_SIZE          (1UL                  *  1024UL * 1024UL)
 #ifndef GUEST_RAM_SIZE
 #define GUEST_RAM_SIZE         (256UL                *  1024UL * 1024UL)
 #endif
+/* The TSM uses a root and an L1 page, then one L0 table per 2 MiB of guest. */
+#define PAGE_DIRECTORY_SIZE    ((2UL + GUEST_RAM_SIZE / (2UL * 1024UL * 1024UL)) * PAGE_SIZE)
 #define PAYLOAD_SIZE           (16UL                 *  1024UL * 1024UL)
 #define SEGMENT_STAGING_SIZE   (2UL                  *  1024UL * 1024UL)
 #define MEASURED_CHUNK_PAGES   (SEGMENT_STAGING_SIZE /  PAGE_SIZE)

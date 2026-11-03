@@ -6,7 +6,9 @@ RUNS=${1:-3}
 OUT=${2:-"$ROOT/experiments/tvm-launch-latency/run-$(date -u +%Y%m%dT%H%M%SZ)"}
 TARGET=riscv64imac-unknown-none-elf
 PLATFORM_NAME=${PLATFORM:-generic}
-FW="$ROOT/target/$TARGET/debug/shadowfax"
+# debug or release; exported so the make calls below build the same profile.
+export PROFILE=${PROFILE:-debug}
+FW="$ROOT/target/$TARGET/$PROFILE/shadowfax"
 DICE="$ROOT/target/artifacts/shadowfax.dice.bin"
 TSM="$ROOT/target/artifacts/tsm.elf"
 TSM_SIGNATURE="$ROOT/target/artifacts/tsm.bin.signature"
@@ -20,6 +22,7 @@ GUEST_RAM_SIZE=${GUEST_RAM_SIZE:-33554432}
 [[ $RUNS =~ ^[1-9][0-9]*$ ]] || {
     echo "usage: $0 [runs] [output-directory]" >&2
     echo "  GUEST_RAM_SIZE=<bytes>  guest RAM to create and zero (default 32 MiB)" >&2
+    echo "  PROFILE=debug|release   firmware build profile (default debug)" >&2
     exit 2
 }
 [[ ! -e "$OUT" ]] || { echo "output already exists: $OUT" >&2; exit 1; }
