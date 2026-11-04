@@ -9,15 +9,33 @@
 #ifndef GUEST_RAM_SIZE
 #define GUEST_RAM_SIZE         (256UL                *  1024UL * 1024UL)
 #endif
-/* The TSM uses a root and an L1 page, then one L0 table per 2 MiB of guest. */
-#define PAGE_DIRECTORY_SIZE    ((2UL + GUEST_RAM_SIZE / (2UL * 1024UL * 1024UL)) * PAGE_SIZE)
-#define PAYLOAD_SIZE           (16UL                 *  1024UL * 1024UL)
+/*
+ * The TSM uses a root and an L1 page, then one L0 table per 2 MiB of guest, and
+ * rejects a directory below 16 KiB (MIN_PAGE_DIRECTORY_SIZE, tsm/src/constants.rs).
+ */
+#define PAGE_TABLES_SIZE       ((2UL + GUEST_RAM_SIZE / (2UL * 1024UL * 1024UL)) * PAGE_SIZE)
+#define PAGE_DIRECTORY_SIZE    (PAGE_TABLES_SIZE > 16UL * 1024UL ? PAGE_TABLES_SIZE : 16UL * 1024UL)
+/*
+ * The measured 0xa5 payload stands in for a kernel and initramfs: half the
+ * guest, at most 128 MiB. It is copied in 2 MiB chunks (one chunk when the
+ * payload is smaller); one ADD_ZERO_PAGES call maps the rest of the guest.
+ */
+#define MAX_PAYLOAD_SIZE       (128UL                *  1024UL * 1024UL)
+#define PAYLOAD_SIZE           (GUEST_RAM_SIZE / 2UL < MAX_PAYLOAD_SIZE ? \
+                                GUEST_RAM_SIZE / 2UL : MAX_PAYLOAD_SIZE)
 #define SEGMENT_STAGING_SIZE   (2UL                  *  1024UL * 1024UL)
-#define MEASURED_CHUNK_PAGES   (SEGMENT_STAGING_SIZE /  PAGE_SIZE)
-#define MEASURED_CHUNKS        (PAYLOAD_SIZE         /  SEGMENT_STAGING_SIZE)
+#define MEASURED_CHUNK_SIZE    (PAYLOAD_SIZE < SEGMENT_STAGING_SIZE ? \
+                                PAYLOAD_SIZE : SEGMENT_STAGING_SIZE)
+#define MEASURED_CHUNK_PAGES   (MEASURED_CHUNK_SIZE  /  PAGE_SIZE)
+#define MEASURED_CHUNKS        (PAYLOAD_SIZE         /  MEASURED_CHUNK_SIZE)
 #define COVH_CALL_COUNT        (MEASURED_CHUNKS + 7)
 #define TSM_DOMAIN_ID          1UL
 #define ACTIVE_TSM_DOMAINS     (1UL << TSM_DOMAIN_ID)
+
+_Static_assert(PAYLOAD_SIZE >= PAGE_SIZE && PAYLOAD_SIZE % MEASURED_CHUNK_SIZE == 0,
+               "GUEST_RAM_SIZE must split into a whole number of measured chunks");
+_Static_assert(GUEST_RAM_SIZE <= (1UL << 30),
+               "the TSM's Sv39x4 tables (tsm/src/gpt.rs) only map GPAs below 1 GiB");
 
 #define COVH_ADD_MEASURED      11UL
 #define COVH_ADD_ZERO          12UL
@@ -119,7 +137,8 @@ int main(void)
     uintptr_t tvm_state = page_table + PAGE_DIRECTORY_SIZE;
     uintptr_t tvm_id;
     uintptr_t create_params[2] __attribute__((aligned(16)));
-    struct latency latencies[COVH_CALL_COUNT];
+    /* One entry per call: 263 of them at 1 GiB overflow the 16 KiB stack. */
+    static struct latency latencies[COVH_CALL_COUNT];
     size_t latency_count = 0;
     struct sbiret ret;
     struct counters startup = {0};
@@ -149,7 +168,7 @@ int main(void)
     measured_covh(&latencies[latency_count++], "ADD_MEMORY_REGION", COVH_ADD_MEMORY_REGION,
                   tvm_id, 0, GUEST_RAM_SIZE, 0, 0, 0);
     for (size_t chunk = 0; chunk < MEASURED_CHUNKS; ++chunk) {
-        uintptr_t guest_offset = chunk * SEGMENT_STAGING_SIZE;
+        uintptr_t guest_offset = chunk * MEASURED_CHUNK_SIZE;
 
         measured_covh(&latencies[latency_count++], "ADD_MEASURED_PAGES", COVH_ADD_MEASURED,
                       tvm_id, (uintptr_t)segment_staging,
