@@ -50,6 +50,26 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
+/*
+ * Standalone entry: QEMU's OpenSBI jumps here once, with no Shadowfax boot
+ * record and no runtime state in sscratch, so start on the linker's boot stack.
+ */
+#[cfg(feature = "standalone")]
+#[no_mangle]
+#[unsafe(naked)]
+#[link_section = "._start"]
+extern "C" fn _start() -> ! {
+    core::arch::naked_asm!(
+        r#"
+        .attribute arch, "rv64imac"
+        la sp, _tsm_stack_top
+        call {main}
+        "#,
+        main = sym tsm_entry,
+    )
+}
+
+#[cfg(not(feature = "standalone"))]
 #[no_mangle]
 #[unsafe(naked)]
 #[link_section = "._start"]

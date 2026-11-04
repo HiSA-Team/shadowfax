@@ -28,18 +28,23 @@ fn stage_guest_payload(variable: &str, default: &str, output_name: &str) {
 }
 
 fn main() {
+    let standalone = env::var_os("CARGO_FEATURE_STANDALONE").is_some();
     let linkerscript_path = PathBuf::from("memory.x").canonicalize().unwrap();
 
     // Put the linker script somewhere the linker can find it.
     println!("cargo:rustc-link-arg=-T{}", linkerscript_path.display());
     println!("cargo:rustc-link-arg=-static");
     println!("cargo:rustc-link-arg=-nostdlib");
+    // memory.x picks the standalone layout when this symbol is defined.
+    if standalone {
+        println!("cargo:rustc-link-arg=--defsym=TSM_STANDALONE=1");
+    }
 
     println!("cargo:rerun-if-changed=memory.x");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_STANDALONE");
 
-    if env::var_os("CARGO_FEATURE_STANDALONE").is_some() {
+    if standalone {
         stage_guest_payload("TSM_GUEST_ELF", "../linux/guest/vmlinux", "guest.elf");
         stage_guest_payload("TSM_GUEST_DTB", "../bin/linux-tvm.dtb", "guest.dtb");
         stage_guest_payload(
