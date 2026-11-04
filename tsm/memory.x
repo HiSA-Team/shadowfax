@@ -36,6 +36,17 @@ SECTIONS {
     *(.rodata .rodata.*);
   }
 
+  /*
+   * Named so they follow .text: with no MEMORY region, ld would place these
+   * orphans at the region start, ahead of _start, where the loader jumps.
+   */
+  .dynsym    : { *(.dynsym) }
+  .gnu.hash  : { *(.gnu.hash) }
+  .hash      : { *(.hash) }
+  .dynstr    : { *(.dynstr) }
+  .rela.dyn  : { *(.rela.dyn .rela.*) }
+  .eh_frame  : { KEEP(*(.eh_frame)) }
+
   .data : ALIGN(8) {
     . = ALIGN(4K);
     *(.data .data.*);
