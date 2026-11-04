@@ -21,7 +21,6 @@
 !/docs
 !/Dockerfile
 !/guests
-!/experiments/analyze.py,
 !/LICENSE
 !/Makefile
 !/MULTIPLE_TSMS.md
@@ -36,3 +35,12 @@
 !/test
 !/tsm
 !/video
+
+# Experiments: keep the scientific results (CSV), the analysis scripts and the
+# protocol READMEs; logs, plots and per-size device trees stay local.
+!/experiments/
+/experiments/**
+!/experiments/**/
+!/experiments/**/*.csv
+!/experiments/**/*.py
+!/experiments/**/README.md
