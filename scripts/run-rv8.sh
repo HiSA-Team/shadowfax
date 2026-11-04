@@ -25,9 +25,9 @@ done
 
 # benchmark artifacts: rv8 suite, initramfs, kernel image, kernel elf
 RV8="$ROOT/guests/linux/rv8-bench"
-BASE_INITRD="$ROOT/bin/linux-tvm-initramfs.cpio.gz"
-KERNEL_IMAGE="$ROOT/linux/guest/arch/riscv/boot/Image"
-KERNEL_ELF="$ROOT/linux/guest/vmlinux"
+BASE_INITRD=${BASE_INITRD:-"$ROOT/target/linux-tvm-initramfs.cpio.gz"}
+KERNEL_IMAGE=${KERNEL_IMAGE:-"$ROOT/target/linux/guest/arch/riscv/boot/Image"}
+KERNEL_ELF=${KERNEL_ELF:-"$ROOT/target/linux/guest/vmlinux"}
 [[ -f "$RV8/src/aes.c" ]] || { echo "initialize submodules first" >&2; exit 1; }
 for file in "$BASE_INITRD" "$KERNEL_IMAGE" "$KERNEL_ELF"; do
     [[ -f "$file" ]] || { echo "missing artifact: $file" >&2; exit 1; }
@@ -122,6 +122,7 @@ if ! TSM_GUEST_ELF="$KERNEL_ELF" \
     TSM_GUEST_INITRD="$INITRD" \
     RUSTFLAGS="$RUSTFLAGS" \
     cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
+        --target-dir "$ROOT/target/standalone" \
         -p tsm "${CARGO_PROFILE[@]}" --features standalone >"$WORK/tsm-build.log" 2>&1; then
     cat "$WORK/tsm-build.log" >&2
     exit 1
@@ -133,7 +134,7 @@ echo "===== TVM LINUX: QEMU -> TSM -> guest Linux, host CPU 0 =====" | tee "$TVM
 taskset -c 0 qemu-system-riscv64 \
     -M virt -m 1G -smp 1 -display none -monitor none \
     -chardev stdio,id=console,signal=on -serial chardev:console -no-reboot \
-    -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" \
+    -kernel "$ROOT/target/standalone/$TARGET/$PROFILE/tsm" \
     2>&1 | tee -a "$TVM_LOG" | sed -u -n 's/\r$//; /^RV8_RESULT,/p'
 
 TVM_RESULTS=$(tr -d '\r' <"$TVM_LOG" | grep -c '^RV8_RESULT,' || true)
