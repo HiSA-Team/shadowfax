@@ -412,13 +412,14 @@ impl State {
                 .insert(idx, new)
                 .map_err(|_| anyhow::anyhow!("too many confidential pieces"))?;
         }
+        /* A guest added in many chunks stays one piece per TVM. */
+        self.coalesce();
         Ok(())
     }
 
     /*
      * Free every page the TSM gave a destroyed TVM, handing each piece to
-     * `clear` first, then merge adjacent free pieces of the same allocation
-     * owner so repeated create/destroy cycles do not fragment the ledger.
+     * `clear` first, so repeated create/destroy cycles hand out zero pages.
      */
     pub fn release_tvm(&mut self, tsm_id: usize, tvm_id: usize, clear: impl Fn(usize, usize)) {
         for piece in self.memory_allocations.iter_mut() {
@@ -427,15 +428,18 @@ impl State {
                 piece.tvm_id = None;
             }
         }
+        self.coalesce();
+    }
 
+    /* Merge adjacent pieces with the same owner, TSM and holder, as the TSM does. */
+    fn coalesce(&mut self) {
         while let Some((left, right)) = (0..self.memory_allocations.len())
             .flat_map(|i| (0..self.memory_allocations.len()).map(move |j| (i, j)))
             .find(|&(i, j)| {
                 let (a, b) = (&self.memory_allocations[i], &self.memory_allocations[j]);
                 i != j
-                    && a.tvm_id.is_none()
-                    && b.tvm_id.is_none()
                     && a.belongs_to(b.owner_id, b.tsm_id)
+                    && a.tvm_id == b.tvm_id
                     && a.end() == b.base_address
             })
         {

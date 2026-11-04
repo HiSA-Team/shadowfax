@@ -208,6 +208,8 @@ impl HypervisorState {
         }
 
         self.confidential_memory = updated_memory;
+        // A guest added in many chunks stays one block per TVM.
+        self.coalesce_confidential_blocks();
         self.tvms[tvmid] = Some(Tvm::new(
             attestation_context,
             page_table_addr,
@@ -465,6 +467,8 @@ impl HypervisorState {
         );
 
         self.confidential_memory = updated_memory;
+        // A guest added in many chunks stays one block per TVM.
+        self.coalesce_confidential_blocks();
 
         Ok(())
     }
@@ -545,6 +549,8 @@ impl HypervisorState {
                     &[],
                 );
                 self.confidential_memory = updated_memory;
+                // A guest added in many chunks stays one block per TVM.
+                self.coalesce_confidential_blocks();
                 Ok(())
             }
             None => Err(anyhow::anyhow!("invalid TVMID")),
