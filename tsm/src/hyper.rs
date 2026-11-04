@@ -526,10 +526,6 @@ impl HypervisorState {
                     tvmid,
                 )?;
 
-                unsafe {
-                    core::ptr::write_bytes(base_page_address as *mut u8, 0, bytes);
-                }
-
                 map_region(
                     tvm.page_table_addr,
                     tvm.page_table_size,
@@ -538,6 +534,7 @@ impl HypervisorState {
                     num_pages,
                     PTE_R | PTE_W | PTE_X,
                 );
+
                 tvm.extend_measure_record(
                     b"zero-pages",
                     &[

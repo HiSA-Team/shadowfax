@@ -202,6 +202,9 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             (*domain_ctx).caller_ctx = caller_ctx_addr;
         }
 
+        // Only the calls below give pages to a TVM; forget any stale range.
+        state.pending_claims[hart_id] = None;
+
         // Perform operations to allow the specific functionality
         match fid {
             // For sbi_covh_get_domain_info we need to give the TSM access to the memory space
@@ -266,6 +269,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                             num_pages,
                             owner_id: src_id,
                             tsm_id: dst_id,
+                            tvm_id: None,
                         },
                     })
                     .unwrap();
@@ -295,6 +299,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                             num_pages,
                             owner_id: src_id,
                             tsm_id: dst_id,
+                            tvm_id: None,
                         },
                     })
                     .unwrap();
@@ -323,10 +328,10 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 let pages = state_page
                     .checked_sub(page_table)
                     .map(|t| t / PAGE_SIZE + 1);
-                if !pages
-                    .is_some_and(|n| state.owns_confidential_range(src_id, dst_id, page_table, n))
-                {
-                    return unsafe { return_error(base_ctx, -1) };
+                /* A new TVM's page directory and state page must be free pages. */
+                match pages.filter(|&n| state.can_claim(src_id, dst_id, None, page_table, n)) {
+                    Some(n) => state.pending_claims[hart_id] = Some((page_table, n)),
+                    None => return unsafe { return_error(base_ctx, -1) },
                 }
             }
 
@@ -340,20 +345,22 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                 });
                 if !state.is_tvm_owned_by(dst_id, tvm_id, src_id)
                     || !src_ok
-                    || !state.owns_confidential_range(src_id, dst_id, dst_base_address, num_pages)
+                    || !state.can_claim(src_id, dst_id, Some(tvm_id), dst_base_address, num_pages)
                 {
                     return unsafe { return_error(base_ctx, -1) };
                 }
+                state.pending_claims[hart_id] = Some((dst_base_address, num_pages));
             }
             SBI_COVH_ADD_ZERO_PAGES => {
                 let tvm_id = unsafe { (*domain_ctx).regs[10] };
                 let base_address = unsafe { (*domain_ctx).regs[11] };
                 let num_pages = unsafe { (*domain_ctx).regs[13] };
                 if !state.is_tvm_owned_by(dst_id, tvm_id, src_id)
-                    || !state.owns_confidential_range(src_id, dst_id, base_address, num_pages)
+                    || !state.can_claim(src_id, dst_id, Some(tvm_id), base_address, num_pages)
                 {
                     return unsafe { return_error(base_ctx, -1) };
                 }
+                state.pending_claims[hart_id] = Some((base_address, num_pages));
             }
             SBI_COVH_ADD_TVM_MEMORY_REGION
             | SBI_COVH_FINALIZE_TVM
@@ -402,6 +409,20 @@ extern "C" fn covh_handler(fid: usize) -> usize {
             )
         };
 
+        let claim = state.pending_claims[hart_id].take();
+        /*
+         * can_claim() checked the range and kept ledger room before the TSM ran,
+         * so this only fails if the TSM gave away pages shadowfax saw as taken.
+         * Untracked pages would escape the DESTROY_TVM clear: stop instead.
+         */
+        let track = |state: &mut State, tvm_id: usize| {
+            if let Some((base_address, num_pages)) = claim {
+                state
+                    .claim(dst_id, src_id, tvm_id, base_address, num_pages)
+                    .expect("TSM gave a TVM pages the TSM-driver cannot track");
+            }
+        };
+
         match fid {
             SBI_COVH_GET_TSM_INFO => {
                 // The output buffer is lent only for this call.
@@ -417,12 +438,24 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                         (*domain_ctx).regs[10] = -1isize as usize;
                         (*domain_ctx).regs[11] = 0;
                     }
+                } else {
+                    track(state, val);
+                }
+            }
+            SBI_COVH_ADD_TVM_MEASURED_PAGES | SBI_COVH_ADD_ZERO_PAGES => {
+                if success {
+                    track(state, call_a0);
                 }
             }
             SBI_COVH_DESTROY_TVM => {
-                /* The TVM id is the caller's a0; forget it only once the TSM destroyed it. */
+                /*
+                 * The TVM id is the caller's a0; forget it only once the TSM destroyed it.
+                 * Its pages stay converted and the TSM may give them to the next TVM, so
+                 * clear them here: ADD_ZERO_PAGES relies on free pages being zero.
+                 */
                 if success {
                     let _ = state.remove_tvm(src_id, call_a0, dst_id);
+                    state.release_tvm(src_id, call_a0, zeroize);
                 }
             }
             SBI_COVH_CONVERT_PAGES => {
@@ -434,8 +467,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                         Ok(PhysicalMemory {
                             base_address,
                             num_pages,
-                            owner_id: _,
-                            tsm_id: _,
+                            ..
                         }) => {
                             let order = (num_pages * COVH_DEFAULT_PAGE_SIZE).trailing_zeros();
                             /* Remove the region from the dst domain (aka the untrusted) */
@@ -481,8 +513,7 @@ extern "C" fn covh_handler(fid: usize) -> usize {
                         Ok(PhysicalMemory {
                             base_address,
                             num_pages,
-                            owner_id: _,
-                            tsm_id: _,
+                            ..
                         }) => {
                             let order = (num_pages * COVH_DEFAULT_PAGE_SIZE).trailing_zeros();
                             /* Remove the region from the src domain (aka the tsm ) */

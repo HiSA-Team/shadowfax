@@ -121,6 +121,8 @@ pub struct PhysicalMemory {
     pub num_pages: usize,
     pub owner_id: usize,
     pub tsm_id: usize,
+    /* The TVM of tsm_id that holds these pages, None while they are free. */
+    pub tvm_id: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -142,6 +144,19 @@ impl PhysicalMemory {
     fn range(&self) -> (usize, usize) {
         (self.base_address, self.num_pages)
     }
+    fn end(&self) -> usize {
+        self.base_address + self.num_pages * common::sbi::PAGE_SIZE
+    }
+    fn contains(&self, base: usize, end: usize) -> bool {
+        base >= self.base_address && end <= self.end()
+    }
+}
+
+fn range_end(base: usize, num_pages: usize) -> Option<usize> {
+    num_pages
+        .checked_mul(common::sbi::PAGE_SIZE)
+        .and_then(|size| base.checked_add(size))
+        .filter(|_| num_pages != 0)
 }
 
 #[derive(Clone, Copy)]
@@ -159,8 +174,13 @@ pub struct State {
     /* Pending trusted memory: base_address, num_pages, original owner */
     pending_memory_allocations: [Option<Borrow>; TICKET_SLOTS],
     next_ticket: usize,
-    /* Real memory allocations */
+    /*
+     * Converted memory, split where TSMs gave pages to TVMs: every piece is
+     * either free or held by exactly one TVM (tvm_id).
+     */
     memory_allocations: Vec<PhysicalMemory, MAX_ALLOCATIONS>,
+    /* Range a TEECALL in flight on each hart asks the TSM to give a TVM. */
+    pub pending_claims: [Option<(usize, usize)>; MAX_HARTS],
     bootstrap_grant: Option<BootstrapGrant>,
     /* TVM ownership: tvm_owner[tsm_id][tvm_id] = owner domain */
     tvm_owner: [[Option<u8>; MAX_TVMS_PER_TSM]; MAX_SUPERVISOR_DOMAINS],
@@ -178,6 +198,7 @@ impl State {
             pending_memory_allocations: core::array::from_fn(|_| None),
             next_ticket: 1,
             memory_allocations: Vec::new(),
+            pending_claims: [None; MAX_HARTS],
             bootstrap_grant: None,
             tvm_owner: [[None; MAX_TVMS_PER_TSM]; MAX_SUPERVISOR_DOMAINS],
             outstanding_calls: [None; MAX_HARTS],
@@ -289,6 +310,11 @@ impl State {
         cursor >= end
     }
 
+    /*
+     * A reclaim returns whole free pieces only: pages a TVM still holds never
+     * leave the TSM, whatever the TSM does. The range must also be a naturally
+     * aligned power of two, since it goes back to the owner as one PMP region.
+     */
     pub fn validate_reclaim_range(
         &self,
         owner_id: usize,
@@ -296,39 +322,126 @@ impl State {
         base_address: usize,
         num_pages: usize,
     ) -> anyhow::Result<()> {
-        self.memory_allocations
-            .iter()
-            .any(|allocation| {
-                allocation.base_address == base_address
-                    && allocation.num_pages == num_pages
-                    && allocation.owner_id == owner_id
-                    && allocation.tsm_id == tsm_id
-            })
+        let end = range_end(base_address, num_pages)
+            .ok_or_else(|| anyhow::anyhow!("invalid page range"))?;
+        let size = end - base_address;
+        if !size.is_power_of_two() || base_address % size != 0 {
+            anyhow::bail!("range must be a naturally aligned power of two");
+        }
+        let mut covered = 0;
+        for piece in &self.memory_allocations {
+            if piece.end() <= base_address || piece.base_address >= end {
+                continue;
+            }
+            if !piece.belongs_to(owner_id, tsm_id)
+                || piece.tvm_id.is_some()
+                || piece.base_address < base_address
+                || piece.end() > end
+            {
+                anyhow::bail!("range is not made of free pieces of this allocation");
+            }
+            covered += piece.num_pages;
+        }
+        (covered == num_pages)
             .then_some(())
             .ok_or_else(|| anyhow::anyhow!("no matching confidential allocation"))
     }
 
-    /* True if [base, base + num_pages) lies inside one allocation that owner_id converted for tsm_id. */
-    pub fn owns_confidential_range(
+    /*
+     * True if [base, base + num_pages) lies inside one piece that owner_id
+     * converted for tsm_id and that is free or already held by tvm_id. A new
+     * TVM (tvm_id None) can only take free pages. One tracked claim splits a
+     * piece in up to three, so keep room for one claim per hart in flight.
+     */
+    pub fn can_claim(
         &self,
         owner_id: usize,
         tsm_id: usize,
+        tvm_id: Option<usize>,
         base: usize,
         num_pages: usize,
     ) -> bool {
-        let Some(end) = num_pages
-            .checked_mul(common::sbi::PAGE_SIZE)
-            .and_then(|size| base.checked_add(size))
-        else {
+        let Some(end) = range_end(base, num_pages) else {
             return false;
         };
-        num_pages != 0
-            && self.memory_allocations.iter().any(|a| {
-                a.owner_id == owner_id
-                    && a.tsm_id == tsm_id
-                    && base >= a.base_address
-                    && end <= a.base_address + a.num_pages * common::sbi::PAGE_SIZE
+        self.memory_allocations.len() + 2 * MAX_HARTS <= MAX_ALLOCATIONS
+            && self.memory_allocations.iter().any(|piece| {
+                piece.belongs_to(owner_id, tsm_id)
+                    && piece.contains(base, end)
+                    && (piece.tvm_id.is_none() || piece.tvm_id == tvm_id)
             })
+    }
+
+    /* Record that the TSM gave [base, base + num_pages) to tvm_id. */
+    pub fn claim(
+        &mut self,
+        owner_id: usize,
+        tsm_id: usize,
+        tvm_id: usize,
+        base: usize,
+        num_pages: usize,
+    ) -> anyhow::Result<()> {
+        let end = range_end(base, num_pages).ok_or_else(|| anyhow::anyhow!("invalid range"))?;
+        let idx = self
+            .memory_allocations
+            .iter()
+            .position(|piece| piece.belongs_to(owner_id, tsm_id) && piece.contains(base, end))
+            .ok_or_else(|| anyhow::anyhow!("range is not converted memory"))?;
+        let piece = self.memory_allocations[idx].clone();
+        match piece.tvm_id {
+            Some(holder) if holder == tvm_id => return Ok(()),
+            Some(_) => anyhow::bail!("pages already held by another TVM"),
+            None => {}
+        }
+
+        let page = common::sbi::PAGE_SIZE;
+        let split = |base_address: usize, end: usize, tvm_id| PhysicalMemory {
+            base_address,
+            num_pages: (end - base_address) / page,
+            tvm_id,
+            ..piece.clone()
+        };
+        let pieces = [
+            split(piece.base_address, base, None),
+            split(base, end, Some(tvm_id)),
+            split(end, piece.end(), None),
+        ];
+        self.memory_allocations.remove(idx);
+        for new in pieces.into_iter().filter(|p| p.num_pages != 0).rev() {
+            self.memory_allocations
+                .insert(idx, new)
+                .map_err(|_| anyhow::anyhow!("too many confidential pieces"))?;
+        }
+        Ok(())
+    }
+
+    /*
+     * Free every page the TSM gave a destroyed TVM, handing each piece to
+     * `clear` first, then merge adjacent free pieces of the same allocation
+     * owner so repeated create/destroy cycles do not fragment the ledger.
+     */
+    pub fn release_tvm(&mut self, tsm_id: usize, tvm_id: usize, clear: impl Fn(usize, usize)) {
+        for piece in self.memory_allocations.iter_mut() {
+            if piece.tsm_id == tsm_id && piece.tvm_id == Some(tvm_id) {
+                clear(piece.base_address, piece.num_pages);
+                piece.tvm_id = None;
+            }
+        }
+
+        while let Some((left, right)) = (0..self.memory_allocations.len())
+            .flat_map(|i| (0..self.memory_allocations.len()).map(move |j| (i, j)))
+            .find(|&(i, j)| {
+                let (a, b) = (&self.memory_allocations[i], &self.memory_allocations[j]);
+                i != j
+                    && a.tvm_id.is_none()
+                    && b.tvm_id.is_none()
+                    && a.belongs_to(b.owner_id, b.tsm_id)
+                    && a.end() == b.base_address
+            })
+        {
+            self.memory_allocations[left].num_pages += self.memory_allocations[right].num_pages;
+            self.memory_allocations.remove(right);
+        }
     }
 
     /* The TVM id comes from the TSM, so bound both indices before use. */
@@ -447,17 +560,18 @@ impl State {
                 block.clone()
             }
             BorrowKind::Reclaim => {
-                let idx = self
-                    .memory_allocations
-                    .iter()
-                    .position(|allocation| {
-                        allocation.base_address == block.base_address
-                            && allocation.num_pages == block.num_pages
-                            && allocation.owner_id == block.owner_id
-                            && allocation.tsm_id == block.tsm_id
-                    })
-                    .ok_or_else(|| anyhow::anyhow!("No matching memory block"))?;
-                self.memory_allocations.remove(idx)
+                /* The ledger may have changed while the TSM ran: check again. */
+                self.validate_reclaim_range(
+                    block.owner_id,
+                    block.tsm_id,
+                    block.base_address,
+                    block.num_pages,
+                )?;
+                let block = block.clone();
+                let end = block.end();
+                self.memory_allocations
+                    .retain(|piece| !(piece.base_address >= block.base_address && piece.end() <= end));
+                block
             }
         };
         self.pending_memory_allocations[ticket] = None;
