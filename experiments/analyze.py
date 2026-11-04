@@ -96,59 +96,68 @@ def _(df, np, plt):
 def _(pd):
     from pathlib import Path
 
-    _frames = [
-        pd.read_csv(path)
-        for path in sorted(Path("./experiments/tvm-launch-latency").glob("run-*/results.csv"))
-    ]
-    latency = pd.concat([f for f in _frames if "guest_ram_size" in f.columns])
+    sweep = sorted(Path("./experiments/tvm-launch-latency").glob("sweep-*"))[-1]
+    latency = pd.read_csv(sweep / "results.csv")
     latency["guest_mib"] = latency["guest_ram_size"] // 2**20
-    # QEMU virt clocks the time CSR at 10 MHz.
-    latency["seconds"] = latency["time_ticks"] / 10_000_000
-    return (latency,)
+    latency["seconds"] = latency["time_ticks"] / 10_000_000  # 10 MHz time CSR
+
+    # Student t for 9 degrees of freedom: every size runs 10 times.
+    T95 = 2.262
+    assert (latency.groupby("guest_mib")["seq"].nunique() == 10).all()
+
+
+    def mean_ci(frame, by):
+        stats = frame.groupby(by)["seconds"].agg(["mean", "sem"])
+        stats["ci"] = T95 * stats["sem"]
+        return stats.reset_index()
+
+
+    def mib_axis(ax, sizes):
+        ax.set_xscale("log", base=2)
+        ax.set_xticks(sizes, labels=sizes)
+        ax.minorticks_off()
+        ax.set_xlabel("Guest memory [MiB]")
+        ax.grid(which="major", linestyle="--", alpha=0.4)
+
+    return latency, mean_ci, mib_axis, sweep
 
 
 @app.cell
-def _(latency, plt):
-    _creation = (
-        latency[latency["operation"] == "TVM_STARTUP"]
-        .groupby("guest_mib")["seconds"]
-        .mean()
-    )
+def _(latency, mean_ci, mib_axis, plt, sweep):
+    from matplotlib.ticker import FormatStrFormatter, LogLocator, NullLocator
 
-    _fig, _ax = plt.subplots()
-    _ax.plot(_creation.index, _creation.values, marker="o")
-    _ax.set_xticks(_creation.index)
-    _ax.set_xlabel("Guest memory [MiB]")
+    _creation = mean_ci(latency[latency["kind"] == "tvm_startup"], "guest_mib")
+
+    _fig, _ax = plt.subplots(figsize=(6, 3.5))
+    _ax.errorbar("guest_mib", "mean", yerr="ci", data=_creation, marker="o", capsize=3)
+    _ax.set_yscale("log")
+    _ax.yaxis.set_major_locator(LogLocator(subs=(1, 2, 5)))
+    _ax.yaxis.set_major_formatter(FormatStrFormatter("%g"))
+    _ax.yaxis.set_minor_locator(NullLocator())
+    mib_axis(_ax, _creation["guest_mib"])
     _ax.set_ylabel("Mean creation time [s]")
     _ax.set_title("TVM creation latency vs. guest size")
-    _ax.grid(linestyle=":")
     _fig.tight_layout()
-    _fig.savefig("./experiments/tvm-launch-latency/creation-latency.pdf")
+    _fig.savefig(sweep / "creation-latency.pdf")
     _fig
     return
 
 
 @app.cell
-def _(latency, plt):
-    _ops = latency[latency["kind"] == "covh"].pivot_table(
-        index="guest_mib", columns="operation", values="seconds", aggfunc="mean"
-    )
+def _(latency, mean_ci, mib_axis, plt, sweep):
+    _ops = mean_ci(latency[latency["kind"] == "covh"], ["operation", "guest_mib"])
 
-    _fig, _ax = plt.subplots()
-    _ops.plot(ax=_ax, marker="o")
+    _fig, _ax = plt.subplots(figsize=(6, 4))
+    for _op, _rows in _ops.groupby("operation"):
+        _ax.errorbar("guest_mib", "mean", yerr="ci", data=_rows, marker="o",
+                     markersize=4, capsize=3, label=_op)
     _ax.set_yscale("log")
-    _ax.set_xlabel("Guest memory [MiB]")
+    mib_axis(_ax, sorted(_ops["guest_mib"].unique()))
     _ax.set_ylabel("Mean time [s]")
     _ax.set_title("CoVE-H operation latency vs. guest size")
-    _ax.grid(which="both", linestyle=":")
-    _ax.legend(
-        title="Operation",
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.18),
-        ncol=3,
-        fontsize="small",
-    )
-    _fig.savefig("./experiments/tvm-launch-latency/operation-latency.pdf", bbox_inches="tight")
+    _ax.legend(title="Operation", loc="upper center", bbox_to_anchor=(0.5, -0.2),
+               ncol=3, fontsize="small")
+    _fig.savefig(sweep / "operation-latency.pdf", bbox_inches="tight")
     _fig
     return
 
