@@ -3,7 +3,8 @@
 This standalone launcher creates and finalizes one TVM without running it. It
 measures each COVH call and the sum of the startup COVH calls from the
 untrusted host and emits CSV markers. A measured `0xa5` payload stands in for a kernel
-and initramfs: half of the guest, at most 128 MiB. It is copied with one
+and initramfs: half of the guest, at most 16 MiB, about the size of a microVM
+kernel and initrd. It is copied with one
 measured-page call per 2 MiB chunk (a single smaller call for a 2 MiB guest);
 one zero-page call maps the rest of the guest. `results.csv` has one
 `ADD_MEASURED_PAGES` row per chunk. The TVM is
