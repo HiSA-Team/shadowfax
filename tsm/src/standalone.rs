@@ -49,15 +49,15 @@ pub fn test_tvm_bootstrap() -> ! {
 
     state
         .hypervisor
-        .add_confidential_pages(0, tvm_page_table_addr, tvm_gpt_pages)
+        .add_confidential_pages(tvm_page_table_addr, tvm_gpt_pages)
         .unwrap(); // 1 MiB
     state
         .hypervisor
-        .add_confidential_pages(0, tvm_state_addr, 1)
+        .add_confidential_pages(tvm_state_addr, 1)
         .unwrap();
     state
         .hypervisor
-        .add_confidential_pages(0, tvm_confidential_pool, pool_size_pages)
+        .add_confidential_pages(tvm_confidential_pool, pool_size_pages)
         .unwrap();
 
     // 4. Use the ELF loading procedure
@@ -88,18 +88,12 @@ pub fn test_tvm_bootstrap() -> ! {
         }
     };
 
-    // 5. Create VCPU (ID 0)
-    state
-        .hypervisor
-        .create_tvm_vcpu(0, tvm_id, 0, 0)
-        .expect("Failed to create VCPU");
-
     println!("[OLORIN] Bootstrap complete. Entering Guest...");
 
     // 6. Run it!
     let (vcpu_addr, entry_sepc, entry_arg, resume) = state
         .hypervisor
-        .prepare_tvm_vcpu(0, tvm_id, 0)
+        .prepare_tvm_vcpu(tvm_id, 0)
         .expect("Failed to prepare VCPU");
     drop(lock);
 
@@ -128,14 +122,14 @@ fn bootstrap_load_elf_lazy(
     let attestation = state.attestation_context.compute_next(&[0; 32]);
     let tvmid = state
         .hypervisor
-        .create_tvm(0, attestation, pt_addr, state_addr)?;
+        .create_tvm(attestation, pt_addr, state_addr)?;
     state
         .hypervisor
-        .add_tvm_memory_region(0, tvmid, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
+        .add_tvm_memory_region(tvmid, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
 
     state
         .hypervisor
-        .add_tvm_mmio_region(0, tvmid, UART_GPA, UART_HPA, PAGE_SIZE)?;
+        .add_tvm_mmio_region(tvmid, UART_GPA, UART_HPA, PAGE_SIZE)?;
 
     println!(
         "[OLORIN] created TVM memory region: 0x{:x} - 0x{:x}",
@@ -228,9 +222,11 @@ fn bootstrap_load_elf_lazy(
         .ok_or_else(|| anyhow::anyhow!("Entry GPA overflow"))?;
     println!("[OLORIN] Guest entrypoint: 0x{:x}", entry_gpa);
     println!("[OLORIN] Guest dtb at : 0x{:x}", dtb_addr);
+    // CoVE only creates vCPUs before finalization.
+    state.hypervisor.create_tvm_vcpu(tvmid, 0, 0)?;
     state
         .hypervisor
-        .finalize_tvm(0, tvmid, entry_gpa, dtb_addr, 0, &state.attestation_context)?;
+        .finalize_tvm(tvmid, entry_gpa, dtb_addr, 0, &state.attestation_context)?;
 
     Ok(tvmid)
 }
@@ -266,7 +262,6 @@ fn map_page_source(
     let src_addr = unsafe { (source_addr as *const u8).add(source_offset) } as usize;
 
     state.hypervisor.add_tvm_measured_pages(
-        0,
         tvmid,
         src_addr,
         pa + destination_offset,
@@ -297,14 +292,14 @@ fn bootstrap_load_elf(
     let attestation = state.attestation_context.compute_next(&[0; 32]);
     let tvmid = state
         .hypervisor
-        .create_tvm(0, attestation, pt_addr, state_addr)?;
+        .create_tvm(attestation, pt_addr, state_addr)?;
     state
         .hypervisor
-        .add_tvm_memory_region(0, tvmid, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
+        .add_tvm_memory_region(tvmid, GUEST_DRAM_GPA_START, GUEST_DRAM_SIZE)?;
 
     state
         .hypervisor
-        .add_tvm_mmio_region(0, tvmid, UART_GPA, UART_HPA, PAGE_SIZE)?;
+        .add_tvm_mmio_region(tvmid, UART_GPA, UART_HPA, PAGE_SIZE)?;
 
     println!("[OLORIN] created TVM with id {}", tvmid);
     println!(
@@ -444,7 +439,7 @@ fn bootstrap_load_elf(
 
         state
             .hypervisor
-            .add_tvm_zero_pages(0, tvmid, pa, 0, zero_pages, zero_gpa_start)?;
+            .add_tvm_zero_pages(tvmid, pa, 0, zero_pages, zero_gpa_start)?;
         pa += zero_pages * PAGE_SIZE;
     }
 
@@ -473,8 +468,9 @@ fn bootstrap_load_elf(
         .ok_or_else(|| anyhow::anyhow!("Entry GPA overflow"))?;
     println!("[OLORIN] Guest entrypoint: 0x{:x}", entry_gpa);
     println!("[OLORIN] Guest dtb at : 0x{:x}", dtb_gpa_base);
+    // CoVE only creates vCPUs before finalization.
+    state.hypervisor.create_tvm_vcpu(tvmid, 0, 0)?;
     state.hypervisor.finalize_tvm(
-        0,
         tvmid,
         entry_gpa,
         dtb_gpa_base,

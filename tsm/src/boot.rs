@@ -60,8 +60,18 @@ pub(crate) fn initialize(addr: usize) -> Result<(), (isize, isize)> {
         context.map_err(|_| (-3, BOOT_INVALID_CONTEXT))?
     };
     *state = Some(crate::TsmState::new(context));
+    // Standalone has no boot record: use the boot buffer the linker reserves
+    // at the top of the region, where Shadowfax would have placed it.
+    let buffer = if addr == 0 {
+        unsafe extern "C" {
+            static _tsm_stack_top: u8;
+        }
+        (&raw const _tsm_stack_top) as usize
+    } else {
+        addr
+    };
     let scratch =
-        (addr + TSM_BOOT_BUFFER_SIZE - core::mem::size_of::<TsmScratch>()) as *mut TsmScratch;
+        (buffer + TSM_BOOT_BUFFER_SIZE - core::mem::size_of::<TsmScratch>()) as *mut TsmScratch;
     unsafe {
         // The erased transfer buffer becomes the runtime stack.
         (*scratch).stack_pointer = scratch as usize;

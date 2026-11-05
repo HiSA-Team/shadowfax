@@ -17,10 +17,12 @@
 #define PAGE_DIRECTORY_SIZE    (PAGE_TABLES_SIZE > 16UL * 1024UL ? PAGE_TABLES_SIZE : 16UL * 1024UL)
 /*
  * The measured 0xa5 payload stands in for a kernel and initramfs: half the
- * guest, at most 128 MiB. It is copied in 2 MiB chunks (one chunk when the
- * payload is smaller); one ADD_ZERO_PAGES call maps the rest of the guest.
+ * guest, at most 16 MiB, the size of microVM boot images (SEVeriFast,
+ * ASPLOS'24: 3.3-15 MB compressed kernels, 12 MB initrd). It is copied in
+ * 2 MiB chunks (one chunk when the payload is smaller); one ADD_ZERO_PAGES
+ * call maps the rest of the guest.
  */
-#define MAX_PAYLOAD_SIZE       (128UL                *  1024UL * 1024UL)
+#define MAX_PAYLOAD_SIZE       (16UL                 *  1024UL * 1024UL)
 #define PAYLOAD_SIZE           (GUEST_RAM_SIZE / 2UL < MAX_PAYLOAD_SIZE ? \
                                 GUEST_RAM_SIZE / 2UL : MAX_PAYLOAD_SIZE)
 #define SEGMENT_STAGING_SIZE   (2UL                  *  1024UL * 1024UL)

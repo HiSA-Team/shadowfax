@@ -1,0 +1,33 @@
+/dts-v1/;
+
+/include/ "platform/generic/base.dtsi"
+/include/ "platform/generic/default-domains.dtsi"
+
+/*
+ * The zeroize measurement converts up to 4 GiB, more than the generic
+ * platform's confidential region, so it carries its own memory map rather
+ * than patching the staged blob after the fact.
+ *
+ * The guest region is fixed at 4 GiB (order 32), the largest size the sweep
+ * converts, so GUEST_RAM_SIZE may range from 2 MiB to 4 GiB with one tree.
+ * The base is aligned to the region's own size, and the memory node ends
+ * past it with room to spare: QEMU sizes guest RAM (-m) from this node and
+ * places its DTB at the top of RAM.
+ */
+&{/memory@80000000} {
+    reg = <0x00 0x80000000 0x01 0x82000000>;
+};
+
+&umem_high {
+    base = <0x1 0x00000000>;
+    order = <32>;
+};
+
+/* The host FDT moves to the top of the larger launcher region. */
+&umem {
+    order = <24>;
+};
+
+&{/chosen/shadowfax} {
+    host-fdt = <0x0 0x81ff0000>;
+};

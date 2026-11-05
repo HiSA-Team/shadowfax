@@ -88,13 +88,14 @@ for benchmark in "${BENCHMARKS[@]}"; do
     TSM_GUEST_ELF="$WORK/s-mode/build/src/$benchmark/$benchmark" \
         TSM_GUEST_DTB="$WORK/empty" TSM_GUEST_INITRD="$WORK/empty" RUSTFLAGS='-C target-feature=+h' \
         cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" \
+        --target-dir "$ROOT/target/standalone" \
         -p tsm "${CARGO_PROFILE[@]}" --features standalone >"$OUT/logs/tsm-build-$benchmark.log" 2>&1
 
     for run in $(seq 1 "$RUNS"); do
         echo "[S-mode] $benchmark $run/$RUNS"
         log="$OUT/logs/s-mode-$benchmark-$run.log"
         taskset -c "$CPU" qemu-system-riscv64 -M virt -m 1G -smp 1 -nographic \
-            -monitor none -no-reboot -kernel "$ROOT/target/$TARGET/$PROFILE/tsm" \
+            -monitor none -no-reboot -kernel "$ROOT/target/standalone/$TARGET/$PROFILE/tsm" \
             >"$log" 2>&1
         result=$(tr -d '\r' <"$log" | sed -n 's/^EMBENCH_RESULT,//p' | tail -1)
         [[ -n $result ]] || { echo "no result: $log"; exit 1; }
