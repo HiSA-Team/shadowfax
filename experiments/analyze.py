@@ -60,9 +60,11 @@ def _(mo, np, plt):
         path.write_text("\n".join(rows) + "\n")
 
 
-    def normalized_bars(frame, value, baseline, modes, title, ylabel, path):
+    def normalized_bars(frame, value, baseline, modes, title, ylabel, path,
+                        figsize=None, xlabel="Benchmark", font_size=None):
         """Median of `value` normalized to the baseline mode's median per
-        benchmark; error bars span the first to third quartile."""
+        benchmark; error bars span the first to third quartile. `figsize` is
+        the printed size in inches, so the PDF is included without scaling."""
         base = frame[frame["mode"] == baseline].groupby("benchmark")[value].median()
         normalized = frame.assign(norm=frame[value] / frame["benchmark"].map(base))
         stats = median_iqr(normalized, ["mode", "benchmark"], "norm")
@@ -70,26 +72,29 @@ def _(mo, np, plt):
         x = np.arange(len(benchmarks))
         width = 0.8 / len(modes)
 
-        fig, ax = plt.subplots(figsize=(max(6, 0.45 * len(benchmarks)), 3.8))
-        for i, (mode, label) in enumerate(modes.items()):
-            rows = stats.loc[mode].reindex(benchmarks)
-            ax.bar(x + (i - (len(modes) - 1) / 2) * width, rows["median"], width,
-                   yerr=[rows["median"] - rows["q1"], rows["q3"] - rows["median"]],
-                   capsize=2, label=label)
-        ax.axhline(1.0, color="black", linestyle="--", linewidth=1)
-        ax.set_xticks(x, benchmarks, rotation=45, ha="right")
-        ax.set_xlabel("Benchmark")
-        ax.set_ylabel(ylabel)
-        # Title, then the legend on its own row: bars near 1.0 fill the axes,
-        # and a long title shares no line with the legend.
-        ax.set_title(title, pad=24)
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(modes),
-                  frameon=False, borderaxespad=0.2)
-        ax.grid(axis="y", linestyle="--", alpha=0.4)
-        ax.set_axisbelow(True)
-        ax.margins(x=0.01)
-        fig.tight_layout()
-        fig.savefig(path)
+        # Fonts apply only while this figure is drawn and saved.
+        with plt.rc_context({"font.size": font_size} if font_size else {}):
+            fig, ax = plt.subplots(
+                figsize=figsize or (max(6, 0.45 * len(benchmarks)), 3.8))
+            for i, (mode, label) in enumerate(modes.items()):
+                rows = stats.loc[mode].reindex(benchmarks)
+                ax.bar(x + (i - (len(modes) - 1) / 2) * width, rows["median"], width,
+                       yerr=[rows["median"] - rows["q1"], rows["q3"] - rows["median"]],
+                       capsize=2, label=label)
+            ax.axhline(1.0, color="black", linestyle="--", linewidth=1)
+            ax.set_xticks(x, benchmarks, rotation=45, ha="right")
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            # Title, then the legend on its own row: bars near 1.0 fill the
+            # axes, and a long title shares no line with the legend.
+            ax.set_title(title, pad=2.4 * plt.rcParams["font.size"])
+            ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0),
+                      ncol=len(modes), frameon=False, borderaxespad=0.2)
+            ax.grid(axis="y", linestyle="--", alpha=0.4)
+            ax.set_axisbelow(True)
+            ax.margins(x=0.01)
+            fig.tight_layout()
+            fig.savefig(path)
         return fig
 
     return ipc_table, latest, normalized_bars, write_latex
@@ -146,6 +151,10 @@ def _(latest, normalized_bars, pd):
         title="Embench benchmarks",
         ylabel="Normalized cycles (median)",
         path=embench_dir / "embench.pdf",
+        # Two-column figure at \textwidth, drawn 1:1 (8 pt text).
+        figsize=(7.0, 2.7),
+        xlabel=None,
+        font_size=8,
     )
     return
 
