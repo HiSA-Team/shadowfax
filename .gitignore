@@ -42,5 +42,6 @@
 /experiments/**
 !/experiments/**/
 !/experiments/**/*.csv
+!/experiments/**/*.pdf
 !/experiments/**/*.py
 !/experiments/**/README.md
